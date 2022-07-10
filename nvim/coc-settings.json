@@ -1,0 +1,50 @@
+{
+    "outline.keepWindow": true,
+    "outline.followCursor": true,
+    "outline.splitCommand": "botright 40vs",
+    "outline.sortBy": "position",
+    "suggest.autoTrigger": "none",
+    "languageserver": {
+        "go": {
+            "command": "gopls",
+            "rootPatterns": [
+                "go.mod",
+                ".vim/",
+                ".git/",
+                ".hg/"
+            ],
+            "trace.server": "verbose",
+            "filetypes": [
+                "go"
+            ]
+        }
+    },
+    //为了避免将GOPATH里面的依赖，也当成工作区。保证一个项目只能有一个工作区
+    "workspace.ignoredFolders": [
+        "$GOPATH/**",
+        "$HOME"
+    ],
+    //当找不到当前文件的工作区的时候，也不要将当前文件的所在路径当成工作区
+    "workspace.workspaceFolderFallbackCwd": false,
+    "workspace.workspaceFolderCheckCwd": false,
+    "rust-analyzer.workspace.symbol.search.scope": "workspace_and_dependencies",
+    "coc.preferences.extensionUpdateCheck": "never",
+    "coc.preferences.formatOnSaveFiletypes": [
+        "rust",
+        "go",
+        "json",
+        "python"
+    ],
+    "rust-analyzer.updates.checkOnStartup": false,
+    "python.pythonPath": "/usr/bin/python3",
+    "python.linting.enabled": false,
+    "python.analysis.typeCheckingMode": "off",
+    "python.formatting.autopep8Path": "/Users/zhenghe/Library/Python/3.8/bin/autopep8",
+    "list.normalMappings": {
+        "v": "action:vsplit"
+    },
+    //函数提示窗口显示在输入字符底下
+    "signature.preferShownAbove": false
+    //会影响搜索,搜索的时候无法输入o这个字符
+    //"tree.key.invoke": "o"
+}
