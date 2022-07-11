@@ -1,0 +1,34 @@
+# -- windows & pane creation ---------------------------------------------------
+
+# new window retains current path, possible values are:
+#   - true
+#   - false (default)
+tmux_conf_new_window_retain_current_path=false
+
+# new pane retains current path, possible values are:
+#   - true (default)
+#   - false
+tmux_conf_new_pane_retain_current_path=true
+
+# new pane tries to reconnect ssh sessions (experimental), possible values are:
+#   - true
+#   - false (default)
+tmux_conf_new_pane_reconnect_ssh=false
+
+# prompt for session name when creating a new session, possible values are:
+#   - true
+#   - false (default)
+tmux_conf_new_session_prompt=false
+
+unbind c
+bind -r n new-window -c "#{pane_current_path}"
+
+# unbind x
+# bind -r c confirm-before -p "kill-pane #P? (y/n)" kill-pane  
+
+bind a display-popup -E -d "#{pane_current_path}" -w 100% -h 100% "git d"
+bind g display-popup -E -d "#{pane_current_path}" -w 100% -h 100% "lazygit"
+# bind g display-popup -E -d "#{pane_current_path}" -w 100% -h 100% "gitui"
+# tmux popup -E -w 100% -h 100% "lazygit -w $PWD"
+# tmux popup -E -d "$PWD" -w 100% -h 100% "gitui"
+
