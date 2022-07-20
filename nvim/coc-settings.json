@@ -28,6 +28,7 @@
     "workspace.workspaceFolderFallbackCwd": false,
     "workspace.workspaceFolderCheckCwd": false,
     "rust-analyzer.workspace.symbol.search.scope": "workspace_and_dependencies",
+    "rust-analyzer.server.path": "/usr/bin/rust-analyzer",
     "coc.preferences.extensionUpdateCheck": "never",
     "coc.preferences.formatOnSaveFiletypes": [
         "rust",
