@@ -119,6 +119,7 @@ alias szsh="source ~/.zshrc && source ~/.zprofile"
 alias vimdiff='nvim -d'
 alias ps="ps -ef | grep"
 alias lg='lazygit'
+alias t='todo.sh'
 
 # To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh

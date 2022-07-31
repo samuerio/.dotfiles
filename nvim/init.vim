@@ -166,6 +166,9 @@ Plug 'vim-airline/vim-airline-themes'
 set laststatus=2
 let g:airline_theme = 'onehalflight'
 
+Plug 'freitass/todo.txt-vim'
+let maplocalleader='\'
+
 " 修复source vimrc报错的BUG
 if !exists('g:airline_symbols')
     let g:airline_symbols = {}
@@ -386,6 +389,9 @@ nnoremap <silent><leader>gi gi
 nnoremap <silent><leader>m :MarkdownPreview<CR>
 
 autocmd FileType markdown nmap <buffer><silent> <leader>i :call mdip#MarkdownClipboardImage()<CR>
+
+autocmd BufNewFile,BufRead *.txt set ft=txt
+autocmd FileType txt nmap <buffer><silent> <leader>i :call mdip#MarkdownClipboardImage()<CR>
 
 
 let g:markdown_fenced_languages = ['html', 'python', 'bash=sh', 'java', 'rust', 'go', 'css', 
