@@ -65,8 +65,8 @@ alt + shift - 9 : yabai -m window --space 9
 ralt - b : yabai -m space --focus recent
 
 # move focused window to previous workspace
-alt + shift - b : yabai -m window --space recent; \
-                  yabai -m space --focus recent
+# alt + shift - b : yabai -m window --space recent; \
+#                  yabai -m space --focus recent
 
 # balance size of windows
 alt + shift - 0 : yabai -m space --balance
