@@ -49,6 +49,7 @@ alt - e : yabai -m space --layout bsp
 alt + shift - space : yabai -m window --toggle float;\
           yabai -m window --grid 6:6:1:1:4:4
 
+# Note: 注意, 要记得关闭Mac自动重排工作区的奇怪特性, System Preferences->Mission Control->Automatically rearrange Spaces based on most recent use
 # move focused container to workspace.
 alt + shift - 1 : yabai -m window --space 1
 alt + shift - 2 : yabai -m window --space 2

@@ -413,9 +413,11 @@ autocmd FileType todo nmap <buffer><silent> <leader>i :call mdip#MarkdownClipboa
 autocmd FileType todo call tablemode#Enable()
 autocmd FileType todo set wrap linebreak
 " 匹配不包含|的任何字符, 作用于todo表格与任务列表
-autocmd FileType todo syntax match DoneTodoMatch /x [^|]*/   
+autocmd FileType todo syntax match DoneTodoMatch /^x [^|]*/
+autocmd FileType todo syntax match DoneTodoCell / x [^|]*/   
 autocmd FileType todo hi def  DoneTodoColor ctermfg=231 ctermbg=71 guifg=#fafafa guibg=#50a14f
 autocmd FileType todo hi link DoneTodoMatch DoneTodoColor
+autocmd FileType todo hi link DoneTodoCell DoneTodoColor
 
 
 let g:markdown_fenced_languages = ['html', 'python', 'bash=sh', 'java', 'rust', 'go', 'css', 
