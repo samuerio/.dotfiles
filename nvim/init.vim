@@ -8,6 +8,8 @@ noremap <Down>  <Nop>
 noremap <Left>  <Nop>
 noremap <Right> <Nop>
 
+nnoremap Q :qa<CR>
+
 nnoremap d "_d
 vnoremap d "_d
 nnoremap D "_D
@@ -409,15 +411,18 @@ autocmd FileType markdown nmap <buffer><silent> <leader>i :call mdip#MarkdownCli
 " 定制todo.txt
 autocmd BufNewFile,BufRead *.todo.txt set ft=todo
 autocmd BufNewFile,BufRead *.done.txt set ft=done
+autocmd BufNewFile,BufRead *.report.txt set ft=report
 autocmd FileType todo nmap <buffer><silent> <leader>i :call mdip#MarkdownClipboardImage()<CR>
-autocmd FileType todo call tablemode#Enable()
 autocmd FileType todo set wrap linebreak
 " 匹配不包含|的任何字符, 作用于todo表格与任务列表
 autocmd FileType todo syntax match DoneTodoMatch /^x [^|]*/
-autocmd FileType todo syntax match DoneTodoCell / x [^|]*/   
 autocmd FileType todo hi def  DoneTodoColor ctermfg=231 ctermbg=71 guifg=#fafafa guibg=#50a14f
 autocmd FileType todo hi link DoneTodoMatch DoneTodoColor
-autocmd FileType todo hi link DoneTodoCell DoneTodoColor
+autocmd FileType report syntax match DoneTodoCell / x [^|]*/   
+autocmd FileType report hi def  DoneTodoColor ctermfg=231 ctermbg=71 guifg=#fafafa guibg=#50a14f
+autocmd FileType report hi link DoneTodoCell DoneTodoColor
+" 启用会导致}{的移动变慢, 因为多增加了}| \ {|移动方式
+autocmd FileType report call tablemode#Enable()
 
 
 let g:markdown_fenced_languages = ['html', 'python', 'bash=sh', 'java', 'rust', 'go', 'css', 
