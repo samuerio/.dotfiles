@@ -8,6 +8,8 @@ noremap <Down>  <Nop>
 noremap <Left>  <Nop>
 noremap <Right> <Nop>
 
+nnoremap Q :qa<CR>
+
 nnoremap d "_d
 vnoremap d "_d
 nnoremap D "_D
@@ -168,6 +170,22 @@ let g:airline_theme = 'onehalflight'
 
 Plug 'freitass/todo.txt-vim'
 let maplocalleader='\'
+
+Plug 'dhruvasagar/vim-table-mode'
+function! s:isAtStartOfLine(mapping)
+  let text_before_cursor = getline('.')[0 : col('.')-1]
+  let mapping_pattern = '\V' . escape(a:mapping, '\')
+  let comment_pattern = '\V' . escape(substitute(&l:commentstring, '%s.*$', '', ''), '\')
+  return (text_before_cursor =~? '^' . ('\v(' . comment_pattern . '\v)?') . '\s*\v' . mapping_pattern . '\v$')
+endfunction
+inoreabbrev <expr> <bar><bar>
+          \ <SID>isAtStartOfLine('\|\|') ?
+          \ '<c-o>:TableModeEnable<cr><bar><space><bar><left><left>' : '<bar><bar>'
+inoreabbrev <expr> __
+          \ <SID>isAtStartOfLine('__') ?
+          \ '<c-o>:silent! TableModeDisable<cr>' : '__'
+let g:table_mode_color_cells=1
+let g:table_mode_syntax = 0
 
 " 修复source vimrc报错的BUG
 if !exists('g:airline_symbols')
@@ -390,8 +408,21 @@ nnoremap <silent><leader>m :MarkdownPreview<CR>
 
 autocmd FileType markdown nmap <buffer><silent> <leader>i :call mdip#MarkdownClipboardImage()<CR>
 
-autocmd BufNewFile,BufRead *.txt set ft=txt
-autocmd FileType txt nmap <buffer><silent> <leader>i :call mdip#MarkdownClipboardImage()<CR>
+" 定制todo.txt
+autocmd BufNewFile,BufRead *.todo.txt set ft=todo
+autocmd BufNewFile,BufRead *.done.txt set ft=done
+autocmd BufNewFile,BufRead *.report.txt set ft=report
+autocmd FileType todo nmap <buffer><silent> <leader>i :call mdip#MarkdownClipboardImage()<CR>
+autocmd FileType todo set wrap linebreak
+" 匹配不包含|的任何字符, 作用于todo表格与任务列表
+autocmd FileType todo syntax match DoneTodoMatch /^x [^|]*/
+autocmd FileType todo hi def  DoneTodoColor ctermfg=231 ctermbg=71 guifg=#fafafa guibg=#50a14f
+autocmd FileType todo hi link DoneTodoMatch DoneTodoColor
+autocmd FileType report syntax match DoneTodoCell / x [^|]*/   
+autocmd FileType report hi def  DoneTodoColor ctermfg=231 ctermbg=71 guifg=#fafafa guibg=#50a14f
+autocmd FileType report hi link DoneTodoCell DoneTodoColor
+" 启用会导致}{的移动变慢, 因为多增加了}| \ {|移动方式
+autocmd FileType report call tablemode#Enable()
 
 
 let g:markdown_fenced_languages = ['html', 'python', 'bash=sh', 'java', 'rust', 'go', 'css', 

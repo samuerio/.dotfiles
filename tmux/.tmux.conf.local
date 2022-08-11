@@ -26,7 +26,7 @@ bind -r n new-window -c "#{pane_current_path}"
 # unbind x
 # bind -r c confirm-before -p "kill-pane #P? (y/n)" kill-pane  
 
-bind a display-popup -E -d "#{pane_current_path}" -w 100% -h 100% "git d"
+bind G display-popup -E -d "#{pane_current_path}" -w 100% -h 100% "git d"
 bind g display-popup -E -d "#{pane_current_path}" -w 100% -h 100% "lazygit"
 # bind g display-popup -E -d "#{pane_current_path}" -w 100% -h 100% "gitui"
 # tmux popup -E -w 100% -h 100% "lazygit -w $PWD"
