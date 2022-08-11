@@ -430,3 +430,6 @@ let g:markdown_fenced_languages = ['html', 'python', 'bash=sh', 'java', 'rust', 
 " 渲染行数
 let g:markdown_minlines = 1000
 
+if has('unix')
+ autocmd InsertLeave * :silent !fcitx5-remote -c 
+endif
