@@ -8,7 +8,9 @@ noremap <Down>  <Nop>
 noremap <Left>  <Nop>
 noremap <Right> <Nop>
 
-nnoremap Q :qa<CR>
+nnoremap <silent>Q :qa<CR>
+nnoremap <silent>X :wincmd c<CR>
+
 
 nnoremap d "_d
 vnoremap d "_d
@@ -380,8 +382,8 @@ nnoremap <silent> <leader>Q  :copen<cr>
 nnoremap <leader>p :<C-u>set paste<cr>
 nnoremap <leader>P :<C-u>set nopaste<cr>
 map <silent> <leader>n :NERDTreeFind<CR>
-nnoremap <silent><leader>x :wincmd c<CR>
-nnoremap <silent><leader>w  :w<cr>
+
+nnoremap <silent><leader>w  :w<CR>
 
 
 nnoremap <silent><leader>j :call ToggleOutline()<CR>
