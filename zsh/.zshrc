@@ -83,8 +83,8 @@ plugins=(
     git
     tmux
     autojump
-    zsh-syntax-highlighting
-    #zsh-autosuggestions
+    # zsh-syntax-highlighting
+    # zsh-autosuggestions
 )
 
 source $ZSH/oh-my-zsh.sh
@@ -129,10 +129,12 @@ alias nn='cd ~/Dropbox/Notes/Inbox && nvim ./'
 # To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
 
-#fzf
+#Mac
 if [[ `uname` == "Darwin" ]]; then
 
     [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
+
+    source /Users/zhenghe/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
 
     [ -f /opt/homebrew/etc/profile.d/autojump.sh ] && . /opt/homebrew/etc/profile.d/autojump.sh
 
@@ -152,9 +154,9 @@ if [[ `uname` == "Darwin" ]]; then
     export LIBRARY_PATH=/opt/homebrew/lib
     export FFI_BUILD_FROM_SOURCE=1
 
-    echo 'mac'
 fi
 
+#Linux
 if [[ `uname` == "Linux" ]]; then
 
     alias kvpn='sudo openvpn --daemon --config ~/.config/openvpn/kaopuyun.ovpn'
@@ -166,7 +168,6 @@ if [[ `uname` == "Linux" ]]; then
 
     export PATH=$HOME/.local/bin:$PATH
 
-    echo 'linux'
 fi
 
 export PATH=$HOME/.cargo/bin:$PATH
