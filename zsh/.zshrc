@@ -115,11 +115,13 @@ source $ZSH/oh-my-zsh.sh
 # alias zshconfig="mate ~/.zshrc"
 # alias ohmyzsh="mate ~/.oh-my-zsh"
 alias nzsh="nvim ~/.zshrc"
-alias szsh="source ~/.zshrc && source ~/.zprofile"
+alias szsh="source ~/.zshrc"
 alias vimdiff='nvim -d'
 alias ps="ps -ef | grep"
 alias lg='lazygit'
-alias t='todo.sh'
+alias vpn='export https_proxy=http://127.0.0.1:7890 http_proxy=http://127.0.0.1:7890 all_proxy=socks5://127.0.0.1:7890'
+# 确保sudo的时候，保留原来的环境变量，保证sudo nvim能使用自定义配置
+alias sudo='sudo -E'
 alias ra='ranger'
 alias ndot='cd ~/source/github/.dotfiles && nvim ./'
 alias nn='cd ~/Dropbox/Notes/Inbox && nvim ./'
@@ -127,34 +129,54 @@ alias nn='cd ~/Dropbox/Notes/Inbox && nvim ./'
 # To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
 
-[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
+#fzf
+if [[ `uname` == "Darwin" ]]; then
 
-[ -f /opt/homebrew/etc/profile.d/autojump.sh ] && . /opt/homebrew/etc/profile.d/autojump.sh
+    [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
 
-export LC_ALL=en_US.UTF-8  
+    [ -f /opt/homebrew/etc/profile.d/autojump.sh ] && . /opt/homebrew/etc/profile.d/autojump.sh
+
+    # Set CLICOLOR if you want Ansi Colors in iTerm2
+    export CLICOLOR=1
+
+    export PYTHON3_HOME=/Users/zhenghe/Library/Python/3.8
+    export PATH=$PYTHON3_HOME/bin:$PATH
+
+    export GOPATH=/Users/zhenghe/repo/go
+    export PATH=$GOPATH/bin:$PATH
+
+    export JAVA_HOME=/Library/Java/JavaVirtualMachines/adoptopenjdk-8.jdk/Contents/Home
+    export PATH=$JAVA_HOME/bin:$PATH
+
+    # lotus
+    export LIBRARY_PATH=/opt/homebrew/lib
+    export FFI_BUILD_FROM_SOURCE=1
+
+    echo 'mac'
+fi
+
+if [[ `uname` == "Linux" ]]; then
+
+    alias kvpn='sudo openvpn --daemon --config ~/.config/openvpn/kaopuyun.ovpn'
+
+    [ -f /usr/share/fzf/key-bindings.zsh ] && source /usr/share/fzf/key-bindings.zsh
+    [ -f /usr/share/fzf/completion.zsh ] && source /usr/share/fzf/completion.zsh
+
+    source /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+
+    export PATH=$HOME/.local/bin:$PATH
+
+    echo 'linux'
+fi
+
+export PATH=$HOME/.cargo/bin:$PATH
+
+export LC_ALL=en_US.UTF-8
 export LANG=en_US.UTF-8
 
 export BAT_THEME="Monokai Extended Light"
 export RANGER_LOAD_DEFAULT_RC=FALSE
 
-export PYTHON3_HOME=/Users/zhenghe/Library/Python/3.8
-export PATH=$PYTHON3_HOME/bin:$PATH
-
-export GOPATH=/Users/zhenghe/repo/go
-export PATH=$GOPATH/bin:$PATH
-
-export JAVA_HOME=/Library/Java/JavaVirtualMachines/adoptopenjdk-8.jdk/Contents/Home
-export PATH=$JAVA_HOME/bin:$PATH
-
-# Set CLICOLOR if you want Ansi Colors in iTerm2 
-export CLICOLOR=1
-
-# Set colors to match iTerm2 Terminal Colors
-export TERM=xterm-256color
-
 export VISUAL=nvim
 export EDITOR="$VISUAL"
-
-# lotus
-export LIBRARY_PATH=/opt/homebrew/lib
-export FFI_BUILD_FROM_SOURCE=1
+export TERM=xterm-256color
