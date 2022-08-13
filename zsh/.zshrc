@@ -122,6 +122,7 @@ alias lg='lazygit'
 alias t='todo.sh'
 alias ra='ranger'
 alias ndot='cd ~/source/github/.dotfiles && nvim ./'
+alias nn='cd ~/Dropbox/Notes/Inbox && nvim ./'
 
 # To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
