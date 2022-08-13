@@ -8,10 +8,6 @@ noremap <Down>  <Nop>
 noremap <Left>  <Nop>
 noremap <Right> <Nop>
 
-nnoremap <silent>Q :qa<CR>
-nnoremap <silent>X :wincmd c<CR>
-
-
 nnoremap d "_d
 vnoremap d "_d
 nnoremap D "_D
@@ -33,6 +29,14 @@ nnoremap x "_x
 vnoremap x "_x
 
 set clipboard=unnamedplus
+
+
+nnoremap <silent>Q :qa<CR>
+nnoremap <silent>X :wincmd c<CR>
+nnoremap <silent>S :w<CR>
+nnoremap <silent>L S
+
+
 
 " <C-i> and <Tab> are strictly equivalent.会影响C-i的功能,不要用
 " nnoremap <tab> %
@@ -78,7 +82,9 @@ set cmdheight=2
 set updatetime=300
 " Don't pass messages to |ins-completion-menu|.
 set shortmess+=c
-set rtp+=/opt/homebrew/opt/fzf
+if has('macunix')
+    set rtp+=/opt/homebrew/opt/fzf
+endif
 set nrformats=
 set concealcursor=
 set conceallevel=2
@@ -383,7 +389,7 @@ nnoremap <leader>p :<C-u>set paste<cr>
 nnoremap <leader>P :<C-u>set nopaste<cr>
 map <silent> <leader>n :NERDTreeFind<CR>
 
-nnoremap <silent><leader>w  :w<CR>
+" nnoremap <silent><leader>w  :w<CR>
 
 
 nnoremap <silent><leader>j :call ToggleOutline()<CR>
@@ -415,7 +421,7 @@ autocmd BufNewFile,BufRead *.todo.txt set ft=todo
 autocmd BufNewFile,BufRead *.done.txt set ft=done
 autocmd BufNewFile,BufRead *.report.txt set ft=report
 autocmd FileType todo nmap <buffer><silent> <leader>i :call mdip#MarkdownClipboardImage()<CR>
-autocmd FileType todo set wrap linebreak
+autocmd FileType todo set wrap linebreak ignorecase
 " 匹配不包含|的任何字符, 作用于todo表格与任务列表
 autocmd FileType todo syntax match DoneTodoMatch /^x [^|]*/
 autocmd FileType todo hi def  DoneTodoColor ctermfg=231 ctermbg=71 guifg=#fafafa guibg=#50a14f
