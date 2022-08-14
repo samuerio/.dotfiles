@@ -123,8 +123,12 @@ alias vpn='export https_proxy=http://127.0.0.1:7890 http_proxy=http://127.0.0.1:
 # 确保sudo的时候，保留原来的环境变量，保证sudo nvim能使用自定义配置
 alias sudo='sudo -E'
 alias ra='ranger'
-alias ndot='cd ~/source/github/.dotfiles && nvim ./'
+
+alias nd='cd ~/source/github/.dotfiles && nvim ./'
 alias nn='cd ~/Dropbox/Notes/Inbox && nvim ./'
+alias nt='cd ~/Dropbox/Todo && nvim ./'
+alias nr='cd ~/Dropbox/Daily_Report && nvim ./'
+alias no='cd ~/Dropbox/OKR && nvim ./'
 
 # To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
