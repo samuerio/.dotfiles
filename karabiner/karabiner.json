@@ -93,14 +93,15 @@
                         ]
                     },
                     {
-                        "description": "Left ctrl + jk to arrow keys Vim in unless iterm",
+                        "description": "Left ctrl + jk to arrow keys Vim in unless iterm, vscode, idea",
                         "manipulators": [
                             {
                                 "conditions": [
                                     {
                                         "bundle_identifiers": [
                                             "^com\\.googlecode\\.iterm2$",
-                                            "^com\\.microsoft\\.VSCode$"
+                                            "^com\\.microsoft\\.VSCode$",
+                                            "^com\\.jetbrains\\.intellij\\.ce$"
                                         ],
                                         "type": "frontmost_application_unless"
                                     }
@@ -128,7 +129,8 @@
                                     {
                                         "bundle_identifiers": [
                                             "^com\\.googlecode\\.iterm2$",
-                                            "^com\\.microsoft\\.VSCode$"
+                                            "^com\\.microsoft\\.VSCode$",
+                                            "^com\\.jetbrains\\.intellij\\.ce$"
                                         ],
                                         "type": "frontmost_application_unless"
                                     }

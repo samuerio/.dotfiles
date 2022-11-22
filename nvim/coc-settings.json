@@ -17,6 +17,23 @@
             "filetypes": [
                 "go"
             ]
+        },
+        "solidity": {
+            "command": "/Users/zhenghe/source/github/.dotfiles/solc-macos",
+            "args": [
+                "--lsp"
+            ],
+            "rootPatterns": [
+                ".git/",
+                "hardhat.config.*"
+            ],
+            "trace.server": "verbose",
+            "filetypes": [
+                "solidity"
+            ],
+            "settings": {
+                "file-load-strategy": "directly-opened-and-on-import"
+            }
         }
     },
     //为了避免将GOPATH里面的依赖，也当成工作区。保证一个项目只能有一个工作区
@@ -28,24 +45,27 @@
     "workspace.workspaceFolderFallbackCwd": false,
     "workspace.workspaceFolderCheckCwd": false,
     "rust-analyzer.workspace.symbol.search.scope": "workspace_and_dependencies",
-    "rust-analyzer.server.path": "/usr/bin/rust-analyzer",
+    "rust-analyzer.server.path": "/usr/local/bin/rust-analyzer",
     "coc.preferences.extensionUpdateCheck": "never",
     "coc.preferences.formatOnSaveFiletypes": [
         "rust",
         "go",
         "json",
-        "python"
+        "python",
+        "javascript"
     ],
     "rust-analyzer.updates.checkOnStartup": false,
     "python.pythonPath": "/usr/bin/python3",
     "python.linting.enabled": false,
-    "python.analysis.typeCheckingMode": "off",
+    "python.analysis.typeCheckingMode": "on",
     "python.formatting.autopep8Path": "/usr/local/bin/autopep8",
     "list.normalMappings": {
         "v": "action:vsplit"
     },
     //函数提示窗口显示在输入字符底下
-    "signature.preferShownAbove": false
+    "signature.preferShownAbove": false,
     //会影响搜索,搜索的时候无法输入o这个字符
     //"tree.key.invoke": "o"
+    //以下路径必须用绝对路径,否则会找不到Jar包
+    "java.jdt.ls.vmargs": "-javaagent:/Users/zhenghe/source/github/.dotfiles/lombok/lombok-1.16.8.jar"
 }

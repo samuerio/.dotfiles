@@ -143,8 +143,8 @@ keybinding:
     prevScreenMode: '_'
     undo: 'z'
     redo: '<c-z>'
-    filteringMenu: '<c-s>'
-    diffingMenu: 'W'
+    filteringMenu: '<c-f>'
+    diffingMenu: 'M'
     diffingMenu-alt: '<c-e>' # deprecated
     copyToClipboard: '<c-o>'
     submitEditorText: '<enter>'

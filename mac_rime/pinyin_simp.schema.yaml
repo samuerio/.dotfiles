@@ -37,8 +37,7 @@ switches:
 engine:
   processors:         # ※ 默认组件：處理各類按鍵消息
     - lua_processor@select_character  # 以词定字
-    # Linux下Rime禁用英文模式，Shift用来切换不同输入法（US与中文Rime）. 与fcitx-VIM插件很契合
-    # - ascii_composer  # ※ 處理西文模式及中西文切換
+    - ascii_composer  # ※ 處理西文模式及中西文切換
     - recognizer      # ※ 與 matcher 搭配，處理符合特定規則的輸入碼，如網址、反查等
     - key_binder      # ※ 在特定條件下將按鍵綁定到其他按鍵，如重定義逗號、句號爲候選翻頁鍵
     - speller         # ※ 拼寫處理器，接受字符按鍵，編輯輸入碼

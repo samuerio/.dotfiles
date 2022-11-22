@@ -15,6 +15,9 @@ nnoremap D "_D
 " nnoremap , <Nop>
 nnoremap ,, ,
 
+" 非常好用, 场景: 清理完多余信息后, 再快速回到原来编辑的位置
+nnoremap <silent>,gi gi
+
 " ,作为第二leader键
 nnoremap ,d "+d
 vnoremap ,d "+d
@@ -244,20 +247,22 @@ function! s:wildchar()
     return ''
 endfunction
 
-let g:coc_snippet_next="<C-n>"
-let g:coc_snippet_prev="<C-p>"			
+" let g:coc_snippet_next="<C-n>"
+" let g:coc_snippet_prev="<C-p>"			
+let g:coc_snippet_next="<tab>"
+let g:coc_snippet_prev="<s-tab>"			
 
 "统一使用C-j/C-k进行下拉框的选择,C-n\C-p这种方向键只是对输入历史的选择
 "Use <C-j> and <C-k> to navigate the completion list:
 "智能补全下的搜索是模糊大小写的，非常方便
-inoremap <expr> <C-j> pumvisible() ? "\<C-n>" : coc#refresh()
-inoremap <expr> <C-k> pumvisible() ? "\<C-p>" : "\<C-k>"
+inoremap <expr> <C-j> coc#pum#visible() ? coc#pum#next(1) : coc#refresh()
+inoremap <expr> <C-k> coc#pum#visible() ? coc#pum#prev(1): "\<C-k>"
 cnoremap <expr> <C-j> pumvisible() ? "\<C-n>" : "\<C-r>=<SID>wildchar()<CR>"
 cnoremap <expr> <C-k> pumvisible() ? "\<C-p>" : "\<C-k>"
 
-" Make <CR> auto-select the first completion item and notify coc.nvim to
-" format on enter, <cr> could be remapped by other vim plugin
-inoremap <silent><expr> <cr> pumvisible() ? coc#_select_confirm()
+" Make <CR> to accept selected completion item or notify coc.nvim to format
+" <C-g>u breaks current undo, please make your own choice.
+inoremap <silent><expr> <CR> coc#pum#visible() ? coc#pum#confirm()
                               \: "\<C-g>u\<CR>\<c-r>=coc#on_enter()\<CR>"
 
 " Use `[d` and `]d` to navigate diagnostics
@@ -270,7 +275,8 @@ nnoremap <silent><nowait>]c :<C-u>CocNext<CR>
 
 " Remap keys for gotos
 " 这里就是tabe，tabe是tabe[edit]的缩写
-nmap <silent> gt :call CocActionAsync('jumpDefinition', 'tabe')<CR>
+" nmap <silent> gt :call CocActionAsync('jumpDefinition', 'tabe')<CR>
+nmap <silent> gt :call CocActionAsync('jumpTypeDefinition', 'tabe')<CR>
 nmap <silent> gd <Plug>(coc-definition)
 nmap <silent> gy <Plug>(coc-type-definition)
 nmap <silent> gi <Plug>(coc-implementation)
@@ -336,14 +342,22 @@ highlight NERDTreeFile ctermfg=14
 "我们当前启用的是GUI color，所以cterm的配置并没生效，生效的是gui
 hi IncSearch ctermfg=231 ctermbg=71 guifg=#fafafa guibg=#50a14f
 hi Search ctermfg=248 ctermbg=71 guifg=#fafafa guibg=#50a14f
+
+
 "修复outline搜索的时候
-"CocTreeSelected的优先级高于CocCursorRange的优先级从而导致搜索关键字在选中行不显示的问题(搜索关键字的字体颜色是白色背景是绿色,
+"CocTreeSelected的优先级高于CocCursorRange的优先级从而导致搜索关键字在选中行不显示的问题(搜索关键字的字体颜色是白色\背景是绿色,
 "被选中行的背景灰色覆盖了绿色,最后只剩下了白色字体\灰色背景,就出现了搜索关键字不显示的问题)
-hi CocTreeSelected ctermfg=248 ctermbg=71 guifg=#fafafa guibg=#50a14f
-" hi CocTreeSelected ctermbg=255 guibg=#f0f0f0
-" hi! link CocCursorRange Search
+" hi CocTreeSelected ctermfg=248 ctermbg=71 guifg=#fafafa guibg=#50a14f
 
 "highlight Normal guibg=none
+
+" 修复新版本coc-nvim, 自动补全下拉框的背景色问题
+highlight! link CocMenuSel PmenuSel
+
+" 修复列表背景色覆盖高亮背景色,导致无法看清文字的问题(变成灰色背景, 白色文字了)
+" highlight! link CocListLine  NONE
+" hi CocListLine gui=underline
+hi CocListLine  ctermfg=248 ctermbg=71 guifg=#fafafa guibg=#50a14f
 
 nmap <silent> gI 'I
 " normal! means nnoremap
@@ -412,13 +426,14 @@ endfunction
 
 "Copy File Path
 nnoremap <silent><leader>cp :let @+ = expand("%")<cr>
+"Copy File Name
+nnoremap <silent><leader>cn :let @+ = expand("%:t")<cr>
 " 转化为垂直/水平分屏
 nnoremap <silent> <leader>cv :windo wincmd H<CR>
 nnoremap <silent> <leader>cs :windo wincmd K<CR>
 
 nnoremap <silent><leader>gd :Gvdiffsplit<CR>
 nnoremap <silent><leader>gb :Git blame<CR>
-nnoremap <silent><leader>gi gi
 
 nnoremap <silent><leader>m :MarkdownPreview<CR>
 
@@ -434,6 +449,7 @@ autocmd FileType todo set wrap linebreak ignorecase
 autocmd FileType todo syntax match DoneTodoMatch /^x [^|]*/
 autocmd FileType todo hi def  DoneTodoColor ctermfg=231 ctermbg=71 guifg=#fafafa guibg=#50a14f
 autocmd FileType todo hi link DoneTodoMatch DoneTodoColor
+autocmd FileType todo call coc#rpc#stop()
 autocmd FileType report syntax match DoneTodoCell / x [^|]*/   
 autocmd FileType report hi def  DoneTodoColor ctermfg=231 ctermbg=71 guifg=#fafafa guibg=#50a14f
 autocmd FileType report hi link DoneTodoCell DoneTodoColor

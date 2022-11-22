@@ -120,12 +120,13 @@ alias vimdiff='nvim -d'
 alias ps="ps -ef | grep"
 alias lg='lazygit'
 alias vpn='export https_proxy=http://127.0.0.1:7890 http_proxy=http://127.0.0.1:7890 all_proxy=socks5://127.0.0.1:7890'
+alias uvpn= 'unset https_proxy http_proxy all_proxy'
 # 确保sudo的时候，保留原来的环境变量，保证sudo nvim能使用自定义配置
 alias sudo='sudo -E'
 alias ra='ranger'
 
 alias nd='cd ~/source/github/.dotfiles && nvim ./'
-alias nn='cd ~/Dropbox/Notes/Inbox && nvim ./'
+alias nn='cd ~/Dropbox/Notes && nvim ./'
 alias nt='cd ~/Dropbox/Todo && nvim ./'
 alias nr='cd ~/Dropbox/Daily_Report && nvim ./'
 alias no='cd ~/Dropbox/OKR && nvim ./'
