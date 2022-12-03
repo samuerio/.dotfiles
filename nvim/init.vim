@@ -1,3 +1,8 @@
+
+" source $HOME/.config/nvim/plugins.vim
+
+
+
 "修复<C-c>无法触发【InsertLeave】事件的问题
 " inoremap <C-c> <Esc>
 inoremap <C-c> <Nop>
@@ -16,7 +21,7 @@ nnoremap D "_D
 nnoremap ,, ,
 
 " 非常好用, 场景: 清理完多余信息后, 再快速回到原来编辑的位置
-nnoremap <silent>,gi gi
+nnoremap <silent>'i gi
 
 " ,作为第二leader键
 nnoremap ,d "+d
@@ -57,10 +62,8 @@ au TabLeave * let g:lasttab = tabpagenr()
 nnoremap <silent> <c-n> :nohlsearch<CR>
 
 set exrc
-"set guicursor=
 set relativenumber
 set nu
-"set nohlsearch
 set hidden
 set noerrorbells
 set tabstop=4 softtabstop=4
@@ -90,7 +93,8 @@ if has('macunix')
 endif
 set nrformats=
 set concealcursor=
-set conceallevel=2
+set conceallevel=0
+" set conceallevel=2
 
 
 call plug#begin()
@@ -167,6 +171,10 @@ let g:fzf_action = {
       \ 'ctrl-t': 'tab split',
       \ 'ctrl-s': 'split',
       \ 'ctrl-v': 'vsplit' }
+
+
+" Enable per-command history. CTRL-N and CTRL-P
+let g:fzf_history_dir = '~/.local/share/fzf-history'
 
 Plug 'scrooloose/nerdtree'
 let NERDTreeMapOpenSplit = 's'
@@ -359,7 +367,7 @@ highlight! link CocMenuSel PmenuSel
 " hi CocListLine gui=underline
 hi CocListLine  ctermfg=248 ctermbg=71 guifg=#fafafa guibg=#50a14f
 
-nmap <silent> gI 'I
+nmap <silent> 'q 'I
 " normal! means nnoremap
 autocmd InsertLeave * execute 'normal! mI'
 
@@ -403,7 +411,7 @@ nnoremap <silent> <leader>h :Ag <CR>
 nnoremap <silent> <leader>o  :<C-u>CocList outline<cr>
 nnoremap <silent> <leader>s  :<C-u>CocList -I symbols<cr>
 nnoremap <silent> <leader>d  :<C-u>CocList diagnostics<cr>
-nnoremap <silent> <leader>l  :<C-u>CocList --normal --auto-preview location<cr>
+nnoremap <silent> <leader>l  :<C-u>:CocListResume<cr>
 nnoremap <silent> <leader>r  <Plug>(coc-rename)
 nnoremap <silent> <leader>q  :CocFix<cr>
 nnoremap <silent> <leader>Q  :copen<cr>

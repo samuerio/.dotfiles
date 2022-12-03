@@ -3,6 +3,7 @@
     "outline.followCursor": true,
     "outline.splitCommand": "botright 40vs",
     "outline.sortBy": "position",
+    "outline.togglePreviewKey": "p",
     "suggest.autoTrigger": "none",
     "languageserver": {
         "go": {
@@ -18,22 +19,69 @@
                 "go"
             ]
         },
-        "solidity": {
-            "command": "/Users/zhenghe/source/github/.dotfiles/solc-macos",
+        //"solidity": {
+        //"command": "/Users/zhenghe/source/github/.dotfiles/solc-macos",
+        //"args": [
+        //"--lsp"
+        //],
+        //"rootPatterns": [
+        //".git/",
+        //"hardhat.config.*"
+        //],
+        //"trace.server": "verbose",
+        //"filetypes": [
+        //"solidity"
+        //],
+        //"settings": {
+        //"file-load-strategy": "directly-opened-and-on-import"
+        //}
+        //},
+        "solidity_ls": {
+            "command": "solidity-language-server",
             "args": [
-                "--lsp"
+                "--stdio"
             ],
             "rootPatterns": [
-                ".git/",
-                "hardhat.config.*"
+                ".git",
+                "package.json"
             ],
             "trace.server": "verbose",
             "filetypes": [
                 "solidity"
+            ]
+        },
+        "vimls": {
+            "command": "vim-language-server",
+            "args": [
+                "--stdio"
             ],
-            "settings": {
-                "file-load-strategy": "directly-opened-and-on-import"
-            }
+            "initializationOptions": {
+                "isNeovim": true, // is neovim, default false
+                "iskeyword": "@,48-57,_,192-255,-#", // vim iskeyword option
+                "vimruntime": "", // $VIMRUNTIME option
+                "runtimepath": "", // vim runtime path separate by `,`
+                "diagnostic": {
+                    "enable": true
+                },
+                "indexes": {
+                    "runtimepath": true, // if index runtimepath's vim files this will effect the suggest
+                    "gap": 100, // index time gap between next file
+                    "count": 3, // count of files index at the same time
+                    "projectRootPatterns": [
+                        "strange-root-pattern",
+                        ".git",
+                        "autoload",
+                        "plugin"
+                    ] // Names of files used as the mark of project root. If empty, the default value [".git", "autoload", "plugin"] will be used
+                },
+                "suggest": {
+                    "fromVimruntime": true, // completionItems from vimruntime's vim files
+                    "fromRuntimepath": false // completionItems from runtimepath's vim files, if this is true that fromVimruntime is true
+                }
+            },
+            "filetypes": [
+                "vim"
+            ]
         }
     },
     //为了避免将GOPATH里面的依赖，也当成工作区。保证一个项目只能有一个工作区
@@ -60,12 +108,24 @@
     "python.analysis.typeCheckingMode": "on",
     "python.formatting.autopep8Path": "/usr/local/bin/autopep8",
     "list.normalMappings": {
+        "<C-o>": "do:togglemode",
+        "t": "action:tabe",
+        "s": "action:split",
         "v": "action:vsplit"
+    },
+    "list.insertMappings": {
+        "<C-o>": "do:togglemode",
+        "<C-t>": "action:tabe",
+        "<C-s>": "action:split"
+        //"<C-v>": "action:vsplit", 会影响默认的C-v粘贴行为
+        //"<C-p>": "action:preview" 会影响默认的C-p查看历史输入的行为
     },
     //函数提示窗口显示在输入字符底下
     "signature.preferShownAbove": false,
     //会影响搜索,搜索的时候无法输入o这个字符
-    //"tree.key.invoke": "o"
+    "tree.key.invoke": "o",
+    "tree.key.toggle": "t",
     //以下路径必须用绝对路径,否则会找不到Jar包
-    "java.jdt.ls.vmargs": "-javaagent:/Users/zhenghe/source/github/.dotfiles/lombok/lombok-1.16.8.jar"
+    "java.jdt.ls.vmargs": "-javaagent:/Users/zhenghe/source/github/.dotfiles/lombok/lombok-1.16.8.jar",
+    "Lua.telemetry.enable": true
 }
