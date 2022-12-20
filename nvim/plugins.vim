@@ -47,5 +47,14 @@ Plug 'dhruvasagar/vim-table-mode'
 
 Plug 'neoclide/coc.nvim', {'branch': 'release'}
 
+Plug 'nvim-treesitter/nvim-treesitter', {'do': ':TSUpdate'}
+
+" One half with treesitter
+Plug 'CodeGradox/onehalf-lush'
+
+Plug 'nvim-lua/plenary.nvim'
+
+Plug 'nvim-telescope/telescope-fzf-native.nvim', { 'do': 'make' }
+
 call plug#end()
 

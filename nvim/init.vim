@@ -367,7 +367,7 @@ highlight! link CocMenuSel PmenuSel
 " hi CocListLine gui=underline
 hi CocListLine  ctermfg=248 ctermbg=71 guifg=#fafafa guibg=#50a14f
 
-nmap <silent> 'q 'I
+nmap <silent> 'p 'I
 " normal! means nnoremap
 autocmd InsertLeave * execute 'normal! mI'
 

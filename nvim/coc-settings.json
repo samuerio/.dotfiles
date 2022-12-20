@@ -100,7 +100,8 @@
         "go",
         "json",
         "python",
-        "javascript"
+        "javascript",
+        "lua"
     ],
     "rust-analyzer.updates.checkOnStartup": false,
     "python.pythonPath": "/usr/bin/python3",
