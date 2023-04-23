@@ -101,7 +101,8 @@
         "json",
         "python",
         "javascript",
-        "lua"
+        "lua",
+        "typescript"
     ],
     "rust-analyzer.updates.checkOnStartup": false,
     "python.pythonPath": "/usr/bin/python3",

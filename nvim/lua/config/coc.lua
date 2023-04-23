@@ -15,7 +15,8 @@ local opts = { silent = true, noremap = true, expr = true, replace_keycodes = fa
 keyset("i", "<C-j>", 'coc#pum#visible() ? coc#pum#next(1) : coc#refresh()', opts)
 keyset("i", "<C-k>", [[coc#pum#visible() ? coc#pum#prev(1) : "\<C-k>"]], opts)
 
-keyset("i", "<cr>", [[coc#pum#visible() ? coc#pum#confirm() : "\<C-g>u\<CR>\<c-r>=coc#on_enter()\<CR>"]], opts)
+-- keyset("i", "<cr>", [[coc#pum#visible() ? coc#pum#confirm() : "\<C-g>u\<CR>\<c-r>=coc#on_enter()\<CR>"]], opts)
+keyset("i", "<cr>", [[coc#pum#visible() ? coc#pum#confirm() : "\<Enter>"]], opts)
 
 keyset("n", "[d", "<Plug>(coc-diagnostic-prev)", { silent = true })
 keyset("n", "]d", "<Plug>(coc-diagnostic-next)", { silent = true })
@@ -69,10 +70,10 @@ vim.cmd([[
     hi CocListLine  ctermfg=248 ctermbg=71 guifg=#fafafa guibg=#50a14f
 ]])
 
-vim.api.nvim_create_autocmd(
-    { "FileType" },
-    { pattern = "go", command = "let b:coc_disabled_sources = ['around', 'buffer', 'file']" }
-)
+-- vim.api.nvim_create_autocmd(
+--     { "FileType" },
+--     { pattern = "go", command = "let b:coc_disabled_sources = ['around', 'buffer', 'file']" }
+-- )
 
 utils.nmap('<leader>F', '<Plug>(coc-format)')
 utils.nmap('<leader>o', ':<C-u>CocList outline<cr>')
@@ -95,3 +96,6 @@ vim.cmd([[
       endif
     endfunction
 ]])
+
+-- :CocInstall coc-yank
+utils.nmap('<leader>y', ':<C-u>CocList -A --normal yank<cr>')

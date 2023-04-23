@@ -32,7 +32,7 @@ vim.opt.wrap = false
 vim.opt.swapfile = false
 vim.opt.backup = false
 vim.opt.writebackup = false
-vim.opt.undodir = '~/.vim/undodir'
+vim.opt.undodir = os.getenv("HOME") .. "/.vim/undodir"
 vim.opt.undofile = true
 vim.opt.incsearch = true
 vim.opt.termguicolors = true
@@ -97,7 +97,7 @@ vim.cmd([[
 -- quick save, quit, insert
 utils.nmap('Q', ':qa<CR>')
 utils.nmap('S', ':w<CR>')
-utils.nmap('L', 'S')
+utils.nmap('L', '"_S')
 
 -- window
 utils.nmap('<C-h>', '<C-w>h')
@@ -131,7 +131,7 @@ utils.nmap(']b', ':bnext<CR>')
 
 -- last edit
 utils.nmap("'i", "gi")
-utils.nmap("'p", "'I")
+utils.nmap("'l", "'I")
 vim.api.nvim_create_autocmd(
     { "InsertLeave" },
     { pattern = "*", command = "execute 'normal! mI'" }

@@ -63,7 +63,7 @@ alt + shift - 9 : yabai -m window --space 9
 #alt + shift - 0 : yabai -m window --space 10
 
 # go back to previous workspace (kind of like back_and_forth in i3)
-ralt - b : yabai -m space --focus recent
+alt - b : yabai -m space --focus recent
 
 # move focused window to previous workspace
 # alt + shift - b : yabai -m window --space recent; \
