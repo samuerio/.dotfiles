@@ -130,6 +130,7 @@ alias nn='cd ~/Dropbox/Notes && nvim ./'
 alias nt='cd ~/Dropbox/Todo && nvim ./'
 alias nr='cd ~/Dropbox/Daily_Report && nvim ./'
 alias no='cd ~/Dropbox/OKR && nvim ./'
+alias bk='expect ~/.kpy'
 
 # To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
@@ -195,4 +196,7 @@ if command -v pyenv 1>/dev/null 2>&1; then
   eval "$(pyenv init -)"
 fi
 
+export PATH="$PATH:/Users/zhenghe/.foundry/bin"
+
 setopt no_nomatch
+export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
