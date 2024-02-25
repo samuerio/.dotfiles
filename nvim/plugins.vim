@@ -5,7 +5,7 @@ Plug 'ferrine/md-img-paste.vim'
 
 Plug 'jiangmiao/auto-pairs'
 
-Plug 'iamcco/markdown-preview.nvim', { 'do': 'cd app && yarn install' }
+Plug 'iamcco/markdown-preview.nvim', { 'do': 'cd app && npx --yes yarn install' }
 
 Plug 'tpope/vim-commentary'
 
