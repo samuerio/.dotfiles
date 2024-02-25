@@ -119,7 +119,7 @@ alias szsh="source ~/.zshrc"
 alias vimdiff='nvim -d'
 alias ps="ps -ef | grep"
 alias lg='lazygit'
-alias vpn='export https_proxy=http://127.0.0.1:7890 http_proxy=http://127.0.0.1:7890 all_proxy=socks5://127.0.0.1:7890'
+alias vpn='export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897 all_proxy=socks5://127.0.0.1:7897'
 alias uvpn= 'unset https_proxy http_proxy all_proxy'
 # 确保sudo的时候，保留原来的环境变量，保证sudo nvim能使用自定义配置
 alias sudo='sudo -E'
@@ -140,18 +140,20 @@ if [[ `uname` == "Darwin" ]]; then
 
     [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
 
-    source /Users/zhenghe/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+    source ~/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
 
     [ -f /opt/homebrew/etc/profile.d/autojump.sh ] && . /opt/homebrew/etc/profile.d/autojump.sh
 
     # Set CLICOLOR if you want Ansi Colors in iTerm2
     export CLICOLOR=1
 
-    export PYTHON3_HOME=/Users/zhenghe/Library/Python/3.8
-    export PATH=$PYTHON3_HOME/bin:$PATH
+    # 使用brew安装后就不需要设置如下环境变量将可执行包引入了, brew会将可执行包放在/usr/local/bin
+    # export PYTHON3_HOME=/Users/zhenghe/Library/Python/3.8
+    # export PATH=$PYTHON3_HOME/bin:$PATH
 
-    export GOPATH=/Users/zhenghe/repo/go
-    export PATH=$GOPATH/bin:$PATH
+    # 使用brew安装后就不需要设置如下环境变量将可执行包引入了, brew会将可执行包放在/usr/local/bin
+    # export GOPATH=/Users/zhenghe/repo/go
+    # export PATH=$GOPATH/bin:$PATH
 
     export JAVA_HOME=/Library/Java/JavaVirtualMachines/adoptopenjdk-8.jdk/Contents/Home
     export PATH=$JAVA_HOME/bin:$PATH
