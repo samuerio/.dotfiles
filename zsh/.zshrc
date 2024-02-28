@@ -130,7 +130,10 @@ alias nn='cd ~/Dropbox/Notes && nvim ./'
 alias nt='cd ~/Dropbox/Todo && nvim ./'
 alias nr='cd ~/Dropbox/Daily_Report && nvim ./'
 alias no='cd ~/Dropbox/OKR && nvim ./'
-alias bk='expect ~/.kpy'
+#expect脚本会导致rz、sz无法生效
+#alias kbk='expect ~/.kpy'
+#alias bk='expect ~/.nkpy'
+alias bk='ssh -p 2222 zhe@10.12.3.5'
 
 # To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
