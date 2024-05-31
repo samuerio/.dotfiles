@@ -143,6 +143,19 @@
     "tree.key.invoke": "o",
     "tree.key.toggle": "t",
     //以下路径必须用绝对路径,否则会找不到Jar包
-    "java.jdt.ls.vmargs": "-javaagent:/Users/zhe/source/github/.dotfiles/lombok/lombok-1.16.8.jar",
+    //"java.jdt.ls.vmargs": "-javaagent:/Users/zhenghe/source/github/.dotfiles/lombok/lombok-1.16.8.jar",
+    "java.jdt.ls.vmargs": "-javaagent:/Users/zhenghe/source/github/.dotfiles/lombok/lombok-1.18.32.jar",
+    "java.jdt.ls.lombokSupport.enabled": false,
+    "java.trace.server": "verbose",
+    "java.configuration.runtimes": [
+        {
+            "name": "JavaSE-1.8",
+            "path": "/Library/Java/JavaVirtualMachines/adoptopenjdk-8.jdk/Contents/Home"
+        },
+        {
+            "name": "JavaSE-17",
+            "path": "/Library/Java/JavaVirtualMachines/openjdk-17.jdk/Contents/Home"
+        }
+    ],
     "Lua.telemetry.enable": true
 }

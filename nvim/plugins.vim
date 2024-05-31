@@ -32,6 +32,8 @@ Plug 'scrooloose/nerdtree'
 
 Plug 'nvim-telescope/telescope.nvim'
 
+Plug 'nvim-telescope/telescope-ui-select.nvim'
+
 Plug 'tpope/vim-fugitive'
 
 Plug 'junegunn/gv.vim'
@@ -55,6 +57,8 @@ Plug 'CodeGradox/onehalf-lush'
 Plug 'nvim-lua/plenary.nvim'
 
 Plug 'nvim-telescope/telescope-fzf-native.nvim', { 'do': 'make' }
+
+Plug 'David-Kunz/gen.nvim'
 
 call plug#end()
 
