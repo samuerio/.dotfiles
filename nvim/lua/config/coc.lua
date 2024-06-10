@@ -5,8 +5,8 @@ vim.g.coc_snippet_prev = "<s-tab>"
 
 local keyset = vim.keymap.set
 function _G.check_back_space()
-    local col = vim.fn.col('.') - 1
-    return col == 0 or vim.fn.getline('.'):sub(col, col):match('%s') ~= nil
+	local col = vim.fn.col('.') - 1
+	return col == 0 or vim.fn.getline('.'):sub(col, col):match('%s') ~= nil
 end
 
 utils.imap('<C-n>', '<Nop>')
@@ -33,14 +33,14 @@ keyset("n", "gi", "<Plug>(coc-implementation)", { silent = true })
 keyset("n", "gr", "<Plug>(coc-references)", { silent = true })
 
 function _G.show_docs()
-    local cw = vim.fn.expand('<cword>')
-    if vim.fn.index({ 'vim', 'help' }, vim.bo.filetype) >= 0 then
-        vim.api.nvim_command('h ' .. cw)
-    elseif vim.api.nvim_eval('coc#rpc#ready()') then
-        vim.fn.CocActionAsync('doHover')
-    else
-        vim.api.nvim_command('!' .. vim.o.keywordprg .. ' ' .. cw)
-    end
+	local cw = vim.fn.expand('<cword>')
+	if vim.fn.index({ 'vim', 'help' }, vim.bo.filetype) >= 0 then
+		vim.api.nvim_command('h ' .. cw)
+	elseif vim.api.nvim_eval('coc#rpc#ready()') then
+		vim.fn.CocActionAsync('doHover')
+	else
+		vim.api.nvim_command('!' .. vim.o.keywordprg .. ' ' .. cw)
+	end
 end
 
 keyset("n", "K", '<CMD>lua _G.show_docs()<CR>', { silent = true })
@@ -51,18 +51,18 @@ local opts = { silent = true, nowait = true, expr = true }
 keyset("n", "<C-f>", 'coc#float#has_scroll() ? coc#float#scroll(1) : "<C-f>"', opts)
 keyset("n", "<C-b>", 'coc#float#has_scroll() ? coc#float#scroll(0) : "<C-b>"', opts)
 keyset("i", "<C-f>",
-    'coc#float#has_scroll() ? "<c-r>=coc#float#scroll(1)<cr>" : "<Right>"', opts)
+	'coc#float#has_scroll() ? "<c-r>=coc#float#scroll(1)<cr>" : "<Right>"', opts)
 keyset("i", "<C-b>",
-    'coc#float#has_scroll() ? "<c-r>=coc#float#scroll(0)<cr>" : "<Left>"', opts)
+	'coc#float#has_scroll() ? "<c-r>=coc#float#scroll(0)<cr>" : "<Left>"', opts)
 keyset("v", "<C-f>", 'coc#float#has_scroll() ? coc#float#scroll(1) : "<C-f>"', opts)
 keyset("v", "<C-b>", 'coc#float#has_scroll() ? coc#float#scroll(0) : "<C-b>"', opts)
 
 -- Highlight the symbol and its references when holding the cursor.
 vim.api.nvim_create_augroup("CocGroup", {})
 vim.api.nvim_create_autocmd("CursorHold", {
-    group = "CocGroup",
-    command = "silent call CocActionAsync('highlight')",
-    desc = "Highlight symbol under cursor on CursorHold"
+	group = "CocGroup",
+	command = "silent call CocActionAsync('highlight')",
+	desc = "Highlight symbol under cursor on CursorHold"
 })
 
 vim.cmd([[
@@ -81,12 +81,16 @@ utils.nmap('<leader>s', ':<C-u>CocList -I symbols<cr>')
 utils.nmap('<leader>d', ':<C-u>CocList diagnostics<cr>')
 utils.nmap('<leader>l', ':<C-u>:CocListResume<cr>')
 utils.nmap('<leader>r', '<Plug>(coc-rename)')
+-- quickfix
 utils.nmap('<leader>q', ':CocFix<cr>')
+-- code actions
+utils.nmap('<leader>a', ':CocAction<cr>')
 utils.nmap('<leader>Q', ':copen<cr>')
-utils.nmap('<leader>l', ':<C-u>:CocListResume<cr>')
 
 vim.cmd([[
     nnoremap <silent><leader>j :call ToggleOutline()<CR>
+	command! -nargs=* -range CocFix    :call CocActionAsync('codeActionRange', <line1>, <line2>, 'quickfix')
+	command! -nargs=* -range CocAction :call CocActionAsync('codeActionRange', <line1>, <line2>, <f-args>)
     function! ToggleOutline() abort
       let winid = coc#window#find('cocViewId', 'OUTLINE')
       if winid == -1

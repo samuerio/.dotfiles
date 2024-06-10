@@ -193,11 +193,12 @@ vim.cmd([[
     autocmd FileType todo hi def  DoneTodoColor ctermfg=231 ctermbg=71 guifg=#fafafa guibg=#50a14f
     autocmd FileType todo hi link DoneTodoMatch DoneTodoColor
     autocmd FileType todo call coc#rpc#stop()
-    autocmd FileType report syntax match DoneTodoCell / x [^|]*/   
+    autocmd FileType report syntax match DoneTodoCell / x [^|]*/
     autocmd FileType report hi def  DoneTodoColor ctermfg=231 ctermbg=71 guifg=#fafafa guibg=#50a14f
     autocmd FileType report hi link DoneTodoCell DoneTodoColor
     " 启用会导致}{的移动变慢, 因为多增加了}| \ {|移动方式
     autocmd FileType report call tablemode#Enable()
+
 ]])
 
 --------------------------------------------------------------------------------

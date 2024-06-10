@@ -26,4 +26,4 @@ vim.g.fzf_history_dir = '~/.local/share/fzf-history'
 
 utils.nmap('<leader>f', ':Files <CR>')
 utils.nmap('<leader>h', ':Ag <CR>')
-utils.nmap('<leader>;', ':History <CR>')
+utils.nmap('<leader>;', ':History:<CR>')

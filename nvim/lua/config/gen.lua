@@ -40,5 +40,6 @@ require('gen').prompts['Write_Comment'] = {
 --     prompt = "Summarize the following text:\n$text"
 -- }
 
-utils.nmap('<leader>g', ':Gen<CR>')
-utils.vmap('<leader>g', ':Gen<CR>')
+utils.nmap('<leader>z', ':Gen<CR>')
+utils.vmap('<leader>z', ':Gen<CR>')
+utils.nmap('<leader>g', ':Gen Chat<CR>')
