@@ -3,7 +3,8 @@
     "outline.followCursor": true,
     "outline.splitCommand": "botright 40vs",
     "outline.sortBy": "position",
-    "outline.togglePreviewKey": "p",
+    //"outline.togglePreviewKey": "p",
+    "outline.togglePreviewKey": "K",
     "suggest.autoTrigger": "none",
     "languageserver": {
         "go": {
@@ -129,7 +130,8 @@
         "<C-o>": "do:togglemode",
         "t": "action:tabe",
         "s": "action:split",
-        "v": "action:vsplit"
+        "v": "action:vsplit",
+        "K": "action:preview"
     },
     "list.insertMappings": {
         "<C-o>": "do:togglemode",

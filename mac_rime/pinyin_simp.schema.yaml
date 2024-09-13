@@ -18,7 +18,9 @@ schema:
 # 功能开关
 switches:
   - name: ascii_mode
-    reset: 0
+    # reset: 0
+    # 重点: rest: 1 将新开窗口的默认输入法设置为英文模式
+    reset: 1
     states: [ 中文, 西文 ]
   - name: full_shape
     reset: 0

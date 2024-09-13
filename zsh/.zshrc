@@ -161,8 +161,8 @@ if [[ `uname` == "Darwin" ]]; then
 
     #If you need to have openjdk@17 first in your PATH, run:
     #echo 'export PATH="/opt/homebrew/opt/openjdk@17/bin:$PATH"' >> ~/.zshrc
-    export JAVA_HOME=/Library/Java/JavaVirtualMachines/adoptopenjdk-8.jdk/Contents/Home
-    # export JAVA_HOME=/opt/homebrew/opt/openjdk@17
+    #export JAVA_HOME=/Library/Java/JavaVirtualMachines/adoptopenjdk-8.jdk/Contents/Home
+    export JAVA_HOME=/opt/homebrew/opt/openjdk@17
     export PATH=$JAVA_HOME/bin:$PATH
 
     # lotus
