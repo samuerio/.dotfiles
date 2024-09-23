@@ -1,0 +1,125 @@
+""" Map leader to space ---------------------
+let mapleader=" "
+set clipboard+=unnamed
+
+map <C-O> <Action>(Back)
+map <C-I> <Action>(Forward)
+
+imap <C-J> <Action>(CodeCompletion)
+
+
+"delete, cut
+nnoremap d "_d
+vnoremap d "_d
+nnoremap D "_D
+nnoremap c "_c
+vnoremap c "_c
+nnoremap C "_C
+nnoremap S "_S
+nnoremap x "_x
+vnoremap x "_x
+nnoremap ,d "+d
+vnoremap ,d "+d
+nnoremap ,D "+D
+
+
+nnoremap Q :qa<CR>
+nnoremap S :w<CR>
+nnoremap L S
+
+
+"window
+nmap <C-h> <C-w>h
+nmap <C-j> <C-w>j
+nmap <C-k> <C-w>k
+nmap <C-l> <C-w>l
+nmap <C-p> <C-w>w
+
+"nmap X <C-w>c
+nmap X <Action>(CloseEditor)
+
+"nmap <C-t> <C-w>T
+nmap <C-t> <Action>(Unsplit)
+nmap <C-s> <C-w>s
+
+
+"tab
+nmap th <Action>(PreviousTab)
+nmap tl <Action>(NextTab)
+nmap to :tabonly<CR>
+"nmap tn <Action>(NewFile)
+
+nmap gd <Action>(GotoDeclaration)
+nmap gy <Action>(GotoTypeDeclaration)
+nmap gi <Action>(GotoImplementation)
+nmap gr <Action>(GotoDeclaration)
+
+
+set relativenumber
+set nu
+set hidden
+set noerrorbells
+set tabstop=4 softtabstop=4
+set shiftwidth=4
+set expandtab
+set smartindent
+set autoindent
+set nowrap
+set noswapfile
+set nobackup
+set nowritebackup
+set incsearch
+set termguicolors
+set scrolloff=8
+set colorcolumn=80
+set signcolumn=yes
+set cmdheight=2
+set updatetime=300
+set shortmess+=c
+set nrformats=
+set concealcursor=
+set conceallevel=0
+
+
+"last edit
+nnoremap 'i gi
+nnoremap <C-n> :nohlsearch<CR>
+nmap 'l <Action>(JumpToLastChange)
+
+"leader
+nmap <leader>f <Action>(GotoFile)
+nmap <leader>s <Action>(GotoSymbol)
+nmap <leader>o <Action>(FileStructurePopup)
+nmap <leader>h <Action>(FindInPath)
+nmap <leader>F <Action>(ReformatCode)
+nmap <leader>q <Action>(ShowIntentionActions)
+nmap <leader>j <Action>(ActivateStructureToolWindow)
+
+"error
+nmap [d <Action>(GotoPreviousError)
+nmap ]d <Action>(GotoNextError)
+
+nmap K <Action>(QuickJavaDoc)
+
+
+set NERDTree
+let NERDTreeMapOpenSplit = 's'
+let NERDTreeMapOpenVSplit = 'v'
+let NERDTreeShowBookmarks=1
+let NERDTreeIgnore=['\.py[cd]$', '\~$', '\.swo$', '\.swp$', '^\.git$', '^\.hg$', '^\.svn$', '\.bzr$']
+let NERDTreeChDirMode=0
+let NERDTreeQuitOnOpen=1
+let NERDTreeMouseMode=2
+let NERDTreeShowHidden=1
+let NERDTreeKeepTreeInNewTab=1
+let g:nerdtree_tabs_open_on_gui_startup=0
+nnoremap <C-e> :NERDTreeToggle<CR>
+nnoremap <leader>n :NERDTreeFind<CR>
+
+Plug 'tpope/vim-surround'
+Plug 'tpope/vim-commentary'
+
+set easymotion
+nmap ss <Plug>(easymotion-s2)
+
+Plug 'machakann/vim-highlightedyank'

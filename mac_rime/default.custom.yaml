@@ -51,8 +51,8 @@ patch:
       # 以下复制于： https://github.com/rime/rime-prelude/blob/master/key_bindings.yaml
       # 也可也看本地文件： /Library/Input Methods/Squirrel.app/Contents/SharedSupport/key_bindings.yaml
       # emacs_editing:
-      # - { when: composing, accept: Control+p, send: Up }
-      # - { when: composing, accept: Control+n, send: Down }
+      - { when: composing, accept: Control+p, send: Up }
+      - { when: composing, accept: Control+n, send: Down }
       - { when: composing, accept: Control+k, send: Page_Up }
       - { when: composing, accept: Control+j, send: Page_Down }
       - { when: composing, accept: Control+b, send: Left }
