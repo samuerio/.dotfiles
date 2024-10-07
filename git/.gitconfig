@@ -12,8 +12,8 @@
 
 [merge]
     ; conflictstyle = diff3[user]
-	name = zhenghe
-	email = zhenghe@kaopuyun.com
+	name = samuerio
+	email = samuerio@853713419.com
 
 [core]
 	editor = nvim
