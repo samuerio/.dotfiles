@@ -119,13 +119,11 @@ alias szsh="source ~/.zshrc"
 alias vimdiff='nvim -d'
 alias ps="ps -ef | grep"
 alias lg='lazygit'
-alias vpn='export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897 all_proxy=socks5://127.0.0.1:7897'
 alias uvpn= 'unset https_proxy http_proxy all_proxy'
 # 确保sudo的时候，保留原来的环境变量，保证sudo nvim能使用自定义配置
 alias sudo='sudo -E'
 alias ra='ranger'
 
-alias nd='cd ~/source/github/.dotfiles && nvim ./'
 alias nn='cd ~/Dropbox/Notes && nvim ./'
 alias nt='cd ~/Dropbox/Todo && nvim ./'
 alias nr='cd ~/Dropbox/Daily_Report && nvim ./'
@@ -135,12 +133,13 @@ alias no='cd ~/Dropbox/OKR && nvim ./'
 #alias bk='expect ~/.nkpy'
 alias bk='ssh -p 2222 zhe@10.12.3.5'
 
-# To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
-[[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
+if [[ $(uname) == "Darwin" ]]; then
+    # 针对 macOS 的命令
+    alias vpn='export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897 all_proxy=socks5://127.0.0.1:7897'
+    alias nd='cd ~/source/github/.dotfiles && nvim ./'
 
-#Mac
-if [[ `uname` == "Darwin" ]]; then
 
+    #待整理-----
     [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
 
     source ~/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
@@ -169,12 +168,25 @@ if [[ `uname` == "Darwin" ]]; then
     export LIBRARY_PATH=/opt/homebrew/lib
     export FFI_BUILD_FROM_SOURCE=1
 
-fi
+    export PYENV_ROOT="$HOME/.pyenv"
+    export PATH="$PYENV_ROOT/bin:$PATH"
+    if command -v pyenv 1>/dev/null 2>&1; then
+      eval "$(pyenv init --path)"
+      eval "$(pyenv init -)"
+    fi
 
-#Linux
-if [[ `uname` == "Linux" ]]; then
+    setopt no_nomatch
 
-    alias kvpn='sudo openvpn --daemon --config ~/.config/openvpn/kaopuyun.ovpn'
+    export PATH="$PATH:/Users/zhenghe/.foundry/bin"
+    export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
+    export PATH="/opt/homebrew/opt/openssl@1.1/bin:$PATH"
+
+elif [[ $(uname) == "Linux" ]]; then
+    # 针对 Linux 的命令
+    alias vpn='export https_proxy=http://172.29.48.1:7890 http_proxy=http://172.29.48.1:7890 all_proxy=socks5://172.29.48.1:7890'
+    alias nd='cd ~/github/samuerio/.dotfiles && nvim ./'
+
+    # alias kvpn='sudo openvpn --daemon --config ~/.config/openvpn/kaopuyun.ovpn'
 
     [ -f /usr/share/fzf/key-bindings.zsh ] && source /usr/share/fzf/key-bindings.zsh
     [ -f /usr/share/fzf/completion.zsh ] && source /usr/share/fzf/completion.zsh
@@ -182,8 +194,11 @@ if [[ `uname` == "Linux" ]]; then
     source /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
 
     export PATH=$HOME/.local/bin:$PATH
-
+else
 fi
+
+# To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
+[[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
 
 export PATH=$HOME/.cargo/bin:$PATH
 
@@ -196,16 +211,4 @@ export RANGER_LOAD_DEFAULT_RC=FALSE
 export VISUAL=nvim
 export EDITOR="$VISUAL"
 export TERM=xterm-256color
-export PATH="/opt/homebrew/opt/openssl@1.1/bin:$PATH"
 
-export PYENV_ROOT="$HOME/.pyenv"
-export PATH="$PYENV_ROOT/bin:$PATH"
-if command -v pyenv 1>/dev/null 2>&1; then
-  eval "$(pyenv init --path)"
-  eval "$(pyenv init -)"
-fi
-
-export PATH="$PATH:/Users/zhenghe/.foundry/bin"
-
-setopt no_nomatch
-export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
