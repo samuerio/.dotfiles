@@ -124,10 +124,6 @@ alias uvpn= 'unset https_proxy http_proxy all_proxy'
 alias sudo='sudo -E'
 alias ra='ranger'
 
-alias nn='cd ~/Dropbox/Notes && nvim ./'
-alias nt='cd ~/Dropbox/Todo && nvim ./'
-alias nr='cd ~/Dropbox/Daily_Report && nvim ./'
-alias no='cd ~/Dropbox/OKR && nvim ./'
 #expect脚本会导致rz、sz无法生效
 #alias kbk='expect ~/.kpy'
 #alias bk='expect ~/.nkpy'
@@ -138,6 +134,10 @@ if [[ $(uname) == "Darwin" ]]; then
     alias vpn='export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897 all_proxy=socks5://127.0.0.1:7897'
     alias nd='cd ~/source/github/.dotfiles && nvim ./'
 
+    alias nn='cd ~/Dropbox/Notes && nvim ./'
+    alias nt='cd ~/Dropbox/Todo && nvim ./'
+    alias nr='cd ~/Dropbox/Daily_Report && nvim ./'
+    alias no='cd ~/Dropbox/OKR && nvim ./'
 
     #待整理-----
     [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
@@ -194,6 +194,11 @@ elif [[ $(uname) == "Linux" ]]; then
     source /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
 
     export PATH=$HOME/.local/bin:$PATH
+
+    alias nn='cd /mnt/c/Users/36001/Dropbox/EXP/Notes && nvim ./'
+    alias nt='cd /mnt/c/Users/36001/Dropbox/GTD/Todo && nvim ./'
+    alias nr='cd /mnt/c/Users/36001/Dropbox/GTD/Daily_Report && nvim ./'
+    alias no='cd /mnt/c/Users/36001/Dropbox/GTD/OKR && nvim ./'
 else
 fi
 
