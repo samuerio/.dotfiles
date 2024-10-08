@@ -27,3 +27,7 @@ vim.g.fzf_history_dir = '~/.local/share/fzf-history'
 utils.nmap('<leader>f', ':Files <CR>')
 utils.nmap('<leader>h', ':Ag <CR>')
 utils.nmap('<leader>;', ':History:<CR>')
+
+vim.cmd([[
+    command! -bang -nargs=* Ag call fzf#vim#ag(<q-args>, {'options': '--delimiter : --nth 4..'}, <bang>0)
+]])
