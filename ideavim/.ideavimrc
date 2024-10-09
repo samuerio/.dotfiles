@@ -48,6 +48,8 @@ nmap th <Action>(PreviousTab)
 nmap tl <Action>(NextTab)
 nmap to :tabonly<CR>
 "nmap tn <Action>(NewFile)
+nmap tp <Action>(RecentLocations)
+
 
 nmap gd <Action>(GotoDeclaration)
 nmap gy <Action>(GotoTypeDeclaration)
@@ -87,17 +89,23 @@ nnoremap <C-n> :nohlsearch<CR>
 nmap 'l <Action>(JumpToLastChange)
 
 "leader
+nmap <leader>o <Action>(FileStructurePopup)
+nmap <leader>F <Action>(ReformatCode)
+
 nmap <leader>f <Action>(GotoFile)
 nmap <leader>s <Action>(GotoSymbol)
-nmap <leader>o <Action>(FileStructurePopup)
 nmap <leader>h <Action>(FindInPath)
-nmap <leader>F <Action>(ReformatCode)
+
 nmap <leader>q <Action>(ShowIntentionActions)
 nmap <leader>j <Action>(ActivateStructureToolWindow)
 
 "error
 nmap [d <Action>(GotoPreviousError)
 nmap ]d <Action>(GotoNextError)
+
+"由于idea不支持类似vscode toggleFold这样的原生neovim za命令，所以作出如下hack
+nnoremap zc :action CollapseRegionRecursively<CR>
+nnoremap zo :action ExpandRegionRecursively<CR>
 
 nmap K <Action>(QuickJavaDoc)
 

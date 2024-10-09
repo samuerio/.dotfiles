@@ -134,10 +134,11 @@ if [[ $(uname) == "Darwin" ]]; then
     alias vpn='export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897 all_proxy=socks5://127.0.0.1:7897'
     alias nd='cd ~/source/github/.dotfiles && nvim ./'
 
-    alias nn='cd ~/Dropbox/Notes && nvim ./'
-    alias nt='cd ~/Dropbox/Todo && nvim ./'
-    alias nr='cd ~/Dropbox/Daily_Report && nvim ./'
-    alias no='cd ~/Dropbox/OKR && nvim ./'
+    alias nn='cd ~/Dropbox/EXP/Notes && nvim ./'
+    alias ns='cd ~/Dropbox/EXP/Scripts && nvim ./'
+    alias nt='cd ~/Dropbox/GTD/Todo && nvim ./'
+    alias nr='cd ~/Dropbox/GTD/Daily_Report && nvim ./'
+    alias no='cd ~/Dropbox/GTD/OKR && nvim ./'
 
     #待整理-----
     [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh

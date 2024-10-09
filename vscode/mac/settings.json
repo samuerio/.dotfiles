@@ -1,0 +1,575 @@
+{
+    // "vim.statusBarColorControl": true, //警告：开启可能会导致CPU消耗过高
+    // "vim.statusBarColors.normal": ["#FAFAFA", "#50A14F"],
+    "vim.incsearch": true,
+    "vim.useSystemClipboard": true,
+    "vim.useCtrlKeys": true,
+    "vim.hlsearch": true,
+    "vim.leader": "<space>",
+    "vim.foldfix": true,
+    "vim.easymotion": true,
+    "vim.handleKeys": {
+        "<C-s>": true,
+        "<C-o>": false, //vscode-vim的go forward/go back有bug（当使用gd后再C-o就回不来了), 先用keybindings来替代
+        "<C-i>": false
+    },
+    "vim.insertModeKeyBindings": [
+        {
+            "before": [
+                "<C-j>"
+            ],
+            "commands": [
+                "editor.action.triggerSuggest"
+            ]
+        }
+    ],
+    "vim.normalModeKeyBindings": [
+        {
+            "before": [
+                "g",
+                "d"
+            ],
+            "commands": [
+                "editor.action.revealDefinition"
+            ]
+        },
+        {
+            "before": [
+                "g",
+                "y"
+            ],
+            "commands": [
+                "editor.action.goToTypeDefinition"
+            ]
+        },
+        {
+            "before": [
+                "g",
+                "i"
+            ],
+            "commands": [
+                "editor.action.goToImplementation"
+            ]
+        },
+        {
+            "before": [
+                "g",
+                "r"
+            ],
+            "commands": [
+                "editor.action.goToReferences"
+            ]
+        },
+        {
+            "before": [
+                "t",
+                "h"
+            ],
+            "commands": [
+                "workbench.action.previousEditor"
+            ]
+        },
+        {
+            "before": [
+                "t",
+                "l"
+            ],
+            "commands": [
+                "workbench.action.nextEditor"
+            ]
+        },
+        {
+            "before": [
+                "t",
+                "o"
+            ],
+            "commands": [
+                "workbench.action.closeOtherEditors"
+            ]
+        },
+        {
+            "before": [
+                "t",
+                "n"
+            ],
+            "commands": [
+                "workbench.action.files.newUntitledFile"
+            ]
+        },
+        {
+            "before": [
+                "t",
+                "p"
+            ],
+            "commands": [
+                "workbench.action.openPreviousRecentlyUsedEditor"
+            ]
+        },
+        {
+            "before": [
+                "'",
+                "l"
+            ],
+            "commands": [
+                "workbench.action.navigateToLastEditLocation"
+            ]
+        },
+        {
+            "before": [
+                "<leader>",
+                "o"
+            ],
+            "commands": [
+                "workbench.action.gotoSymbol"
+            ]
+        },
+        {
+            "before": [
+                "<leader>",
+                "F"
+            ],
+            "commands": [
+                "editor.action.formatDocument"
+            ]
+        },
+        {
+            "before": [
+                "<leader>",
+                "f",
+            ],
+            "commands": [
+                "workbench.action.quickOpen"
+            ]
+        },
+        {
+            "before": [
+                "<leader>",
+                "s"
+            ],
+            "commands": [
+                "workbench.action.showAllSymbols"
+            ]
+        },
+        {
+            "before": [
+                "<leader>",
+                "h",
+            ],
+            "commands": [
+                "workbench.action.findInFiles"
+            ]
+        },
+        {
+            "before": [
+                "<leader>",
+                "q",
+            ],
+            "commands": [
+                "editor.action.quickFix"
+            ]
+        },
+        {
+            "before": [
+                "<leader>",
+                "j",
+            ],
+            "commands": [
+                "outline.focus"
+            ]
+        },
+        {
+            "before": [
+                "<leader>",
+                "n",
+            ],
+            "commands": [
+                "workbench.files.action.showActiveFileInExplorer"
+            ]
+        },
+        {
+            "before": [
+                "<leader>",
+                "m",
+            ],
+            "commands": [
+                "markdown.showPreview"
+            ]
+        },
+        {
+            "before": [
+                "K"
+            ],
+            "commands": [
+                "editor.action.showHover"
+            ]
+        },
+        // 重点：配合以下注释的keybindings实现类似NerdTree的菜单开合效果
+        // {
+        //     "key": "ctrl+e",
+        //     "command": "workbench.action.toggleSidebarVisibility",
+        //     "when": "!editorTextFocus && vim.active && sideBarVisible "
+        // }
+        {
+            "before": [
+                "<C-e>"
+            ],
+            "commands": [
+                "workbench.explorer.fileView.focus"
+            ]
+        },
+        {
+            "before": [
+                "]",
+                "d"
+            ],
+            "commands": [
+                "editor.action.marker.next"
+            ]
+        },
+        {
+            "before": [
+                "[",
+                "d"
+            ],
+            "commands": [
+                "editor.action.marker.prev"
+            ]
+        },
+    ],
+    "vim.normalModeKeyBindingsNonRecursive": [
+        {
+            "before": [
+                "d"
+            ],
+            "after": [
+                "\"",
+                "_",
+                "d"
+            ]
+        },
+        {
+            "before": [
+                "D"
+            ],
+            "after": [
+                "\"",
+                "_",
+                "D"
+            ]
+        },
+        {
+            "before": [
+                "c"
+            ],
+            "after": [
+                "\"",
+                "_",
+                "c"
+            ]
+        },
+        {
+            "before": [
+                "C"
+            ],
+            "after": [
+                "\"",
+                "_",
+                "C"
+            ]
+        },
+        {
+            "before": [
+                "S"
+            ],
+            "after": [
+                "\"",
+                "_",
+                "S"
+            ]
+        },
+        {
+            "before": [
+                "x"
+            ],
+            "after": [
+                "\"",
+                "_",
+                "x"
+            ]
+        },
+        {
+            "before": [
+                ",",
+                "d"
+            ],
+            "after": [
+                "\"",
+                "+",
+                "d"
+            ]
+        },
+        {
+            "before": [
+                ",",
+                "D"
+            ],
+            "after": [
+                "\"",
+                "+",
+                "D"
+            ]
+        },
+        {
+            "before": [
+                "Q"
+            ],
+            "commands": [
+                ":qa"
+            ]
+        },
+        {
+            "before": [
+                "S"
+            ],
+            "commands": [
+                ":w"
+            ]
+        },
+        {
+            "before": [
+                "L"
+            ],
+            "after": [
+                "S"
+            ]
+        },
+        {
+            "before": [
+                "<C-h>"
+            ],
+            "after": [
+                "<C-w>",
+                "h"
+            ]
+        },
+        {
+            "before": [
+                "<C-j>"
+            ],
+            "after": [
+                "<C-w>",
+                "j"
+            ]
+        },
+        {
+            "before": [
+                "<C-k>"
+            ],
+            "after": [
+                "<C-w>",
+                "k"
+            ]
+        },
+        {
+            "before": [
+                "<C-l>"
+            ],
+            "after": [
+                "<C-w>",
+                "l"
+            ]
+        },
+        {
+            "before": [
+                "<C-p>"
+            ],
+            "after": [
+                "<C-w>",
+                "w"
+            ]
+        },
+        {
+            "before": [
+                "X"
+            ],
+            "commands": [
+                "workbench.action.closeActiveEditor"
+            ]
+        },
+        {
+            "before": [
+                "<C-s>"
+            ],
+            "after": [
+                "<C-w>",
+                "s"
+            ]
+        },
+        {
+            "before": [
+                "<C-t>"
+            ],
+            "commands": [
+                "workbench.action.joinAllGroups"
+            ]
+        },
+        {
+            "before": [
+                "<C-n>"
+            ],
+            "commands": [
+                ":nohl"
+            ]
+        },
+        {
+            "before": [
+                "'",
+                "i"
+            ],
+            "after": [
+                "g",
+                "i"
+            ]
+        },
+        {
+            "before": [
+                "z",
+                "a"
+            ],
+            "commands": [
+                "editor.toggleFold"
+            ]
+        },
+        //为了兼容idea中折叠的hack操作, 保持一致的IDE VIM操作习惯
+        {
+            "before": [
+                "z",
+                "c"
+            ],
+            "commands": [
+                "editor.toggleFold"
+            ]
+        },
+        {
+            "before": [
+                "z",
+                "o"
+            ],
+            "commands": [
+                "editor.toggleFold"
+            ]
+        },
+        {
+            "before": [
+                "s",
+                "s"
+            ],
+            "after": [
+                "leader",
+                "leader",
+                "2",
+                "s"
+            ]
+        }
+    ],
+    "vim.visualModeKeyBindingsNonRecursive": [
+        {
+            "before": [
+                "d"
+            ],
+            "after": [
+                "\"",
+                "_",
+                "d"
+            ]
+        },
+        {
+            "before": [
+                "c"
+            ],
+            "after": [
+                "\"",
+                "_",
+                "c"
+            ]
+        },
+        {
+            "before": [
+                "x"
+            ],
+            "after": [
+                "\"",
+                "_",
+                "x"
+            ]
+        },
+        {
+            "before": [
+                ",",
+                "d"
+            ],
+            "after": [
+                "\"",
+                "+",
+                "d"
+            ]
+        },
+    ],
+    "editor.fontFamily": "Monaco",
+    "editor.fontSize": 17,
+    "editor.quickSuggestions": {
+        "comments": "off",
+        "strings": "off",
+        "other": "off"
+    },
+    "editor.wordBasedSuggestions": "off",
+    "editor.parameterHints.enabled": false,
+    "explorer.autoReveal": false,
+    "editor.selectionHighlight": false,
+    "typescript.updateImportsOnFileMove.enabled": "always",
+    "workbench.editor.enablePreview": false,
+    "solidity.defaultCompiler": "embedded",
+    "git.autofetch": true,
+    "git.enableSmartCommit": true,
+    "git.confirmSync": false,
+    "solidity.enabledAsYouTypeCompilationErrorCheck": false,
+    "editor.codeActionsOnSave": {
+        "source.fixAll.eslint": "explicit"
+    },
+    "eslint.validate": [
+        "javascript"
+    ],
+    "gitlens.hovers.currentLine.over": "line",
+    "gitlens.codeLens.enabled": false,
+    "gitlens.currentLine.enabled": false,
+    "gitlens.hovers.enabled": false,
+    "go.toolsManagement.autoUpdate": true,
+    "diffEditor.ignoreTrimWhitespace": false,
+    "workbench.iconTheme": "vscode-icons",
+    "rust-analyzer.workspace.symbol.search.scope": "workspace_and_dependencies",
+    "editor.lineNumbers": "relative",
+    "editor.hover.enabled": false,
+    "workbench.colorCustomizations": {
+        "statusBar.background": "#FAFAFA",
+        "statusBar.noFolderBackground": "#FAFAFA",
+        "statusBar.debuggingBackground": "#FAFAFA",
+        "statusBar.foreground": "#50A14F",
+        "statusBar.debuggingForeground": "#50A14F"
+    },
+    "editor.snippetSuggestions": "top",
+    "workbench.colorTheme": "Default Light+",
+    "editor.fontWeight": "normal",
+    "go.gotoSymbol.includeImports": true,
+    "go.gotoSymbol.includeGoroot": true,
+    "editor.cursorSurroundingLines": 8,
+    "terminal.integrated.scrollback": 100000000,
+    "[python]": {
+        "editor.formatOnType": true
+    },
+    "redhat.telemetry.enabled": false,
+    "extensions.ignoreRecommendations": true,
+    "editor.suggestOnTriggerCharacters": false,
+    "editor.stickyScroll.enabled": false,
+    "editor.renderWhitespace": "none",
+    "editor.minimap.enabled": false
+}
