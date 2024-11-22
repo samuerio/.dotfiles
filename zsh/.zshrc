@@ -195,6 +195,7 @@ elif [[ $(uname) == "Linux" ]]; then
     source /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
 
     export PATH=$HOME/.local/bin:$PATH
+    export PATH=$PATH:~/.npm-global/bin
 
     alias nn='cd /mnt/c/Users/36001/Dropbox/EXP/Notes && nvim ./'
     alias nt='cd /mnt/c/Users/36001/Dropbox/GTD/Todo && nvim ./'
@@ -207,6 +208,7 @@ fi
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
 
 export PATH=$HOME/.cargo/bin:$PATH
+export PATH=$HOME/.yarn/bin:$PATH
 
 export LC_ALL=en_US.UTF-8
 export LANG=en_US.UTF-8
