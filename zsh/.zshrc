@@ -184,10 +184,11 @@ if [[ $(uname) == "Darwin" ]]; then
 
 elif [[ $(uname) == "Linux" ]]; then
     # 针对 Linux 的命令
-    alias vpn='export https_proxy=http://172.29.48.1:7890 http_proxy=http://172.29.48.1:7890 all_proxy=socks5://172.29.48.1:7890'
-    alias nd='cd ~/github/samuerio/.dotfiles && nvim ./'
+    alias vpn='export https_proxy=http://127.0.0.1:7890 http_proxy=http://127.0.0.1:7890 all_proxy=socks5://127.0.0.1:7890'
+    alias nd='cd ~/github/.dotfiles && nvim ./'
 
     # alias kvpn='sudo openvpn --daemon --config ~/.config/openvpn/kaopuyun.ovpn'
+    alias zvpn='sudo openvpn  --daemon --config ~/.config/openvpn/zrinfo.ovpn --data-ciphers AES-128-CBC --auth-user-pass ~/.config/openvpn/auth.txt'
 
     [ -f /usr/share/fzf/key-bindings.zsh ] && source /usr/share/fzf/key-bindings.zsh
     [ -f /usr/share/fzf/completion.zsh ] && source /usr/share/fzf/completion.zsh
@@ -197,10 +198,24 @@ elif [[ $(uname) == "Linux" ]]; then
     export PATH=$HOME/.local/bin:$PATH
     export PATH=$PATH:~/.npm-global/bin
 
-    alias nn='cd /mnt/c/Users/36001/Dropbox/EXP/Notes && nvim ./'
-    alias nt='cd /mnt/c/Users/36001/Dropbox/GTD/Todo && nvim ./'
-    alias nr='cd /mnt/c/Users/36001/Dropbox/GTD/Daily_Report && nvim ./'
-    alias no='cd /mnt/c/Users/36001/Dropbox/GTD/OKR && nvim ./'
+    # alias nn='cd /mnt/c/Users/36001/Dropbox/EXP/Notes && nvim ./'
+    # alias nt='cd /mnt/c/Users/36001/Dropbox/GTD/Todo && nvim ./'
+    # alias nr='cd /mnt/c/Users/36001/Dropbox/GTD/Daily_Report && nvim ./'
+    # alias no='cd /mnt/c/Users/36001/Dropbox/GTD/OKR && nvim ./'
+
+    alias nn='cd ~/Dropbox/EXP/Notes && nvim ./'
+    alias ns='cd ~/Dropbox/EXP/Scripts && nvim ./'
+    alias nt='cd ~/Dropbox/GTD/Todo && nvim ./'
+    alias nr='cd ~/Dropbox/GTD/Daily_Report && nvim ./'
+    alias no='cd ~/Dropbox/GTD/OKR && nvim ./'
+
+    export GTK_IM_MODULE=fcitx
+    export QT_IM_MODULE=fcitx
+    export XMODIFIERS=@im=fcitx
+
+    # export GDK_SCALE=1.5
+    # export GDK_DPI_SCALE=0.5
+    # export QT_AUTO_SCREEN_SCALE_FACTOR=1
 else
 fi
 

@@ -14,7 +14,7 @@ set $mod Mod1
 # Font for window titles. Will also be used by the bar unless a different font
 # is used in the bar {} block below.
 #font pango:monospace 8
-font pango:Monaco 8
+font pango:Noto Sans 11
 
 # GET DEM BORDERS OUT OF HEREc:w
 #
@@ -170,7 +170,7 @@ bindsym $mod+x exec "alacritty -e ranger &> /tmp/ranger.log"
 # Start i3bar to display a workspace bar (plus the system information i3status
 # finds out, if available)
 bar {
-        status_command i3status
+        # status_command i3status
         tray_output primary
 }
 
@@ -190,7 +190,7 @@ exec --no-startup-id clash
 
 exec --no-startup-id dropbox
 exec --no-startup-id Snipaste
-exec --no-startup-id BreakTimer
+exec --no-startup-id /opt/BreakTimer/breaktimer
 
 # Suspend
 bindsym $mod+Shift+period exec systemctl suspend
@@ -207,4 +207,7 @@ bindsym XF86AudioMicMute        exec --no-startup-id pactl set-source-mute @DEFA
 
 exec_always --no-startup-id  sh ~/.config/i3/start.sh
 exec_always libinput-gestures-setup start
+
+#polybar
+exec_always --no-startup-id ~/.config/polybar/launch.sh &
 

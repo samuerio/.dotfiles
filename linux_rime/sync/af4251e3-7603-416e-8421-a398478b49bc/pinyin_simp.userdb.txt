@@ -1,0 +1,220 @@
+# Rime user dictionary
+#@/db_name	pinyin_simp
+#@/db_type	userdb
+#@/rime_version	1.11.2
+#@/tick	391
+#@/user_id	af4251e3-7603-416e-8421-a398478b49bc
+a 	啊	c=2 d=1.7291 t=391
+an jian 	按键	c=1 d=0.900325 t=391
+an zhuang 	安装	c=3 d=2.7059 t=391
+ba 	吧	c=1 d=0.822835 t=391
+ban 	班	c=2 d=1.66698 t=391
+ban ben 	版本	c=1 d=0.970446 t=391
+bang 	帮	c=1 d=0.843665 t=391
+bao cuo 	报错	c=2 d=1.99501 t=391
+bi 	比	c=3 d=2.70377 t=391
+bi ji ben 	笔记本	c=1 d=0.923116 t=391
+bian kuang 	边框	c=2 d=1.96042 t=391
+bing 	并	c=3 d=2.60724 t=391
+bu 	不	c=1 d=0.856415 t=391
+bu neng 	不能	c=2 d=1.50185 t=391
+bu ran 	不然	c=1 d=0.965605 t=391
+bu tong 	不同	c=2 d=1.89776 t=391
+cai 	才	c=1 d=0.798516 t=391
+can shu 	参数	c=1 d=0.980199 t=391
+cha bie 	差别	c=1 d=0.980199 t=391
+cha dao 	查到	c=1 d=0.802519 t=391
+cha kan 	查看	c=1 d=0.960789 t=391
+cha xun 	查询	c=1 d=0.985112 t=391
+chao 	吵	c=1 d=0.83527 t=391
+che 	车	c=1 d=0.690734 t=391
+chi dao 	迟到	c=2 d=1.64545 t=391
+chu li 	处理	c=3 d=2.46146 t=391
+chu men 	出门	c=1 d=0.946485 t=391
+chuang jian 	创建	c=1 d=0.995012 t=391
+da xie 	大写	c=1 d=0.99005 t=391
+dai 	带	c=1 d=0.955997 t=391
+dai biao 	代表	c=2 d=1.94575 t=391
+dai hao 	代号	c=1 d=0.932394 t=391
+dang qian 	当前	c=2 d=1.88872 t=391
+dang ran 	当然	c=1 d=0.806541 t=391
+dao 	到	c=3 d=2.04757 t=391
+dao ru 	导入	c=1 d=1 t=390
+dao zhi 	导致	c=1 d=0.995012 t=391
+de 	的	c=17 d=8.19749 t=391
+di er 	第二	c=1 d=0.786628 t=391
+di yi ge 	第一个	c=1 d=0.694197 t=391
+dian hua 	电话	c=1 d=0.97531 t=391
+diao 	掉	c=1 d=0.955997 t=391
+ding yi 	定义	c=1 d=0.965605 t=391
+dong tai 	动态	c=1 d=0.97531 t=391
+dou 	都	c=1 d=0.97531 t=391
+du li 	独立	c=1 d=0.97531 t=391
+en en 	恩恩	c=3 d=2.78669 t=391
+er 	二	c=1 d=0.960789 t=391
+er ji 	二级	c=1 d=0.891366 t=391
+fa sheng 	发生	c=1 d=1 t=391
+fan kui 	反馈	c=1 d=0.923116 t=391
+fen 	分	c=1 d=0.941765 t=391
+fen lei 	分类	c=4 d=3.57393 t=391
+fen shu 	分数	c=1 d=0.985112 t=391
+fen ye 	分页	c=1 d=0.970446 t=391
+feng 	封	c=1 d=0.946485 t=391
+gang 	刚	c=1 d=0.814647 t=391
+gao dong 	搞懂	c=1 d=0.927743 t=391
+ge 	个	c=2 d=1.65945 t=391
+gei 	给	c=0 d=0.0904837 t=391
+gen ju 	根据	c=1 d=0.927743 t=391
+geng 	更	c=2 d=1.90795 t=391
+geng xin 	更新	c=1 d=0.985112 t=391
+guan bi 	关闭	c=2 d=1.83115 t=391
+guan jian zi 	关键字	c=1 d=0.904837 t=391
+guan li 	管理	c=1 d=0.951229 t=391
+guo lai 	过来	c=1 d=0.923116 t=391
+hai gao 	还高	c=1 d=0.99005 t=391
+hai shi 	还是	c=3 d=2.4361 t=391
+hao 	好	c=3 d=2.89302 t=391
+hao lei 	好嘞	c=2 d=1.52678 t=391
+he 	和	c=5 d=3.15757 t=391
+he gui 	合规	c=7 d=4.42202 t=391
+hei se 	黑色	c=2 d=1.9605 t=391
+hou duan 	后端	c=1 d=0.960789 t=391
+hou mian 	后面	c=1 d=0.774916 t=391
+hu 	户	c=1 d=1 t=391
+huan jing 	环境	c=1 d=1 t=391
+hui 	会	c=3 d=2.67439 t=391
+ji 	级	c=2 d=1.89799 t=391
+ji cheng 	集成	c=1 d=0.951229 t=391
+jia 	加	c=1 d=0.88692 t=391
+jiang 	将	c=2 d=1.36621 t=391
+jiao 	交	c=1 d=0.704688 t=391
+jin tian 	今天	c=2 d=1.83272 t=391
+jin wan 	今晚	c=3 d=2.34409 t=391
+jin xing 	进行	c=1 d=0.923116 t=391
+jin zhi 	禁止	c=1 d=0.918512 t=391
+jiu 	就	c=1 d=0.932394 t=391
+jiu hao 	就好	c=1 d=0.918512 t=391
+jiu qu 	就去	c=1 d=0.860708 t=391
+ke yi 	可以	c=5 d=3.52241 t=391
+ku 	库	c=7 d=4.46647 t=391
+kuai qu 	快去	c=1 d=1 t=391
+lao lei 	劳累	c=1 d=0.878095 t=391
+le 	了	c=1 d=0.826959 t=391
+lei si 	类似	c=1 d=0.937067 t=391
+li mian 	里面	c=2 d=1.56196 t=391
+lou shang 	楼上	c=1 d=0.802519 t=391
+ma 	吗	c=4 d=3.23035 t=391
+mang 	忙	c=1 d=0.822835 t=391
+mei 	没	c=6 d=4.51219 t=391
+mei you 	没有	c=1 d=0.985112 t=391
+mi ma 	密码	c=1 d=0.826959 t=391
+ming tian 	明天	c=2 d=1.93131 t=391
+mou 	某	c=1 d=0.946485 t=391
+mu ban 	模板	c=1 d=0.737123 t=391
+na wo 	那我	c=1 d=0.782705 t=391
+ne 	呢	c=8 d=6.23172 t=391
+ni 	你	c=4 d=2.58601 t=391
+ni hao 	你好	c=1 d=1 t=391
+nong 	弄	c=1 d=0.847894 t=391
+ou 	偶	c=0 d=0.0904837 t=391
+pei zhi 	配置	c=5 d=4.36817 t=391
+qi dong 	启动	c=1 d=0.927743 t=391
+qian duan 	前端	c=1 d=0.951229 t=391
+qing chu 	清楚	c=1 d=0.860708 t=391
+qing kuang 	情况	c=1 d=0.843665 t=391
+qu 	去	c=2 d=1.56326 t=391
+que ren 	确认	c=1 d=0.927743 t=391
+rang 	让	c=1 d=0.790571 t=391
+ru he 	如何	c=6 d=4.61049 t=391
+ruan jian 	软件	c=1 d=0.941765 t=391
+sha 	啥	c=1 d=0.852144 t=391
+shang 	上	c=1 d=0.891366 t=391
+shang chuan 	上传	c=1 d=0.744532 t=391
+shang xian 	上线	c=3 d=1.95356 t=391
+shen 	身	c=1 d=0.951229 t=391
+sheng chan 	生产	c=2 d=1.88504 t=391
+shi 	是	c=7 d=5.44758 t=391
+shi fou 	是否	c=1 d=0.970446 t=391
+shi qing 	事情	c=1 d=0.900325 t=391
+shi shi 	试试	c=1 d=0.946485 t=391
+shi yong 	使用	c=3 d=2.61564 t=391
+shou ji 	手机	c=1 d=0.941765 t=391
+shu 	数	c=8 d=5.21524 t=391
+shu chu 	输出	c=1 d=0.99005 t=391
+shu ju ku 	数据库	c=1 d=0.99005 t=391
+shu zi 	数字	c=1 d=1 t=391
+shui jiao 	睡觉	c=1 d=1 t=391
+shuo 	说	c=5 d=3.18807 t=391
+shuo ming 	说明	c=1 d=0.909373 t=391
+si 	四	c=1 d=0.99005 t=391
+sui sheng 	随声	c=1 d=0.946485 t=391
+ta 	她	c=1 d=0.895834 t=391
+ta 	它	c=1 d=0.794534 t=391
+tai da 	太大	c=1 d=0.980199 t=391
+tian xie 	填写	c=2 d=1.851 t=391
+tui chu 	推出	c=1 d=0.995012 t=391
+wan 	晚	c=1 d=0.965605 t=391
+wei 	为	c=2 d=1.97032 t=391
+wei 	未	c=2 d=1.84091 t=391
+wei shen me 	为什么	c=1 d=0.937067 t=391
+wen 	问	c=1 d=0.878095 t=391
+wen dang 	文档	c=4 d=2.44935 t=391
+wen jian 	文件	c=3 d=2.43296 t=391
+wen jian ma 	文件吗	c=1 d=1 t=391
+wo 	我	c=10 d=6.37663 t=391
+xi tong 	系统	c=1 d=0.895834 t=391
+xi zao 	洗澡	c=0 d=0.0960789 t=391
+xi zao ba 	洗澡吧	c=1 d=0.965605 t=391
+xia 	下	c=1 d=0.882497 t=391
+xian ka 	显卡	c=2 d=1.9362 t=391
+xian zhi 	限制	c=2 d=1.81873 t=391
+xiang qi lai 	响起来	c=1 d=0.99005 t=391
+xie 	写	c=2 d=1.58689 t=391
+xing neng 	性能	c=2 d=1.91238 t=391
+xiu mian 	休眠	c=4 d=3.77018 t=391
+xu yao 	需要	c=3 d=2.14872 t=391
+ya 	呀	c=6 d=3.67506 t=391
+yan ge 	严格	c=1 d=0.985112 t=391
+yan zheng 	验证	c=1 d=0.941765 t=391
+yao 	要	c=1 d=0.985112 t=391
+ye 	也	c=5 d=3.39264 t=391
+ye shi 	也是	c=2 d=1.55375 t=391
+yi 	一	c=2 d=1.87451 t=391
+yi bao 	医保	c=1 d=0.70822 t=391
+yi ji 	一级	c=1 d=0.878095 t=391
+yi xia 	一下	c=1 d=0.818731 t=391
+yi zhi 	一直	c=1 d=0.985112 t=391
+ying wen 	英文	c=1 d=0.995012 t=391
+ying xiang 	影响	c=1 d=0.995012 t=391
+ying yong 	应用	c=2 d=1.4823 t=391
+yong 	用	c=1 d=0.995012 t=391
+yong hu ming 	用户名	c=1 d=0.818731 t=391
+you 	有	c=4 d=2.9041 t=391
+yu 	与	c=1 d=0.970446 t=391
+yu ju 	语句	c=1 d=0.99005 t=391
+yu ming 	域名	c=1 d=0.946485 t=391
+yue 	月	c=2 d=1.49221 t=391
+zai 	再	c=1 d=0.960789 t=391
+zai 	在	c=2 d=1.63379 t=391
+zen me 	怎么	c=1 d=0.99005 t=391
+zeng jia 	增加	c=1 d=0.97531 t=391
+zhe yang 	这样	c=1 d=0.831104 t=391
+zheng gai 	整改	c=1 d=0.918512 t=391
+zhi 	值	c=1 d=0.904837 t=391
+zhi ding 	指定	c=3 d=2.3321 t=391
+zhi qian 	之前	c=1 d=0.900325 t=391
+zhi xing 	执行	c=1 d=0.918512 t=391
+zhong 	中	c=3 d=2.53109 t=391
+zhu shou 	助手	c=1 d=1 t=391
+zhuang tai 	状态	c=1 d=0.970446 t=391
+zhui jia 	追加	c=2 d=1.37701 t=391
+zhun 	准	c=1 d=0.99005 t=391
+zi duan 	字段	c=1 d=0.985112 t=391
+zi fu 	字符	c=3 d=2.77473 t=391
+zi fu chuan 	字符串	c=1 d=0.965605 t=391
+zi ti 	字体	c=2 d=1.71534 t=391
+zuo 	做	c=2 d=1.58036 t=391
+zuo bian 	左边	c=1 d=0.891366 t=391
+zuo tian 	昨天	c=1 d=0.960789 t=391
+zuo yong 	作用	c=1 d=1.06372 t=391
+zuo yong ou gei 	作用偶给	c=1 d=0.909373 t=391
