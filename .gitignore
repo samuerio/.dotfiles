@@ -1,3 +1,6 @@
 __pycache__/
 ranger/plugins
 linux_rime/build
+linux_rime/sync
+linux_rime/pinyin_simp.userdb
+

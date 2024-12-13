@@ -163,7 +163,9 @@ mode "resize" {
 bindsym $mod+r mode "resize"
 
 bindsym $mod+Tab workspace back_and_forth
-bindsym $mod+Shift+a exec flameshot gui
+
+#Mod4为Super/Windows按键
+bindsym Mod4+Shift+5  exec flameshot gui
 
 bindsym $mod+x exec "alacritty -e ranger &> /tmp/ranger.log"
 
@@ -189,7 +191,6 @@ exec --no-startup-id clash
 #exec --no-startup-id xbindkeys
 
 exec --no-startup-id dropbox
-exec --no-startup-id Snipaste
 exec --no-startup-id /opt/BreakTimer/breaktimer
 
 # Suspend
