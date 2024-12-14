@@ -135,6 +135,15 @@
         {
             "before": [
                 "<leader>",
+                "r"
+            ],
+            "commands": [
+                "editor.action.rename"
+            ]
+        },
+        {
+            "before": [
+                "<leader>",
                 "f",
             ],
             "commands": [
@@ -531,4 +540,5 @@
     "editor.cursorSurroundingLines": 8,
     "editor.selectionHighlight": false,
     "editor.parameterHints.enabled": false,
+    "editor.fontFamily": "Monaco",
 }
