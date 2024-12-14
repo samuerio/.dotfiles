@@ -3,4 +3,5 @@ ranger/plugins
 linux_rime/build
 linux_rime/sync
 linux_rime/pinyin_simp.userdb
+linux_rime/user.yaml
 
