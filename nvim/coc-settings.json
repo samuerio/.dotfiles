@@ -148,7 +148,7 @@
     //以下路径必须用绝对路径,否则会找不到Jar包
     //"java.jdt.ls.vmargs": "-javaagent:/Users/zhenghe/source/github/.dotfiles/lombok/lombok-1.16.8.jar",
     //"java.jdt.ls.vmargs": "-javaagent:/Users/zhenghe/source/github/.dotfiles/lombok/lombok-1.18.32.jar",
-    "java.jdt.ls.vmargs": "-javaagent:/home/zhe/github/samuerio/.dotfiles/lombok/lombok-1.18.32.jar",
+    "java.jdt.ls.vmargs": "-javaagent:/home/zhe/github/.dotfiles/lombok/lombok-1.18.32.jar",
     "java.jdt.ls.lombokSupport.enabled": false,
     "java.trace.server": "verbose",
     "java.configuration.runtimes": [

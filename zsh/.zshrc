@@ -209,13 +209,20 @@ elif [[ $(uname) == "Linux" ]]; then
     alias nr='cd ~/Dropbox/GTD/Daily_Report && nvim ./'
     alias no='cd ~/Dropbox/GTD/OKR && nvim ./'
 
+    #微信这样的应用能识别到输入法
     export GTK_IM_MODULE=fcitx
     export QT_IM_MODULE=fcitx
     export XMODIFIERS=@im=fcitx
 
+    #会作用到dbeaver上, 会导致与xResource中的dpi配置冲突，不要同时配置！只使用xResource中的dpi配置
+    # export GDK_BACKEND=x11
     # export GDK_SCALE=1.5
     # export GDK_DPI_SCALE=0.5
     # export QT_AUTO_SCREEN_SCALE_FACTOR=1
+    #
+    export NVM_DIR="$HOME/.nvm"
+    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
+    [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
 else
 fi
 
@@ -235,3 +242,7 @@ export VISUAL=nvim
 export EDITOR="$VISUAL"
 export TERM=xterm-256color
 
+
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
+[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion

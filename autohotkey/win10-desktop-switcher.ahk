@@ -118,29 +118,10 @@ OutputDebug, [loading] desktops: %DesktopCount% current: %CurrentDesktop%
 ; User config!
 ; This section binds the key combo to the switch/create/delete actions
 LALT & 1::switchDesktopByNumber(1)
-LALT & 2::
-    If(GetKeyState("Shift", "D"))
-        Send, {F1}
-    ELSE
-        switchDesktopByNumber(2)   
-return
+LALT & 2::switchDesktopByNumber(2)   
 LALT & 3::switchDesktopByNumber(3)
-;win10也要开启PrtSc截图按键的功能
-LALT & 4::
-    If(GetKeyState("Shift", "D"))
-        ;打开截图的同时，会打开浏览器，并输入法失灵
-        ;Send, {LWin down}{Shift down}s{LWin up}{Shift up}
-
-        Send, {PrintScreen}
-    ELSE
-        switchDesktopByNumber(4)   
-return
-LALT & 5::
-    If(GetKeyState("Shift", "D"))
-        Send, {F1}
-    ELSE
-        switchDesktopByNumber(5)   
-return
+LALT & 4::switchDesktopByNumber(4)   
+LALT & 5::switchDesktopByNumber(5)   
 LALT & 6::switchDesktopByNumber(6)
 LALT & 7::switchDesktopByNumber(7)
 LALT & 8::switchDesktopByNumber(8)
