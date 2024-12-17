@@ -185,7 +185,7 @@
                         ]
                     },
                     {
-                        "description": "flameshot shortcut CMD+SHIFT+X map to ALT+SHIFT+A",
+                        "description": "flameshot ALT+SHIFT+A(配合flameshot-conf-Shortcuts-Capture screen设置为fn+f1)",
                         "manipulators": [
                             {
                                 "from": {
@@ -202,10 +202,9 @@
                                 },
                                 "to": [
                                     {
-                                        "key_code": "x",
+                                        "key_code": "f1",
                                         "modifiers": [
-                                            "left_command",
-                                            "left_shift"
+                                            "fn"
                                         ]
                                     }
                                 ],
@@ -640,6 +639,16 @@
                             "to": [
                                 {
                                     "key_code": "left_command"
+                                }
+                            ]
+                        },
+                        {
+                            "from": {
+                                "key_code": "caps_lock"
+                            },
+                            "to": [
+                                {
+                                    "key_code": "left_control"
                                 }
                             ]
                         }
