@@ -91,6 +91,7 @@ nmap 'l <Action>(JumpToLastChange)
 "leader
 nmap <leader>o <Action>(FileStructurePopup)
 nmap <leader>F <Action>(ReformatCode)
+nmap <leader>r <Action>(RenameElement)
 
 nmap <leader>f <Action>(GotoFile)
 nmap <leader>s <Action>(GotoSymbol)
