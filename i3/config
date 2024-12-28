@@ -200,6 +200,7 @@ bar {
         tray_output primary
 }
 
+
 # ------------------------------------------
 # CUSTOM KEYS START
 # ------------------------------------------
@@ -216,6 +217,8 @@ exec --no-startup-id clash
 
 exec --no-startup-id dropbox
 exec --no-startup-id /opt/BreakTimer/breaktimer
+exec --no-startup-id xautolock -time 5 -locker '~/.config/i3/lock.sh'
+exec --no-startup-id dunst
 
 # Suspend
 bindsym $mod+Shift+period exec systemctl suspend
