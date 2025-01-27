@@ -1,0 +1,1 @@
+require('fittencode').setup({})

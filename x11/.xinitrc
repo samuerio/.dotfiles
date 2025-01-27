@@ -50,9 +50,9 @@ fi
 
 redshift &
 
-# feh --bg-center ~/Dropbox/壁纸/unsplash-Will\ Swann.jpg &
-# feh --bg-fill ~/Dropbox/壁纸/kazetachinu050.jpg &
-feh --bg-fill ~/Dropbox/壁纸/1451566265534_.pic_hd.jpg &
+# feh --bg-center ~/Dropbox/Wallpaper/unsplash-Will\ Swann.jpg &
+# feh --bg-fill ~/Dropbox/Wallpaper/kazetachinu050.jpg &
+feh --bg-fill ~/Dropbox/Wallpaper/1451566265534_.pic_hd.jpg &
 
 #xdpyinfo | grep -B2 resolution
 #设置Xserver的dpi配置
