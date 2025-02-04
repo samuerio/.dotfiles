@@ -541,4 +541,13 @@
     "editor.selectionHighlight": false,
     "editor.parameterHints.enabled": false,
     "editor.fontFamily": "Monaco",
+    "java.jdt.ls.java.home": "/usr/lib/jvm/java-8-openjdk",
+    "java.jdt.ls.vmargs": "-javaagent:/home/zhe/github/.dotfiles/lombok/lombok-1.18.32.jar",
+    "java.jdt.ls.lombokSupport.enabled": false,
+    "java.configuration.runtimes": [
+        {
+            "name": "JavaSE-1.8",
+            "path": "/usr/lib/jvm/java-8-openjdk"
+        }
+    ],
 }

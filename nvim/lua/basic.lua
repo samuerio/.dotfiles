@@ -25,7 +25,6 @@ end
 -- Use an on_attach function to only map the following keys
 -- after the language server attaches to the current buffer
 local on_attach = function(client, bufnr)
-
     lsp_highlight_document(client)
 
     -- Enable completion triggered by <c-x><c-o>
@@ -343,8 +342,8 @@ require("nvim-tree").setup({
         adaptive_size = true,
         mappings = {
             list = {
-                { key = "u", action = "dir_up" },
-                { key = 'o', action = "edit" },
+                { key = "u",     action = "dir_up" },
+                { key = 'o',     action = "edit" },
                 { key = '<C-e>', action = "" },
             },
         },

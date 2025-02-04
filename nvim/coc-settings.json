@@ -52,20 +52,20 @@
         //"file-load-strategy": "directly-opened-and-on-import"
         //}
         //},
-        "solidity_ls": {
-            "command": "solidity-language-server",
-            "args": [
-                "--stdio"
-            ],
-            "rootPatterns": [
-                ".git",
-                "package.json"
-            ],
-            "trace.server": "verbose",
-            "filetypes": [
-                "solidity"
-            ]
-        },
+        //"solidity_ls": {
+        //    command": "solidity-language-server",
+        //    "args": [
+        //        "--stdio"
+        //    ],
+        //    "rootPatterns": [
+        //        ".git",
+        //        "package.json"
+        //    ],
+        //    "trace.server": "verbose",
+        //    "filetypes": [
+        //        "solidity"
+        //    ]
+        //},
         "vimls": {
             "command": "vim-language-server",
             "args": [
@@ -156,13 +156,14 @@
             "name": "JavaSE-1.8",
             //"path": "/Library/Java/JavaVirtualMachines/adoptopenjdk-8.jdk/Contents/Home"
             "path": "/usr/lib/jvm/java-8-openjdk"
-        },
-        {
-            "name": "JavaSE-17",
-            //"path": "/Library/Java/JavaVirtualMachines/openjdk-17.jdk/Contents/Home"
-            "path": "/usr/lib/jvm/java-17-openjdk"
         }
+        //{
+        //    "name": "JavaSE-17",
+        //    //"path": "/Library/Java/JavaVirtualMachines/openjdk-17.jdk/Contents/Home"
+        //    "path": "/usr/lib/jvm/java-17-openjdk"
+        //}
     ],
     "java.compile.nullAnalysis.mode": "automatic",
-    "Lua.telemetry.enable": true
+    "Lua.telemetry.enable": true,
+    "@nomicfoundation/coc-solidity.telemetry": true
 }
