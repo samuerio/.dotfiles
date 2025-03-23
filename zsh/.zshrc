@@ -223,6 +223,13 @@ elif [[ $(uname) == "Linux" ]]; then
     export NVM_DIR="$HOME/.nvm"
     [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
     [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
+
+    #sudo pacman -S pyenv
+    #pyenv versions
+    #pyenv global <version> 所有shell会话生效
+    #pyenv local <version> 当前shell会话生效
+    #pyenv version
+    export PATH="$HOME/.pyenv/shims:$PATH"
 else
 fi
 

@@ -1,0 +1,103 @@
+// Zed keymap
+//
+// For information on binding keys, see the Zed
+// documentation: https://zed.dev/docs/key-bindings
+//
+// To see the default key bindings run `zed: open default keymap`
+// from the command palette.
+[
+  {
+    "bindings": {
+      "ctrl-\\": "workspace::NewCenterTerminal",
+      "ctrl-t": "terminal_panel::ToggleFocus",
+      "ctrl-a g": "git_panel::ToggleFocus",
+      "ctrl-a G": "git::Diff"
+    }
+  },
+  {
+    "context": "Workspace",
+    "bindings": {
+      // "shift shift": "file_finder::Toggle"
+      "ctrl-e": "workspace::ToggleLeftDock",
+      "space j": "outline_panel::ToggleFocus",
+      "ctrl-n": null,
+      "ctrl-p": null
+    }
+  },
+  {
+    "context": "Editor",
+    "bindings": {
+      // "j k": ["workspace::SendKeystrokes", "escape"]
+      "ctrl-e": "workspace::ToggleLeftDock",
+      "space j": "outline_panel::ToggleFocus"
+    }
+  },
+  {
+    "context": "Terminal",
+    "bindings": {
+      "ctrl-n": ["terminal::SendKeystroke", "down"],
+      "ctrl-p": ["terminal::SendKeystroke", "up"],
+      "space a e": "assistant::InlineAssist",
+      "space a a": "assistant::ToggleFocus"
+    }
+  },
+  {
+    "context": "VimControl && !menu",
+    "bindings": {
+      "enter": "editor::OpenExcerpts"
+    }
+  },
+  {
+    "context": "Editor && vim_mode == normal && !VimWaiting && !menu",
+    "bindings": {
+      "z a": "editor::ToggleFold",
+      "g d": "editor::GoToDefinition",
+      "g y": "editor::GoToTypeDefinition",
+      "g i": "editor::GoToImplementation",
+      "g r": "editor::FindAllReferences",
+      "S": "workspace::Save",
+      "K": "editor::Hover",
+      "X": "pane::CloseActiveItem",
+      "] d": "editor::GoToDiagnostic",
+      "[ d": "editor::GoToPreviousDiagnostic",
+      "] c": "editor::GoToHunk",
+      "[ c": "editor::GoToPreviousHunk",
+      "d o": "editor::ToggleSelectedDiffHunks", //Expand diff hunk
+      "d O": "git::ToggleStaged",
+      "d p": "git::Restore",
+      "d u": "git::StageAndNext",
+      "d U": "git::UnstageAndNext",
+      "t h": "pane::ActivatePreviousItem",
+      "t l": "pane::ActivateNextItem",
+      "t o": "pane::CloseInactiveItems",
+      "t n": "workspace::NewFile",
+      "space g b": "editor::ToggleGitBlame",
+      // "' l": "workbench.action.navigateToLastEditLocation" zed 还未实现
+      "space o": "outline::Toggle",
+      "space F": "editor::Format",
+      "space r": "editor::Rename",
+      "space f": "file_finder::Toggle",
+      "space s": "project_symbols::Toggle",
+      "space h": "pane::DeploySearch",
+      "space q": "editor::ToggleCodeActions",
+      "space n": "pane::RevealInProjectPanel",
+      "space m ": "markdown::OpenPreviewToTheSide",
+      "space a a": "assistant::ToggleFocus",
+      "space a e": "assistant::InlineAssist"
+    }
+  },
+  {
+    "context": "Editor && vim_mode == insert && !menu",
+    "bindings": {
+      "ctrl-j": "editor::ShowCompletions",
+      "ctrl-h": "editor::Backspace"
+    }
+  },
+  {
+    "context": "Editor && vim_mode == visual && !menu",
+    "bindings": {
+      "space a a": "assistant::QuoteSelection",
+      "space a e": "assistant::InlineAssist"
+    }
+  }
+]
