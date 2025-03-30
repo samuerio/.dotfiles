@@ -19,7 +19,42 @@ vim.cmd([[
 
     highlight! link NERDTreeFlags NERDTreeDir
     highlight NERDTreeFile ctermfg=14
+
 ]])
 
 utils.nmap('<C-e>', ':NERDTreeToggle<CR>')
 utils.nmap('<leader>n', ':NERDTreeFind<CR>')
+
+-- plugins/nerdtree.lua
+local function avante_add_files(dirnode)
+    -- 获取当前节点的文件路径（转换为字符串）
+    local segments = dirnode.path.pathSegments
+    local filepath = "/" .. table.concat(segments, "/")
+    print(filepath)
+
+    local relative_path = require("avante.utils").relative_path(filepath)
+    local sidebar = require("avante").get()
+    local is_open = sidebar:is_open()
+
+    if not is_open then
+        require("avante.api").ask()
+        sidebar = require("avante").get()
+    end
+
+    sidebar.file_selector:add_selected_file(relative_path)
+
+    if not is_open then
+        sidebar.file_selector:remove_selected_file("NERD_tree_tab_1")
+    end
+end
+
+vim.api.nvim_create_autocmd("VimEnter", {
+    callback = function()
+        vim.fn.NERDTreeAddKeyMap({
+            key = "aa",
+            callback = avante_add_files,
+            quickhelpText = "Add to Avante",
+            scope = "Node",
+        })
+    end,
+})

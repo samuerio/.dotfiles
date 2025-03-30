@@ -230,6 +230,9 @@ elif [[ $(uname) == "Linux" ]]; then
     #pyenv local <version> 当前shell会话生效
     #pyenv version
     export PATH="$HOME/.pyenv/shims:$PATH"
+
+    export AIDER_CACHE_PROMPTS=true
+    export CACHE_KEEPALIVE_PINGS=6
 else
 fi
 

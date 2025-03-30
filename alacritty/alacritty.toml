@@ -16,6 +16,7 @@
   bindings = [{key = "N", mods = "Control | Shift" , action = "CreateNewWindow" }]
 
 
+
 # Colors (Nord)
 
 # Default colors

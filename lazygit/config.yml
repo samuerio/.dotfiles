@@ -216,3 +216,18 @@ keybinding:
         init: 'i'
         update: 'u'
         bulkMenu: 'b'
+customCommands:
+  - key: '<c-g>'  
+    context: 'commits'
+    # command: "git show {{.SelectedLocalCommit.Sha}}"
+    command: "git d {{.SelectedLocalCommit.Sha}}^!"
+    subprocess: true
+    description: "Show selected commit"
+    stream: true
+  - key: '<c-g>'  
+    context: 'files'
+    # command: "git show {{.SelectedLocalCommit.Sha}}"
+    command: "git d {{.SelectedLocalCommit.Sha}}^!"
+    subprocess: true
+    description: "Show selected commit"
+    stream: true
