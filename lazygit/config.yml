@@ -224,10 +224,9 @@ customCommands:
     subprocess: true
     description: "Show selected commit"
     stream: true
-  - key: '<c-g>'  
+  - key: '<c-g>'
     context: 'files'
-    # command: "git show {{.SelectedLocalCommit.Sha}}"
-    command: "git d {{.SelectedLocalCommit.Sha}}^!"
+    command: "git d HEAD -- {{.SelectedFile.Name}}"
     subprocess: true
-    description: "Show selected commit"
+    description: "Show selected file changes"
     stream: true

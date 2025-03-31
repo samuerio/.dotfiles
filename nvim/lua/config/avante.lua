@@ -3,11 +3,11 @@ require('avante').setup({
     provider = "openai",
     auto_suggestions_provider = "openai", -- Since auto-suggestions are a high-frequency operation and therefore expensive, it is recommended to specify an inexpensive provider or even a free provider: copilot
     openai = {
-        endpoint = "https://api.siliconflow.cn/v1",
+        -- endpoint = "https://api.siliconflow.cn/v1",
         -- model = "Qwen/Qwen2.5-72B-Instruct",
-        model = "deepseek-ai/DeepSeek-V3",
-        -- endpoint = "https://api.deepseek.com/v1",
-        -- model = "deepseek-chat",
+        -- model = "deepseek-ai/DeepSeek-V3",
+        endpoint = "https://api.deepseek.com/v1",
+        model = "deepseek-chat",
         -- model = "deepseek-reasoner",
         -- endpoint = "https://openrouter.ai/api/v1",
         -- model = "qwen/qwen-2.5-coder-32b-instruct",
