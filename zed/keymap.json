@@ -62,16 +62,11 @@
       "[ d": "editor::GoToPreviousDiagnostic",
       "] c": "editor::GoToHunk",
       "[ c": "editor::GoToPreviousHunk",
-      "d o": "editor::ToggleSelectedDiffHunks", //Expand diff hunk
-      "d O": "git::ToggleStaged",
-      "d p": "git::Restore",
-      "d u": "git::StageAndNext",
-      "d U": "git::UnstageAndNext",
       "t h": "pane::ActivatePreviousItem",
       "t l": "pane::ActivateNextItem",
       "t o": "pane::CloseInactiveItems",
       "t n": "workspace::NewFile",
-      "space g b": "editor::ToggleGitBlame",
+      "space g b": "git::Blame",
       // "' l": "workbench.action.navigateToLastEditLocation" zed 还未实现
       "space o": "outline::Toggle",
       "space F": "editor::Format",
@@ -98,6 +93,25 @@
     "bindings": {
       "space a a": "assistant::QuoteSelection",
       "space a e": "assistant::InlineAssist"
+    }
+  },
+  {
+    "context": "Editor && vim_mode == visual && !VimWaiting && !menu",
+    "bindings": {
+      "d": ["workspace::SendKeystrokes", "\" _ d"],
+      "c": ["workspace::SendKeystrokes", "\" _ c"],
+      //剪切统一用v x
+      "x": ["workspace::SendKeystrokes", "\" + x"]
+    }
+  },
+  {
+    "context": "Editor && vim_mode == normal && !VimWaiting && !menu",
+    "bindings": {
+      "d": ["workspace::SendKeystrokes", "\" _ d"],
+      "D": ["workspace::SendKeystrokes", "\" _ d $"],
+      "c": ["workspace::SendKeystrokes", "\" _ c"],
+      "C": ["workspace::SendKeystrokes", "\" _ d $ a"],
+      "x": ["workspace::SendKeystrokes", "\" _ x"]
     }
   }
 ]

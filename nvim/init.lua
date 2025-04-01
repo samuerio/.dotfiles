@@ -75,29 +75,23 @@ utils.nmap('<Down>', '<Nop>')
 utils.nmap('<Left>', '<Nop>')
 utils.nmap('<Right>', '<Nop>')
 
--- , 作为第二leader按键
-utils.nmap(',,', ',')
-
--- delete, cut
+-- delete
 utils.nmap('d', '"_d')
-utils.vmap('d', '"_d')
 utils.nmap('D', '"_D')
 utils.nmap('c', '"_c')
-utils.vmap('c', '"_c')
 utils.nmap('C', '"_C')
 utils.nmap('S', '"_S')
 utils.nmap('x', '"_x')
-utils.vmap('x', '"_x')
-vim.cmd([[
-    nnoremap ,d "+d
-    vnoremap ,d "+d
-    nnoremap ,D "+D
-]])
+utils.vmap('d', '"_d')
+utils.vmap('c', '"_c')
+
+-- cut
+utils.vmap('x', '"+x')
 
 -- quick save, quit, insert
 utils.nmap('Q', ':qa<CR>')
 utils.nmap('S', ':w<CR>')
-utils.nmap('L', '"_S')
+-- utils.nmap('L', '"_S') 使用cc替代
 
 -- window
 utils.nmap('<C-h>', '<C-w>h')
