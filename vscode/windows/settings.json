@@ -346,14 +346,6 @@
         },
         {
             "before": [
-                "L"
-            ],
-            "after": [
-                "S"
-            ]
-        },
-        {
-            "before": [
                 "<C-h>"
             ],
             "after": [
@@ -508,21 +500,10 @@
             ],
             "after": [
                 "\"",
-                "_",
+                "+",
                 "x"
             ]
-        },
-        {
-            "before": [
-                ",",
-                "d"
-            ],
-            "after": [
-                "\"",
-                "+",
-                "d"
-            ]
-        },
+        }
     ],
     "editor.stickyScroll.enabled": false,
     "editor.renderWhitespace": "none",

@@ -8,24 +8,21 @@ map <C-I> <Action>(Forward)
 imap <C-J> <Action>(CodeCompletion)
 
 
-"delete, cut
+"delete
 nnoremap d "_d
-vnoremap d "_d
 nnoremap D "_D
 nnoremap c "_c
-vnoremap c "_c
 nnoremap C "_C
 nnoremap S "_S
 nnoremap x "_x
-vnoremap x "_x
-nnoremap ,d "+d
-vnoremap ,d "+d
-nnoremap ,D "+D
+vnoremap d "_d
+vnoremap c "_c
 
+"cut
+vnoremap x "_x
 
 nnoremap Q :qa<CR>
 nnoremap S :w<CR>
-nnoremap L S
 
 
 "window

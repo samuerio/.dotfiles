@@ -135,6 +135,15 @@
         {
             "before": [
                 "<leader>",
+                "r"
+            ],
+            "commands": [
+                "editor.action.rename"
+            ]
+        },
+        {
+            "before": [
+                "<leader>",
                 "f",
             ],
             "commands": [
@@ -337,14 +346,6 @@
         },
         {
             "before": [
-                "L"
-            ],
-            "after": [
-                "S"
-            ]
-        },
-        {
-            "before": [
                 "<C-h>"
             ],
             "after": [
@@ -499,19 +500,8 @@
             ],
             "after": [
                 "\"",
-                "_",
-                "x"
-            ]
-        },
-        {
-            "before": [
-                ",",
-                "d"
-            ],
-            "after": [
-                "\"",
                 "+",
-                "d"
+                "x"
             ]
         },
     ],
