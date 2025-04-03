@@ -209,6 +209,7 @@ elif [[ $(uname) == "Linux" ]]; then
     alias nr='cd ~/Dropbox/GTD/Daily_Report && nvim ./'
     alias no='cd ~/Dropbox/GTD/OKR && nvim ./'
 
+    #可以使用该命令将git diff赋值给AI，得到commit message，也可以直接使用aider /commit生成commit message并提交
     alias gdc='git diff | xclip -selection clipboard'
 
     #微信这样的应用能识别到输入法
