@@ -6,3 +6,4 @@ linux_rime/pinyin_simp.userdb
 linux_rime/user.yaml
 .env
 
+.aider*

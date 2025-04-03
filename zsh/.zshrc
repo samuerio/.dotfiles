@@ -209,6 +209,8 @@ elif [[ $(uname) == "Linux" ]]; then
     alias nr='cd ~/Dropbox/GTD/Daily_Report && nvim ./'
     alias no='cd ~/Dropbox/GTD/OKR && nvim ./'
 
+    alias gdc='git diff | xclip -selection clipboard'
+
     #微信这样的应用能识别到输入法
     export GTK_IM_MODULE=fcitx
     export QT_IM_MODULE=fcitx
