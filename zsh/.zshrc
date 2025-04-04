@@ -210,7 +210,7 @@ elif [[ $(uname) == "Linux" ]]; then
     alias no='cd ~/Dropbox/GTD/OKR && nvim ./'
 
     #可以使用该命令将git diff赋值给AI，得到commit message，也可以直接使用aider /commit生成commit message并提交
-    alias gdc ='git diff --cached | xclip -selection clipboard'
+    alias gdc='git diff --cached | xclip -selection clipboard'
     alias c2pdiff='code2prompt ./ --diff --template ~/github/.dotfiles/prompt-template/code2prompt/write-git-commit.hbs'
 
     #微信这样的应用能识别到输入法
