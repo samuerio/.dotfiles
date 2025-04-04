@@ -50,6 +50,7 @@ Plug 'dhruvasagar/vim-table-mode'
 Plug 'neoclide/coc.nvim', {'branch': 'release'}
 
 Plug 'nvim-treesitter/nvim-treesitter', {'do': ':TSUpdate'}
+Plug 'nvim-treesitter/nvim-treesitter-textobjects'
 
 " One half with treesitter
 Plug 'CodeGradox/onehalf-lush'

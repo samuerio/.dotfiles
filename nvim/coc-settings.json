@@ -165,5 +165,8 @@
     ],
     "java.compile.nullAnalysis.mode": "automatic",
     "Lua.telemetry.enable": true,
-    "@nomicfoundation/coc-solidity.telemetry": true
+    "@nomicfoundation/coc-solidity.telemetry": true,
+    "pyright.inlayHints.functionReturnTypes": false,
+    "pyright.inlayHints.variableTypes": false,
+    "pyright.inlayHints.parameterTypes": false
 }
