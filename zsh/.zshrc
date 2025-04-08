@@ -211,7 +211,11 @@ elif [[ $(uname) == "Linux" ]]; then
 
     #可以使用该命令将git diff赋值给AI，得到commit message，也可以直接使用aider /commit生成commit message并提交
     alias gdc='git diff --cached | xclip -selection clipboard'
-    alias c2pdiff='code2prompt ./ --diff --template ~/github/.dotfiles/prompt-template/code2prompt/write-git-commit.hbs'
+    alias c2p-diff='code2prompt ./ --diff --template ~/github/.dotfiles/prompt-template/code2prompt/write-git-commit.hbs'
+    alias c2p-readme='code2prompt ./ --diff --template ~/github/.dotfiles/prompt-template/code2prompt/write-github-readme.hbs'
+    alias c2p-doc='code2prompt ./ --diff --template ~/github/.dotfiles/prompt-template/code2prompt/document-the-code.hbs'
+    alias c2p-clean='code2prompt ./ --diff --template ~/github/.dotfiles/prompt-template/code2prompt/clean-up-code.hbs'
+
 
     #微信这样的应用能识别到输入法
     export GTK_IM_MODULE=fcitx
@@ -237,6 +241,7 @@ elif [[ $(uname) == "Linux" ]]; then
 
     export AIDER_CACHE_PROMPTS=true
     export CACHE_KEEPALIVE_PINGS=6
+
 else
 fi
 

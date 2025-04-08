@@ -32,3 +32,6 @@ bind g display-popup -E -d "#{pane_current_path}" -w 100% -h 100% "lazygit"
 # tmux popup -E -w 100% -h 100% "lazygit -w $PWD"
 # tmux popup -E -d "$PWD" -w 100% -h 100% "gitui"
 
+#Nvim keymap hack: C-enter 映射为自定义码值, 由于C-enter的码值和enter是一样的，
+#会导致nvim无法识别，故使用自定义码值(nvim中也定义将该自定义码值识别为C-CR)
+bind -n C-e send-keys Escape [ 13 ';' 5 u

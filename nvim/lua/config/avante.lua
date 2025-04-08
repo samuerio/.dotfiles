@@ -1,3 +1,5 @@
+vim.cmd([[set <C-CR>=\e[13;5u]])
+
 require('avante_lib').load()
 require('avante').setup({
     -- provider = "aihubmix",
@@ -56,6 +58,12 @@ require('avante').setup({
             model = "deepseek-ai/DeepSeek-V3",
         },
     },
+
+    mappings = {
+        submit = {
+            insert = "<C-CR>",
+        },
+    }
     -- rag_service = {
     --     enabled = false,                        -- Enables the RAG service
     --     host_mount = os.getenv("HOME"),         -- Host mount path for the rag service

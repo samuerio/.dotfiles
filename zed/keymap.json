@@ -115,5 +115,14 @@
       "C": ["workspace::SendKeystrokes", "\" _ d $ a"],
       "x": ["workspace::SendKeystrokes", "\" _ x"]
     }
+  },
+  {
+    "context": "Dock || Editor",
+    "bindings": {
+      "ctrl-h": "workspace::ActivatePaneLeft",
+      "ctrl-l": "workspace::ActivatePaneRight",
+      "ctrl-k": "workspace::ActivatePaneUp",
+      "ctrl-j": "workspace::ActivatePaneDown"
+    }
   }
 ]
