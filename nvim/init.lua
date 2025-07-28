@@ -55,6 +55,7 @@ vim.opt.foldopen = vim.opt.foldopen - 'block'
 vim.opt.clipboard = 'unnamedplus'
 vim.opt.laststatus = 2
 vim.opt.foldlevelstart = 99
+vim.opt.fileencodings = "utf-8,gbk"
 
 --------------------------------------------------------------------------------
 -- Features

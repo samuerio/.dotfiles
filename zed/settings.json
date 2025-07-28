@@ -7,6 +7,14 @@
 // custom settings, run `zed: open default settings` from the
 // command palette (cmd-shift-p / ctrl-shift-p)
 {
+  "edit_predictions": {
+    "mode": "eager",
+    "copilot": {
+      "proxy": null,
+      "proxy_no_verify": null
+    },
+    "enabled_in_assistant": false
+  },
   "features": {
     "edit_prediction_provider": "zed"
   },
@@ -42,7 +50,7 @@
   // "buffer_font_family": "JetBrainsMono Nerd Font",
   "buffer_font_family": "Monaco",
   "buffer_font_weight": 500,
-  "show_completions_on_input": true,
+  "show_completions_on_input": false,
   "tab_bar": {
     "show_nav_history_buttons": false
   },

@@ -117,7 +117,7 @@
     }
   },
   {
-    "context": "Dock || Editor",
+    "context": "Dock || (Editor && vim_mode == normal)",
     "bindings": {
       "ctrl-h": "workspace::ActivatePaneLeft",
       "ctrl-l": "workspace::ActivatePaneRight",
