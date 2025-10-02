@@ -54,6 +54,8 @@ redshift &
 # feh --bg-fill ~/Dropbox/Wallpaper/kazetachinu050.jpg &
 feh --bg-fill ~/Dropbox/Wallpaper/1451566265534_.pic_hd.jpg &
 
+# xinput disable 13
+
 #xdpyinfo | grep -B2 resolution
 #设置Xserver的dpi配置
 xrandr --dpi 144

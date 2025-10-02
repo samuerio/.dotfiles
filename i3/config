@@ -192,7 +192,8 @@ workspace_auto_back_and_forth no
 
 #Mod4为Super/Windows按键
 # bindsym Mod4+Shift+5  exec flameshot gui
-bindsym $mod+shift+a  exec flameshot gui
+# bindsym $mod+shift+a  exec flameshot gui
+bindsym $mod+shift+a  exec QT_ENABLE_HIGHDPI_SCALING=0 flameshot gui
 
 bindsym $mod+x exec "alacritty -e ranger &> /tmp/ranger.log"
 
