@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=BreakTimer
+Comment=Save yourself from RSI and eye-strain
+Exec=/opt/BreakTimer/breaktimer
+Icon=/opt/BreakTimer/resources/tray/icon.png
+Terminal=false
+Categories=分类;

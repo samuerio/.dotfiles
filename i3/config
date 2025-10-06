@@ -219,7 +219,7 @@ exec --no-startup-id clash
 #exec --no-startup-id xmodmap ~/.Xmodmap
 #exec --no-startup-id xbindkeys
 
-exec --no-startup-id dropbox
+exec --no-startup-id env http_proxy=http://127.0.0.1:7890 dropbox
 exec --no-startup-id /opt/BreakTimer/breaktimer
 exec --no-startup-id dunst
 
