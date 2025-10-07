@@ -243,7 +243,8 @@ bindsym XF86AudioMute           exec --no-startup-id pactl set-sink-mute @DEFAUL
 bindsym XF86AudioMicMute        exec --no-startup-id pactl set-source-mute @DEFAULT_SOURCE@ toggle
 
 exec_always --no-startup-id  sh ~/.config/i3/start.sh
-exec_always libinput-gestures-setup start
+#配置触控板多指手势
+#exec_always libinput-gestures-setup start
 
 #polybar
 exec_always --no-startup-id ~/.config/polybar/launch.sh &
