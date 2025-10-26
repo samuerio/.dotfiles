@@ -229,6 +229,9 @@ bindsym $mod+shift+c exec xset s on && xset +dpms && notify-send "disable caffin
 # 会与caffine mode冲突
 # exec --no-startup-id xautolock -time 5 -locker '~/.config/i3/lock.sh'
 
+#libinput toggle tapping
+bindsym $mod+t exec  sh ~/.config/i3/toggle_tapping.sh && notify-send "toggle tapping"
+
 # Suspend
 bindsym $mod+Shift+period exec systemctl suspend
 

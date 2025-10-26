@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=PDMaas
+Comment=
+Exec=/opt/PDMaas/pdmaas-ce
+Icon=
+Terminal=false
+Categories=分类;
