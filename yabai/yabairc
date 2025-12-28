@@ -119,10 +119,9 @@ yabai -m signal --add event=window_destroyed action="${ubersicht_spaces_refresh_
 yabai -m signal --add event=window_focused action="${ubersicht_spaces_refresh_command}"
 yabai -m signal --add event=window_title_changed action="${ubersicht_spaces_refresh_command}"
 
-# spacebar padding on top screen
-#SPACEBAR_HEIGHT=$(spacebar -m config height)
-#yabai -m config external_bar all:0:$SPACEBAR_HEIGHT
-yabai -m config external_bar all:0:26
+# SPACEBAR_HEIGHT=$(spacebar -m config height)
+# yabai -m config external_bar all:0:$SPACEBAR_HEIGHT
+yabai -m config external_bar all:0:26 #使用spacebar -m config height的值
 
 set +x
 printf "yabai: configuration loaded...\\n"
