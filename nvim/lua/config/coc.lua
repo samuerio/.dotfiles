@@ -96,6 +96,7 @@ vim.cmd([[
 	command! -nargs=* -range CocAction :call CocActionAsync('codeActionRange', <line1>, <line2>, <f-args>)
     function! ToggleOutline() abort
       let winid = coc#window#find('cocViewId', 'OUTLINE')
+      echo 'outline winid = ' . winid
       if winid == -1
         call CocActionAsync('showOutline', 1)
       else
@@ -103,6 +104,7 @@ vim.cmd([[
       endif
     endfunction
 ]])
+
 
 -- :CocInstall coc-yank
 utils.nmap('<leader>y', ':<C-u>CocList -A --normal yank<cr>')

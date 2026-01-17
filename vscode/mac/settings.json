@@ -561,5 +561,7 @@
     "editor.suggestOnTriggerCharacters": false,
     "editor.stickyScroll.enabled": false,
     "editor.renderWhitespace": "none",
-    "editor.minimap.enabled": false
+    "editor.minimap.enabled": false,
+    "terminal.integrated.fontFamily": "Fira Code",
+    "terminal.integrated.fontSize": 14
 }

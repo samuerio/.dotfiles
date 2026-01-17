@@ -3,6 +3,13 @@
   # bold = {family = "JetBrainsMono NF" ,style = "Bold"}
   # italic  = {family = "JetBrainsMono NF" ,style = "Italic "}
   # bold_italic  = {family = "JetBrainsMono NF" ,style = "Bold Italic "}
+
+  # normal = {family = "Fira Code" ,style = "Regular"}
+  # bold = {family = "Fira Code" ,style = "Bold"}
+  # italic  = {family = "Fira Code" ,style = "Italic "}
+  # bold_italic  = {family = "Fira Code" ,style = "Bold Italic "}
+  # normal = {family = "Fira Code" ,style = "Regular"}
+  # size = 18
   normal = {family = "Monaco" ,style = "Regular"}
   bold = {family = "Monaco" ,style = "Bold"}
   italic  = {family = "Monaco" ,style = "Italic "}
