@@ -204,6 +204,9 @@ vim.g.markdown_fenced_languages = { 'html', 'python', 'bash=sh', 'java', 'rust',
     'javascript', 'js=javascript', 'c', 'cpp', 'sql', 'json', 'yaml', 'lua' }
 vim.g.markdown_minlines = 1000
 
+vim.g.java_ignore_markdown = 1
+vim.g.java_ignore_html = 1
+
 if vim.fn.has('unix') then
     vim.api.nvim_create_autocmd(
         { "InsertLeave", "BufCreate", "BufEnter", "BufLeave" },

@@ -3,7 +3,7 @@ call plug#begin()
 
 Plug 'ferrine/md-img-paste.vim'
 
-Plug 'jiangmiao/auto-pairs'
+Plug 'windwp/nvim-autopairs'
 
 Plug 'iamcco/markdown-preview.nvim', { 'do': 'cd app && npx --yes yarn install' }
 
@@ -59,29 +59,15 @@ Plug 'nvim-lua/plenary.nvim'
 
 Plug 'nvim-telescope/telescope-fzf-native.nvim', { 'do': 'make' }
 
+Plug 'nvim-lua/plenary.nvim'
+
+" --- Opencode stuff
+Plug 'NickvanDyke/opencode.nvim'
+Plug 'folke/snacks.nvim'
+
 " Plug 'David-Kunz/gen.nvim'
 
 " Plug 'Exafunction/codeium.vim', { 'branch': 'main' }
-
-" Plug 'luozhiya/fittencode.nvim'
-
-"--- avante
-
-" Deps
-Plug 'stevearc/dressing.nvim'
-Plug 'nvim-lua/plenary.nvim'
-Plug 'MunifTanjim/nui.nvim'
-
-" Optional deps
-Plug 'hrsh7th/nvim-cmp'
-Plug 'nvim-tree/nvim-web-devicons' "or Plug 'echasnovski/mini.icons'
-" Plug 'HakonHarnes/img-clip.nvim'
-Plug 'zbirenbaum/copilot.lua'
-
-" Yay, pass source=true if you want to build from source
-Plug 'yetone/avante.nvim', { 'branch': 'main', 'do': 'make' }
-
-"--- avante
 
 
 call plug#end()
