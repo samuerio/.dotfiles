@@ -80,6 +80,7 @@ vim.cmd([[
 
 utils.nmap('<leader>F', '<Plug>(coc-format)')
 utils.nmap('<leader>o', ':<C-u>CocList outline<cr>')
+utils.nmap('<leader>j', ':<C-u>CocOutline<cr>')
 utils.nmap('<leader>s', ':<C-u>CocList -I symbols<cr>')
 utils.nmap('<leader>d', ':<C-u>CocList diagnostics<cr>')
 utils.nmap('<leader>l', ':<C-u>:CocListResume<cr>')
@@ -91,18 +92,8 @@ utils.nmap('<leader>a', ':CocAction<cr>')
 utils.nmap('<leader>Q', ':copen<cr>')
 
 vim.cmd([[
-    nnoremap <silent><leader>j :call ToggleOutline()<CR>
 	command! -nargs=* -range CocFix    :call CocActionAsync('codeActionRange', <line1>, <line2>, 'quickfix')
 	command! -nargs=* -range CocAction :call CocActionAsync('codeActionRange', <line1>, <line2>, <f-args>)
-    function! ToggleOutline() abort
-      let winid = coc#window#find('cocViewId', 'OUTLINE')
-      echo 'outline winid = ' . winid
-      if winid == -1
-        call CocActionAsync('showOutline', 1)
-      else
-        call coc#window#close(winid)
-      endif
-    endfunction
 ]])
 
 
