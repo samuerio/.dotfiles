@@ -32,7 +32,8 @@ vim.g.opencode_opts = {
     provider = {
         enabled = 'tmux',
         tmux = {
-            options = '-h -p 35'
+            -- options = '-h -p 35'
+            options = '-h -p 50'
         }
     }
 }

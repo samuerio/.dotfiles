@@ -26,10 +26,15 @@
 	prompt = false
 
 [difftool "nvimdiff"]
-	cmd = "nvim -d \"$LOCAL\" \"$REMOTE\""
+    cmd = "nvim -d \"$LOCAL\" \"$REMOTE\""
+
+[difftool "nvimdiff-o"]
+    cmd = "nvim -do \"$LOCAL\" \"$REMOTE\""
 
 [alias]
-	d = difftool
+    d  = difftool -t nvimdiff
+    do = difftool -t nvimdiff-o
+
 [user]
 	name = samuerio
 	email = 853713419@qq.com

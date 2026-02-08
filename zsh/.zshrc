@@ -123,6 +123,7 @@ alias uvpn= 'unset https_proxy http_proxy all_proxy'
 # 确保sudo的时候，保留原来的环境变量，保证sudo nvim能使用自定义配置
 alias sudo='sudo -E'
 alias ra='ranger'
+alias op='opencode'
 
 #expect脚本会导致rz、sz无法生效
 #alias kbk='expect ~/.kpy'
