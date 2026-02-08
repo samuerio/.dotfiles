@@ -225,7 +225,7 @@ customCommands:
     output: terminal
   - key: '<c-o>'
     context: 'commits'
-    command: "git do {{.SelectedLocalCommit.Sha}}^!"
+    command: "git diff {{.SelectedLocalCommit.Sha}}^!"
     description: "Show selected commit"
     output: terminal
   - key: '<c-g>'
@@ -235,6 +235,6 @@ customCommands:
     output: terminal
   - key: '<c-o>'
     context: 'files'
-    command: "git do HEAD -- {{.SelectedFile.Name}}"
+    command: "git diff HEAD -- {{.SelectedFile.Name}}"
     description: "Show selected file changes"
     output: terminal
