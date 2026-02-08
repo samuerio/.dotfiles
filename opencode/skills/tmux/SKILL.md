@@ -50,6 +50,7 @@ This must ALWAYS be printed right after a session was started and once again at 
 ## Finding sessions
 
 - List sessions on your active socket with metadata: `./scripts/find-sessions.sh -S "$SOCKET"`; add `-q partial-name` to filter.
+- For machine parsing, emit JSON: `./scripts/find-sessions.sh -S "$SOCKET" --json`.
 - Scan all sockets under the shared directory: `./scripts/find-sessions.sh --all` (uses `CLAUDE_TMUX_SOCKET_DIR` or `${TMPDIR:-/tmp}/claude-tmux-sockets`).
 
 ## Sending input safely
