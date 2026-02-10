@@ -1,55 +1,97 @@
 ---
 name: gen-ctx-kline
-description: Generate multi-timeframe contextual K-line charts for FILUSDT cryptocurrency at specific time points. Use when user wants to analyze FIL price action, patterns, or trading context at a particular moment in history.
+description: "Generate FILUSDT multi-timeframe context K-line charts at a target timestamp and report output artifacts."
 ---
 
-# gen-ctx-kline Skill
+# Gen Ctx Kline
 
-Generates contextual K-line (candlestick) charts for FILUSDT across multiple timeframes.
+Generate FILUSDT context candlestick charts around a target time via the local wrapper script.
 
-## When to Use
+## Use This Skill When
 
-- User asks to "generate FIL context at [time]"
-- User wants to analyze FILUSDT price action at a specific date/time
-- User requests K-line charts, candlestick charts, or trading context
-- User mentions analyzing FIL patterns on a specific date
+- User asks for FIL/FILUSDT context charts at a specific time.
+- User asks for multi-timeframe K-line context.
+- User wants pre/post context images for trade review at one timestamp.
 
-## Usage
+## Output Goal
 
-Call the bash script with two parameters:
+Produce one context bundle under:
+
+`~/Dropbox/Kline/CTX/CTX_<YYYYMMDD_HHMM>_<mark>/`
+
+Then report:
+
+- absolute output directory
+- key generated files
+- warnings/errors (if any)
+
+## Required Inputs
+
+- `ctx_time` (required): format `YYYY-MM-DD HH:MM`
+- `mark` (required): one of `5m`, `15m`, `1h`, `4h`
+
+If either input is missing or ambiguous, ask the user a concise follow-up question before execution.
+
+## Timeframe Pack Per Mark
+
+- `5m` -> `5m`, `15m`, `1h`
+- `15m` -> `5m`, `15m`, `1h`, `4h`
+- `1h` -> `15m`, `1h`, `4h`, `1d`
+- `4h` -> `1h`, `4h`, `1d`, `1w`
+
+## Command
+
+Run from the skill directory: `~/.config/opencode/skills/gen-ctx-kline/`
+
 ```bash
-bash /path/to/gen_ctx.sh "<ctx-time>" <mark>
+bash ./gen_ctx.sh "<ctx_time>" <mark>
 ```
 
-**Parameters:**
-- `ctx-time`: Target timestamp in format "YYYY-MM-DD HH:MM" (quote if contains space)
-- `mark`: Primary timeframe, one of: `5m`, `15m`, `1h`, `4h`
+Examples:
 
-**Examples:**
 ```bash
-bash gen_ctx.sh "2025-11-30 14:40" 5m
-bash gen_ctx.sh "2025-12-01 08:30" 15m
-bash gen_ctx.sh "2025-06-15 12:00" 1h
-bash gen_ctx.sh "2025-03-20 00:00" 4h
+bash ./gen_ctx.sh "2025-11-30 14:40" 5m
+bash ./gen_ctx.sh "2025-12-01 08:30" 15m
+bash ./gen_ctx.sh "2025-06-15 12:00" 1h
+bash ./gen_ctx.sh "2025-03-20 00:00" 4h
 ```
 
-## Timeframe Selection
+## Execution Procedure
 
-Each mark generates charts for multiple timeframes:
-- `5m`: 5m + 15m + 1h charts
-- `15m`: 5m + 15m + 1h + 4h charts
-- `1h`: 15m + 1h + 4h + 1d charts
-- `4h`: 1h + 4h + 1d + 1w charts
+1. Resolve `ctx_time` and `mark`, validate format quickly.
+2. Run the wrapper command exactly once.
+3. Compute expected output dir: `CTX_${ctx_time as YYYYMMDD_HHMM}_${mark}`.
+4. Check key artifacts and report what exists:
+   - `metadata.json`
+   - `ctx.md`
+   - `CTX_<...>.png`
+   - `CTX_<...>_later.png`
+   - optional dirs: `ctx_png/`, `later_png/`, `ctx_csv/`, `later_csv/`
+5. Return concise result summary.
 
-## Output
+## Failure Handling
 
-- Charts saved to `~/Dropbox/Kline/CTX/`
-- Multiple PNG files (one per timeframe)
-- Script confirms success and shows output location
+- Unsupported `mark`: show valid values `5m`, `15m`, `1h`, `4h`.
+- `uv` not found: report missing dependency and suggest installing `uv`.
+- Missing script or CSV data: surface exact missing file path from command output.
+- `ctx_time` earlier than available data: report out-of-range and ask for a later timestamp.
+- Partial output: report generated files and missing files; do not claim full success.
 
-## Implementation Details
+## Local Paths and Dependencies
 
-- Script located at: `~/.config/opencode/skills/gen-ctx-kline/gen_ctx.sh`
+- Wrapper script: `~/.config/opencode/skills/gen-ctx-kline/gen_ctx.sh`
 - Python script: `~/github/python-playground/gen_ctx_kline.py`
 - Data sources: `~/Dropbox/Kline/SRC/FILUSDT_*_indicators.csv`
-- Requires: `uv` command (Python package runner)
+- Output root: `~/Dropbox/Kline/CTX/`
+- Runtime: `uv`
+
+## Response Template
+
+Use this output shape to the user:
+
+- `status`: `success` | `partial` | `failed`
+- `ctx_time`: `<value>`
+- `mark`: `<value>`
+- `output_dir`: `<absolute-path>`
+- `files`: `<comma-separated key files found>`
+- `notes`: `<warnings/errors>`
