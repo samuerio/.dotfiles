@@ -9,12 +9,13 @@ This skill helps analyze coding agent sessions to improve or create skills. It w
 
 ## Quick Start
 
-Extract the current session and generate an improvement prompt:
+List recent sessions, let the user choose one, then export it:
 ```bash
-# Get the latest session ID
-SESSION_ID=$(opencode session list -n 2 | tail -n 1 | awk '{print $1}')
+# List recent sessions (user picks session ID)
+opencode session list -n 10
 
-# Export session transcript
+# Export selected session transcript
+SESSION_ID=<user-selected-session-id>
 opencode export $SESSION_ID > /tmp/session-transcript.txt
 ```
 
@@ -28,30 +29,50 @@ opencode session list -n 10
 # Export a specific session
 opencode export <session-id>
 
-# Export latest session to file
-SESSION_ID=$(opencode session list -n 2 | tail -n 1 | awk '{print $1}')
+# Export selected session to file
+SESSION_ID=<session-id>
 opencode export $SESSION_ID > /tmp/session-transcript.txt
 ```
 
+## Session Selection Rule
+
+Always list sessions first and let the user choose which session to use.
+
+1. Run:
+```bash
+opencode session list -n 10
+```
+2. Show the list to the user.
+3. Ask for a specific session ID.
+4. Only export after the user confirms the session ID.
+
+Do not auto-pick the latest session unless the user explicitly asks for "latest".
+
 **Skill location:**
 - OpenCode skills: `~/.config/opencode/skills/<skill-name>/SKILL.md`
+- If `~/.config/opencode` is a symlink (common in dotfiles setups), the equivalent real path works too: `/home/zhe/github/.dotfiles/opencode/skills/<skill-name>/SKILL.md`
 
 ## Workflow: Improve an Existing Skill
 
 When asked to improve a skill based on a session:
 
-1. **Extract the session transcript:**
+1. **List sessions and ask the user to choose one:**
 ```bash
-   SESSION_ID=$(opencode session list -n 2 | tail -n 1 | awk '{print $1}')
+   opencode session list -n 10
+```
+
+2. **Extract the chosen session transcript:**
+```bash
+   SESSION_ID=<user-selected-session-id>
    opencode export $SESSION_ID > /tmp/session-transcript.txt
 ```
 
-2. **Find the existing skill:**
+3. **Find the existing skill:**
 ```bash
    ls ~/.config/opencode/skills/<skill-name>/SKILL.md
 ```
 
-3. **Generate an improvement prompt** for a new session:
+4. **Generate an improvement prompt** for a new session:
 ```
 ═══════════════════════════════════════════════════════════════════════════════
 COPY THE FOLLOWING PROMPT INTO A NEW OPENCODE SESSION:
@@ -86,13 +107,18 @@ Write the improved skill back to the same location.
 
 When asked to create a new skill from a session:
 
-1. **Extract the session transcript:**
+1. **List sessions and ask the user to choose one:**
 ```bash
-   SESSION_ID=$(opencode session list -n 2 | tail -n 1 | awk '{print $1}')
+   opencode session list -n 10
+```
+
+2. **Extract the chosen session transcript:**
+```bash
+   SESSION_ID=<user-selected-session-id>
    opencode export $SESSION_ID > /tmp/session-transcript.txt
 ```
 
-2. **Generate a creation prompt** for a new session:
+3. **Generate a creation prompt** for a new session:
 ```
 ═══════════════════════════════════════════════════════════════════════════════
 COPY THE FOLLOWING PROMPT INTO A NEW OPENCODE SESSION:
@@ -154,8 +180,8 @@ Keep skills concise - focus on the most important information and examples.
 # List sessions
 opencode session list -n 10
 
-# Get latest session ID
-SESSION_ID=$(opencode session list -n 2 | tail -n 1 | awk '{print $1}')
+# Set chosen session ID
+SESSION_ID=<session-id>
 
 # Export session
 opencode export $SESSION_ID
