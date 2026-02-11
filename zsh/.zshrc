@@ -268,7 +268,3 @@ export RANGER_LOAD_DEFAULT_RC=FALSE
 export VISUAL=nvim
 export EDITOR="$VISUAL"
 export TERM=xterm-256color
-
-
-#隐私的环境变量
-[ -f ~/.env ] && source ~/.env
