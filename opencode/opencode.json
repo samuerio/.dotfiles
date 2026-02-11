@@ -1,9 +1,11 @@
 {
     "$schema": "https://opencode.ai/config.json",
     "instructions": [
-        "/home/zhe/github/.dotfiles/CONVENTIONS.md",
+        "/home/zhe/github/.dotfiles/CONVENTIONS.md"
     ],
-    "plugin": [],
+    "plugin": [
+        "oh-my-opencode@latest"
+    ],
     "provider": {
         "volcengine": {
             "npm": "@ai-sdk/openai-compatible",
@@ -33,7 +35,7 @@
                     }
                 }
             }
-        },
+        }
     },
     "mcp": {
         "chrome-devtools": {
