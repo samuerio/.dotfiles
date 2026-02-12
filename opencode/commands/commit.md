@@ -1,6 +1,5 @@
 ---
 description: commit guide
-agent: build
 ---
 
 Load the `commit-workflow` skill and execute it for current repository changes.
