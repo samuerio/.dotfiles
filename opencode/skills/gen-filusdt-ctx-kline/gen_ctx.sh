@@ -23,9 +23,9 @@ fi
 CTX_TIME="$1"
 MARK="$2"
 
-PROJECT_DIR="$HOME/github/python-playground"
-BASE_DIR="$HOME/Dropbox/Kline/SRC"
-OUTPUT_DIR="$HOME/Dropbox/Kline/CTX"
+PROJECT_DIR="$HOME/github/crypto-kline-toolkit"
+BASE_DIR="$HOME/Dropbox/Kline/FILUSDT/data/indicators"
+OUTPUT_DIR="$HOME/Dropbox/Kline/FILUSDT/ctx"
 PYTHON_SCRIPT="$PROJECT_DIR/gen_ctx_kline.py"
 
 declare -A DATA_SOURCES
@@ -112,6 +112,7 @@ echo ""
 
 cd "$PROJECT_DIR" && uv run "$PYTHON_SCRIPT" \
     "${FILES[@]}" \
+    --symbol FILUSDT \
     --output-dir "$OUTPUT_DIR" \
     --ctx-time "$CTX_TIME" \
     --mark "$MARK"
