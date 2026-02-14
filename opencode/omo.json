@@ -3,6 +3,9 @@
     "instructions": [
         "/home/zhe/github/.dotfiles/CONVENTIONS.md"
     ],
+    "plugin": [
+        "oh-my-opencode@latest"
+    ],
     "provider": {
         "volcengine": {
             "npm": "@ai-sdk/openai-compatible",
