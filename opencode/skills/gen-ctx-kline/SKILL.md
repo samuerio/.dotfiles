@@ -5,110 +5,18 @@ description: "Generate multi-symbol context K-line charts at a target timestamp 
 
 # Gen Ctx Kline
 
-Generate context candlestick charts for a target symbol (e.g. FILUSDT/BTCUSDT/ETHUSDT/BNBUSDT) around a target time via the local wrapper script.
-
-## Use This Skill When
-
-- User asks for context charts for a specific symbol at a specific time.
-- User asks for multi-timeframe K-line context.
-- User wants pre/post context images for trade review at one timestamp.
-
-## Output Goal
-
-Produce one context bundle under:
-
-`~/Dropbox/Kline/<SYMBOL>/CTX/CTX_<SYMBOL>_<YYYYMMDD_HHMM>_<mark>/`
-
-Then report:
-
-- absolute output directory
-- key generated files
-- warnings/errors (if any)
+Run the local wrapper once to generate context K-line charts for one symbol/time.
 
 ## Required Inputs
 
-- `ctx_time` (required): format `YYYY-MM-DD HH:MM`
-- `mark` (required): one of `5m`, `15m`, `1h`, `4h`
-- `symbol` (required): trading symbol like `FILUSDT`/`BTCUSDT`/`ETHUSDT`
+- `ctx_time`: `YYYY-MM-DD HH:MM`
+- `mark`: `5m|15m|1h|4h`
+- `symbol`: e.g. `FILUSDT`
 
-If `ctx_time`, `mark`, or `symbol` is missing or ambiguous, ask a concise follow-up question before execution.
-
-## Timeframe Pack Per Mark
-
-- `5m` -> `5m`, `15m`, `1h`
-- `15m` -> `5m`, `15m`, `1h`, `4h`
-- `1h` -> `15m`, `1h`, `4h`, `1d`
-- `4h` -> `1h`, `4h`, `1d`, `1w`
+If any input is missing or ambiguous, ask one concise follow-up question.
 
 ## Command
 
-Run from the skill directory: `~/.config/opencode/skills/gen-ctx-kline/`
-
 ```bash
-bash ./gen_ctx.sh "<ctx_time>" <mark> --symbol <symbol>
+bash ~/.config/opencode/skills/gen-ctx-kline/gen_ctx.sh "<ctx_time>" <mark> --symbol <symbol>
 ```
-
-List locally available symbols (have indicator files):
-
-```bash
-bash ./list_symbols.sh
-```
-
-Examples:
-
-```bash
-bash ./gen_ctx.sh "2025-11-30 14:40" 5m --symbol FILUSDT
-bash ./gen_ctx.sh "2025-12-01 08:30" 15m --symbol BTCUSDT
-bash ./gen_ctx.sh "2025-06-15 12:00" 1h --symbol ETHUSDT
-bash ./gen_ctx.sh "2025-03-20 00:00" 4h --symbol BNBUSDT
-```
-
-## Execution Procedure
-
-1. Resolve `ctx_time`, `mark`, and required `symbol`; normalize symbol to uppercase.
-2. Run the wrapper command exactly once.
-3. Compute expected output dir: `CTX_${SYMBOL}_${ctx_time as YYYYMMDD_HHMM}_${mark}`.
-4. Check key artifacts and report what exists:
-    - `metadata.json`
-    - `ctx.md`
-    - `CTX_<SYMBOL>_<...>.png`
-    - `CTX_<SYMBOL>_<...>_later.png`
-    - optional dirs: `ctx_png/`, `later_png/`, `ctx_csv/`, `later_csv/`
-5. Return concise result summary.
-
-## Failure Handling
-
-- Unsupported `mark`: show valid values `5m`, `15m`, `1h`, `4h`.
-- Missing `--symbol`: stop and ask user to provide symbol explicitly.
-- Invalid `symbol`: require alphanumeric uppercase symbol like `BTCUSDT`.
-- `uv` not found: report missing dependency and suggest installing `uv`.
-- Missing project/script/data: surface exact missing file path from command output.
-- `ctx_time` earlier than available data: report out-of-range and ask for a later timestamp.
-- Partial output: report generated files and missing files; do not claim full success.
-
-## Local Paths and Dependencies
-
-- Wrapper script: `~/.config/opencode/skills/gen-ctx-kline/gen_ctx.sh`
-- Helper script: `~/.config/opencode/skills/gen-ctx-kline/list_symbols.sh`
-- Project root: `~/github/crypto-kline-toolkit`
-- Python entry: `uv run python -m crypto_kline_toolkit.gen_ctx_kline`
-- Data sources: `~/Dropbox/Kline/<SYMBOL>/data/indicators/<SYMBOL>_<timeframe>_*_indicators.csv`
-- Output root: `~/Dropbox/Kline/<SYMBOL>/CTX/`
-- Runtime: `uv`
-
-## Data Source Selection Rule
-
-- The wrapper auto-selects the latest indicators file for each required timeframe.
-- Latest is determined by lexicographical filename order (e.g. newer `YYYYMMDD_HHMM` wins).
-
-## Response Template
-
-Use this output shape to the user:
-
-- `status`: `success` | `partial` | `failed`
-- `symbol`: `<SYMBOL>`
-- `ctx_time`: `<value>`
-- `mark`: `<value>`
-- `output_dir`: `<absolute-path>`
-- `files`: `<comma-separated key files found>`
-- `notes`: `<warnings/errors>`
