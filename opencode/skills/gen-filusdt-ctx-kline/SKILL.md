@@ -17,7 +17,7 @@ Generate FILUSDT context candlestick charts around a target time via the local w
 
 Produce one context bundle under:
 
-`~/Dropbox/Kline/CTX/CTX_<YYYYMMDD_HHMM>_<mark>/`
+`~/Dropbox/Kline/FILUSDT/CTX/CTX_FILUSDT_<YYYYMMDD_HHMM>_<mark>/`
 
 Then report:
 
@@ -41,7 +41,7 @@ If either input is missing or ambiguous, ask the user a concise follow-up questi
 
 ## Command
 
-Run from the skill directory: `~/.config/opencode/skills/gen-ctx-kline/`
+Run from the skill directory: `~/.config/opencode/skills/gen-filusdt-ctx-kline/`
 
 ```bash
 bash ./gen_ctx.sh "<ctx_time>" <mark>
@@ -60,36 +60,43 @@ bash ./gen_ctx.sh "2025-03-20 00:00" 4h
 
 1. Resolve `ctx_time` and `mark`, validate format quickly.
 2. Run the wrapper command exactly once.
-3. Compute expected output dir: `CTX_${ctx_time as YYYYMMDD_HHMM}_${mark}`.
+3. Compute expected output dir: `CTX_FILUSDT_${ctx_time as YYYYMMDD_HHMM}_${mark}`.
 4. Check key artifacts and report what exists:
-   - `metadata.json`
-   - `ctx.md`
-   - `CTX_<...>.png`
-   - `CTX_<...>_later.png`
-   - optional dirs: `ctx_png/`, `later_png/`, `ctx_csv/`, `later_csv/`
+    - `metadata.json`
+    - `ctx.md`
+    - `CTX_FILUSDT_<...>.png`
+    - `CTX_FILUSDT_<...>_later.png`
+    - optional dirs: `ctx_png/`, `later_png/`, `ctx_csv/`, `later_csv/`
 5. Return concise result summary.
 
 ## Failure Handling
 
 - Unsupported `mark`: show valid values `5m`, `15m`, `1h`, `4h`.
 - `uv` not found: report missing dependency and suggest installing `uv`.
-- Missing script or CSV data: surface exact missing file path from command output.
+- Missing project/script/data: surface exact missing file path from command output.
 - `ctx_time` earlier than available data: report out-of-range and ask for a later timestamp.
 - Partial output: report generated files and missing files; do not claim full success.
 
 ## Local Paths and Dependencies
 
-- Wrapper script: `~/.config/opencode/skills/gen-ctx-kline/gen_ctx.sh`
-- Python script: `~/github/python-playground/gen_ctx_kline.py`
-- Data sources: `~/Dropbox/Kline/SRC/FILUSDT_*_indicators.csv`
-- Output root: `~/Dropbox/Kline/CTX/`
+- Wrapper script: `~/.config/opencode/skills/gen-filusdt-ctx-kline/gen_ctx.sh`
+- Project root: `~/github/crypto-kline-toolkit`
+- Python entry: `uv run python -m crypto_kline_toolkit.gen_ctx_kline`
+- Data sources: `~/Dropbox/Kline/FILUSDT/data/indicators/FILUSDT_<timeframe>_*_indicators.csv`
+- Output root: `~/Dropbox/Kline/FILUSDT/CTX/`
 - Runtime: `uv`
+
+## Data Source Selection Rule
+
+- The wrapper auto-selects the latest indicators file for each required timeframe.
+- Latest is determined by lexicographical filename order (e.g. newer `YYYYMMDD_HHMM` wins).
 
 ## Response Template
 
 Use this output shape to the user:
 
 - `status`: `success` | `partial` | `failed`
+- `symbol`: `FILUSDT`
 - `ctx_time`: `<value>`
 - `mark`: `<value>`
 - `output_dir`: `<absolute-path>`
