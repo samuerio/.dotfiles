@@ -2,33 +2,46 @@
 
 set -euo pipefail
 
-if [ "$#" -ne 2 ]; then
+if [ "$#" -ne 4 ] || [ "$3" != "--symbol" ]; then
     cat <<EOF
 Error: 参数数量错误
 
-用法: $0 <ctx-time> <mark>
+用法: $0 <ctx-time> <mark> --symbol <symbol>
   ctx-time: 上下文时间，格式如 "2025-11-30 14:40"（有空格时请用引号包裹）
   mark:     时间周期，可选值: 5m, 15m, 1h, 4h
+  symbol:   交易对（必填），例如 BTCUSDT / ETHUSDT / BNBUSDT / FILUSDT
 
 示例:
-  $0 "2025-11-30 14:40" 5m
-  $0 "2025-12-01 08:30" 15m
-  $0 "2025-06-15 12:00" 1h
-  $0 "2025-03-20 00:00" 4h
+  $0 "2025-11-30 14:40" 5m --symbol FILUSDT
+  $0 "2025-12-01 08:30" 15m --symbol BTCUSDT
+  $0 "2025-06-15 12:00" 1h --symbol ETHUSDT
+  $0 "2025-03-20 00:00" 4h --symbol BNBUSDT
 EOF
     exit 1
 fi
 
 CTX_TIME="$1"
 MARK="$2"
+SYMBOL_INPUT="$4"
+SYMBOL="$(printf '%s' "$SYMBOL_INPUT" | tr '[:lower:]' '[:upper:]')"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-SYMBOL="FILUSDT"
 PROJECT_DIR="$HOME/github/crypto-kline-toolkit"
-BASE_DIR="$HOME/Dropbox/Kline/FILUSDT/data/indicators"
-OUTPUT_DIR="$HOME/Dropbox/Kline/FILUSDT/CTX"
+BASE_DIR="$HOME/Dropbox/Kline/$SYMBOL/data/indicators"
+OUTPUT_DIR="$HOME/Dropbox/Kline/$SYMBOL/CTX"
 
 if ! [[ "$CTX_TIME" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]][0-9]{2}:[0-9]{2}$ ]]; then
     echo "Error: ctx-time 格式错误，必须为 YYYY-MM-DD HH:MM"
+    exit 1
+fi
+
+if [ -z "$SYMBOL" ]; then
+    echo "Error: --symbol 不能为空"
+    exit 1
+fi
+
+if ! [[ "$SYMBOL" =~ ^[A-Z0-9]+$ ]]; then
+    echo "Error: symbol 格式错误，必须是字母数字组合，例如 BTCUSDT"
     exit 1
 fi
 
@@ -44,6 +57,10 @@ fi
 
 if [ ! -d "$BASE_DIR" ]; then
     echo "Error: 数据目录不存在: $BASE_DIR"
+    if [ -f "$SCRIPT_DIR/list_symbols.sh" ]; then
+        echo "可用 symbol 列表（本地有指标数据）:"
+        bash "$SCRIPT_DIR/list_symbols.sh" || true
+    fi
     exit 1
 fi
 
