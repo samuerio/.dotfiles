@@ -1,7 +1,7 @@
----
+ ---
 name: agent-workspace
-description: "Create a dedicated git worktree and tmux window from a branch name."
----
+description: "Create a dedicated git worktree and tmux window from a branch name. Worktree path is ./.worktree/<branch tail>, automatically adds .worktree/ to .gitignore, reuses existing tmux windows if present."
+ ---
 
 # Agent Workspace
 
@@ -13,9 +13,11 @@ Create a dedicated workspace per branch with `git worktree` + `tmux`.
 
 ## Output Goal
 
-- Worktree path: `./.git-worktree/<branch>`
+- Worktree path: `./.worktree/<branch tail>` (e.g., `ui-migration` from `features/ui-migration`)
 - tmux window name: branch tail (e.g. `p1-1` from `features/p1-1`)
 - tmux layout: exactly 2 panes (left runs `omo`, right runs `lazygit`)
+- `.worktree/` is automatically added to `.gitignore`
+- Reuses existing tmux window if one with the same name already exists
 
 ## Procedure
 
@@ -23,7 +25,7 @@ Create a dedicated workspace per branch with `git worktree` + `tmux`.
 2. Run:
 
 ```bash
-bash ~/.config/opencode/skills/agent-workspace/create_workspace.sh "<branch>"
+bash opencode/skills/agent-workspace/create_workspace.sh "<branch>"
 ```
 
 3. Report:
