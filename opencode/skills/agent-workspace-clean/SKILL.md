@@ -24,6 +24,7 @@ bash ~/.config/opencode/skills/agent-workspace-clean/clean_workspace.sh [--force
 
 ## Report
 
+- `agent_root`
 - `current_worktree_path`
 - `worktree_removed`
 - `errors` (if any)

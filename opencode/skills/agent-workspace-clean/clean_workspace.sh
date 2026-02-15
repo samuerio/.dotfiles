@@ -52,8 +52,11 @@ fi
 
 printf 'current_worktree_path=%s\n' "$repo_root"
 printf 'worktree_removed=%s\n' "$worktree_removed"
+printf 'agent_root=%s\n' "$repo_main"
 
 if [ "${#errors[@]}" -gt 0 ]; then
   printf 'errors=%s\n' "$(IFS=,; echo "${errors[*]}")"
   exit 1
 fi
+
+echo "cd $repo_main"
