@@ -13,7 +13,7 @@ Detect whether current workspace is an agent git worktree and remove it.
 
 ## Output Goal
 
-- Detect whether current workspace is an agent worktree under `<repo-main>/.git-worktree/*`
+- Detect whether current workspace is an agent worktree under `<repo-main>/.worktree/*`
 - If yes, remove current worktree
 
 ## Execute
@@ -24,7 +24,6 @@ bash ~/.config/opencode/skills/agent-workspace-clean/clean_workspace.sh [--force
 
 ## Report
 
-- `is_agent_workspace`
 - `current_worktree_path`
 - `worktree_removed`
 - `errors` (if any)
