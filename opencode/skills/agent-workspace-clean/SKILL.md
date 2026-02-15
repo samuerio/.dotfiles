@@ -11,25 +11,8 @@ Detect whether current workspace is an agent git worktree and remove it.
 
 - `--force`: optional; force-remove worktree when needed
 
-## Output Goal
-
-- Detect whether current workspace is an agent worktree under `<repo-main>/.worktree/*`
-- If yes, remove current worktree
-
 ## Execute
 
 ```bash
 bash ~/.config/opencode/skills/agent-workspace-clean/clean_workspace.sh [--force]
 ```
-
-## Report
-
-- `agent_root`
-- `current_worktree_path`
-- `worktree_removed`
-- `errors` (if any)
-
-## Notes
-
-- Do not delete any git branch.
-- If current workspace is not an agent worktree, do not remove anything.
