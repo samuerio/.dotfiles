@@ -51,36 +51,22 @@ else
 fi
 
 target_session="agent-workspace"
-target_window=""
 
 if tmux has-session -t "$target_session" 2>/dev/null; then
-  existing_window="$(tmux list-windows -t "$target_session" -F '#{window_name}' 2>/dev/null | grep -x "$window_name" || true)"
-  if [ -n "$existing_window" ]; then
-    target_window="$window_name"
-  fi
+  window_id="$(tmux new-window -P -F '#{window_id}' -t "$target_session" -n "$window_name" -c "$worktree_path")"
+else
+  window_id="$(tmux new-session -d -P -F '#{window_id}' -s "$target_session" -n "$window_name" -c "$worktree_path")"
 fi
-
-if [ -z "$target_window" ]; then
-  if tmux has-session -t "$target_session" 2>/dev/null; then
-    window_id="$(tmux new-window -P -F '#{window_id}' -t "$target_session" -n "$window_name" -c "$worktree_path")"
-  else
-    window_id="$(tmux new-session -d -P -F '#{window_id}' -s "$target_session" -n "$window_name" -c "$worktree_path")"
-  fi
-  target_window="$window_id"
-  left_pane="$(tmux display-message -p -t "$target_window" '#{pane_id}')"
-  right_pane="$(tmux split-window -h -P -F '#{pane_id}' -t "$target_window" -c "$worktree_path")"
-  tmux select-layout -t "$target_window" even-horizontal >/dev/null
-  tmux send-keys -t "$left_pane" 'omo' C-m
-  tmux send-keys -t "$right_pane" 'lazygit' C-m
-fi
+target_window="$window_id"
+left_pane="$(tmux display-message -p -t "$target_window" '#{pane_id}')"
+right_pane="$(tmux split-window -h -P -F '#{pane_id}' -t "$target_window" -c "$worktree_path")"
+tmux select-layout -t "$target_window" even-horizontal >/dev/null
+tmux send-keys -t "$right_pane" 'lazygit' C-m
+tmux send-keys -t "$left_pane" 'omo' C-m
 
 printf 'branch=%s\n' "$branch"
 printf 'worktree_path=%s\n' "$worktree_path"
-printf 'tmux_window=%s\n' "$window_name"
 printf 'worktree_created=%s\n' "$created"
-printf 'tmux_target=%s\n' "$target_session"
-printf 'left_pane_cmd=%s\n' 'omo'
-printf 'right_pane_cmd=%s\n' 'lazygit'
 
 if [ -n "${TMUX:-}" ]; then
   tmux switch-client -t "$target_session"
