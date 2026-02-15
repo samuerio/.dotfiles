@@ -82,6 +82,11 @@ printf 'tmux_target=%s\n' "$target_session"
 printf 'left_pane_cmd=%s\n' 'omo'
 printf 'right_pane_cmd=%s\n' 'lazygit'
 
+if [ -n "${TMUX:-}" ]; then
+  tmux switch-client -t "$target_session"
+  tmux select-window -t "$target_session:$target_window"
+fi
+
 if [ "$target_session" = "agent-workspace" ] && [ -z "${TMUX:-}" ]; then
-  echo 'attach=tmux attach -t agent-workspace'
+  echo "attach=tmux attach -t $target_session:$target_window"
 fi
