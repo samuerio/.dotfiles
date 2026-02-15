@@ -13,13 +13,21 @@ if [ -z "$repo_root" ]; then
   exit 2
 fi
 
-worktree_path="$repo_root/.git-worktree/$branch"
-window_name="${branch##*/}"
+branch_tail="${branch##*/}"
+worktree_path="$repo_root/.worktree/$branch_tail"
+window_name="$branch_tail"
+
+gitignore="$repo_root/.gitignore"
+if ! grep -q '^/\.worktree/$' "$gitignore" 2>/dev/null; then
+  echo '/.worktree/' >> "$gitignore"
+fi
 
 mkdir -p "$(dirname "$worktree_path")"
 
 needs_new_worktree="yes"
-if [ -d "$worktree_path/.git" ] || [ -f "$worktree_path/.git" ]; then
+if git -C "$repo_root" worktree list --porcelain | grep -q "^worktree $worktree_path$"; then
+  needs_new_worktree="no"
+elif [ -d "$worktree_path/.git" ] || [ -f "$worktree_path/.git" ]; then
   needs_new_worktree="no"
 fi
 
@@ -31,9 +39,7 @@ fi
 
 created="no"
 if git show-ref --verify --quiet "refs/heads/$branch"; then
-  if [ -d "$worktree_path/.git" ] || [ -f "$worktree_path/.git" ]; then
-    :
-  else
+  if [ "$needs_new_worktree" = "yes" ]; then
     git -C "$repo_root" worktree add "$worktree_path" "$branch"
     created="yes"
   fi
@@ -42,32 +48,38 @@ else
   created="yes"
 fi
 
-if [ -n "${TMUX:-}" ]; then
-  window_id="$(tmux new-window -P -F '#{window_id}' -n "$window_name" -c "$worktree_path")"
-  tmux_target="current-session"
-else
-  if tmux has-session -t agent-workspace 2>/dev/null; then
-    window_id="$(tmux new-window -P -F '#{window_id}' -t agent-workspace -n "$window_name" -c "$worktree_path")"
-  else
-    window_id="$(tmux new-session -d -P -F '#{window_id}' -s agent-workspace -n "$window_name" -c "$worktree_path")"
+target_session="agent-workspace"
+target_window=""
+
+if tmux has-session -t "$target_session" 2>/dev/null; then
+  existing_window="$(tmux list-windows -t "$target_session" -F '#{window_name}' 2>/dev/null | grep -x "$window_name" || true)"
+  if [ -n "$existing_window" ]; then
+    target_window="$window_name"
   fi
-  tmux_target="agent-workspace"
 fi
 
-left_pane="$(tmux display-message -p -t "$window_id" '#{pane_id}')"
-right_pane="$(tmux split-window -h -P -F '#{pane_id}' -t "$window_id" -c "$worktree_path")"
-tmux select-layout -t "$window_id" even-horizontal >/dev/null
-tmux send-keys -t "$left_pane" 'omo' C-m
-tmux send-keys -t "$right_pane" 'lazygit' C-m
+if [ -z "$target_window" ]; then
+  if tmux has-session -t "$target_session" 2>/dev/null; then
+    window_id="$(tmux new-window -P -F '#{window_id}' -t "$target_session" -n "$window_name" -c "$worktree_path")"
+  else
+    window_id="$(tmux new-session -d -P -F '#{window_id}' -s "$target_session" -n "$window_name" -c "$worktree_path")"
+  fi
+  target_window="$window_id"
+  left_pane="$(tmux display-message -p -t "$target_window" '#{pane_id}')"
+  right_pane="$(tmux split-window -h -P -F '#{pane_id}' -t "$target_window" -c "$worktree_path")"
+  tmux select-layout -t "$target_window" even-horizontal >/dev/null
+  tmux send-keys -t "$left_pane" 'omo' C-m
+  tmux send-keys -t "$right_pane" 'lazygit' C-m
+fi
 
 printf 'branch=%s\n' "$branch"
 printf 'worktree_path=%s\n' "$worktree_path"
 printf 'tmux_window=%s\n' "$window_name"
 printf 'worktree_created=%s\n' "$created"
-printf 'tmux_target=%s\n' "$tmux_target"
+printf 'tmux_target=%s\n' "$target_session"
 printf 'left_pane_cmd=%s\n' 'omo'
 printf 'right_pane_cmd=%s\n' 'lazygit'
 
-if [ "$tmux_target" = "agent-workspace" ]; then
+if [ "$target_session" = "agent-workspace" ] && [ -z "${TMUX:-}" ]; then
   echo 'attach=tmux attach -t agent-workspace'
 fi

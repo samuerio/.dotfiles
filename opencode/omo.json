@@ -15,8 +15,13 @@
                 "apiKey": "{env:ARK_API_KEY}"
             },
             "models": {
-                "doubao-seed-code": {
-                    "name": "doubao-seed-code"
+                "doubao-seed-2.0-code": {
+                    "name": "doubao-seed-2.0-code",
+                    "options": {
+                        "thinking": {
+                            "type": "enabled"
+                        }
+                    }
                 },
                 "glm-4.7": {
                     "name": "glm-4.7",
