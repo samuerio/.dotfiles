@@ -24,33 +24,32 @@ fi
 repo_main="$(dirname "$git_common_dir")"
 agent_root="$repo_main/.worktree"
 
-is_agent_workspace="no"
-worktree_removed="no"
-errors=()
-
 case "$repo_root/" in
   "$agent_root"/*)
-    is_agent_workspace="yes"
+    ;;
+  *)
+    echo "error: not an agent workspace" >&2
+    exit 1
     ;;
 esac
 
-if [ "$is_agent_workspace" = "yes" ]; then
-  if [ "$force" = "--force" ]; then
-    if git -C "$repo_main" worktree remove --force "$repo_root" 2>/dev/null; then
-      worktree_removed="yes"
-    else
-      errors+=("worktree_remove_failed")
-    fi
+worktree_removed="no"
+errors=()
+
+if [ "$force" = "--force" ]; then
+  if git -C "$repo_main" worktree remove --force "$repo_root" 2>/dev/null; then
+    worktree_removed="yes"
   else
-    if git -C "$repo_main" worktree remove "$repo_root" 2>/dev/null; then
-      worktree_removed="yes"
-    else
-      errors+=("worktree_remove_failed_try_force")
-    fi
+    errors+=("worktree_remove_failed")
+  fi
+else
+  if git -C "$repo_main" worktree remove "$repo_root" 2>/dev/null; then
+    worktree_removed="yes"
+  else
+    errors+=("worktree_remove_failed_try_force")
   fi
 fi
 
-printf 'is_agent_workspace=%s\n' "$is_agent_workspace"
 printf 'current_worktree_path=%s\n' "$repo_root"
 printf 'worktree_removed=%s\n' "$worktree_removed"
 
