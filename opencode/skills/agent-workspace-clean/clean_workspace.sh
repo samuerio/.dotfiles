@@ -22,7 +22,7 @@ if [ -z "$git_common_dir" ]; then
 fi
 
 repo_main="$(dirname "$git_common_dir")"
-agent_root="$repo_main/.git-worktree"
+agent_root="$repo_main/.worktree"
 
 is_agent_workspace="no"
 worktree_removed="no"
