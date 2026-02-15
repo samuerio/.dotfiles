@@ -20,6 +20,8 @@ window_name="$branch_tail"
 gitignore="$repo_root/.gitignore"
 if ! grep -q '^/\.worktree/$' "$gitignore" 2>/dev/null; then
   echo '/.worktree/' >> "$gitignore"
+  git -C "$repo_root" add "$gitignore"
+  git -C "$repo_root" commit -m "chore(gitignore): add .worktree directory to ignores" "$gitignore"
 fi
 
 mkdir -p "$(dirname "$worktree_path")"
