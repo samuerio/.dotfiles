@@ -21,7 +21,8 @@ tmux_conf_new_pane_reconnect_ssh=false
 tmux_conf_new_session_prompt=false
 
 unbind c
-bind -r n new-window -c "#{pane_current_path}"
+bind -r n new-window -a -c "#{pane_current_path}"
+bind -r N new-window -c "#{pane_current_path}"
 
 # unbind x
 # bind -r c confirm-before -p "kill-pane #P? (y/n)" kill-pane  
