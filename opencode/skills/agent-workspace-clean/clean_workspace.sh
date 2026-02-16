@@ -33,27 +33,16 @@ case "$repo_root/" in
     ;;
 esac
 
-worktree_removed="no"
-errors=()
-
 if [ "$force" = "--force" ]; then
-  if git -C "$repo_main" worktree remove --force "$repo_root" 2>/dev/null; then
-    worktree_removed="yes"
-  else
-    errors+=("worktree_remove_failed")
+  if ! git -C "$repo_main" worktree remove --force "$repo_root" 2>/dev/null; then
+    echo "error: failed to force remove worktree" >&2
+    exit 1
   fi
 else
-  if git -C "$repo_main" worktree remove "$repo_root" 2>/dev/null; then
-    worktree_removed="yes"
-  else
-    errors+=("worktree_remove_failed_try_force")
+  if ! git -C "$repo_main" worktree remove "$repo_root" 2>/dev/null; then
+    echo "error: failed to remove worktree (try --force)" >&2
+    exit 1
   fi
 fi
 
-printf 'current_worktree_path=%s\n' "$repo_root"
-printf 'worktree_removed=%s\n' "$worktree_removed"
-
-if [ "${#errors[@]}" -gt 0 ]; then
-  printf 'errors=%s\n' "$(IFS=,; echo "${errors[*]}")"
-  exit 1
-fi
+echo "success: worktree removed"
