@@ -1,6 +1,6 @@
 ---
 name: commit-workflow
-description: "Create safe Conventional Commit messages and commits from current working tree changes."
+description: "Use when user asks to commit; Create a safe Conventional Commit from current working tree changes."
 ---
 
 # Commit Workflow
