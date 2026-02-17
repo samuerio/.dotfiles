@@ -1,40 +1,60 @@
 ---
 name: agent-workspace-clean
-description: "Remove current agent git worktree if applicable."
+description: "Safely remove the current git worktree when it is an agent workspace under <repo>/.worktree/*. Use when the user asks to clean/remove/delete the current agent workspace/worktree. Apply --force only when explicitly requested in the latest user instruction."
 ---
 
 # Agent Workspace Clean
 
-Detect whether current workspace is an agent git worktree and remove it.
+Remove the current agent worktree deterministically via the bundled script.
 
 ## Input
 
-- `--force`: optional; force-remove worktree
+- `--force` (optional): only when user explicitly requests force removal in the latest message.
+
+## Preconditions
+
+- Current directory is inside a git repository.
+- Current workspace resolves to a worktree under `<repo>/.worktree/*`.
 
 ## Execute
 
-Default (no explicit force from user):
+Default:
 
 ```bash
 bash ~/.config/opencode/skills/agent-workspace-clean/clean_workspace.sh
 ```
 
-Only when user explicitly requested force:
+Only when user explicitly requests force:
 
 ```bash
 bash ~/.config/opencode/skills/agent-workspace-clean/clean_workspace.sh --force
 ```
 
+## Output Contract
+
+If command succeeds, report:
+
+- `success: worktree removed`
+
+If command fails (non-zero exit):
+
+- Report exact command output (stdout/stderr) and exit code.
+- Stop immediately.
+- Do not retry.
+- Do not run fallback commands.
+- Do not suggest `--force` unless user explicitly asked for it.
+
+## Decision Rules
+
+- Explicit force intent in latest user instruction (`--force`, "force remove") -> run force command.
+- Otherwise -> run non-force command.
+- Never infer force intent from previous turns.
+
 ## Failure Handling
 
-If execution fails (non-zero exit), report the exact error output to the user and stop.
+If execution fails, including when current workspace is not an agent workspace, report the exact error output to the user and stop.
 
-- Do not auto-retry.
-- Do not ask whether to run `--force`.
-- Only run `--force` when the user explicitly requested it in the latest instruction.
+## Safety Boundaries
 
-## Quick Decision Rules
-
-- User says "execute/clean/remove" only -> run non-force only.
-- User says "force/remove with --force" -> run force command.
-- Any failure -> report error and stop.
+- Only use `clean_workspace.sh` for deletion.
+- Do not run extra cleanup (`git worktree prune`, `git gc`, `rm -rf`) unless user explicitly requests.
