@@ -49,7 +49,7 @@ Target skill file path:
 3. Load verbatim templates from `references/prompt-templates.md`.
 4. Fill placeholders only:
    - `<skill-name>`
-   - `<session_transcript>` block content
+   - `<session_transcript>` block content = `/tmp/opencode-session.txt`
 5. Return the final prompt for a fresh OpenCode session.
 
 ## Transcript Source Resolution
@@ -90,9 +90,9 @@ Prompt:
 
 Before returning:
 
-- Template text is unchanged (verbatim)
 - Exactly one transcript source is used
 - Session export path is `/tmp/opencode-session.txt` when writing to file
+- `<session_transcript>` block content is `/tmp/opencode-session.txt`
 - Skill path uses `~/.config/opencode/skills/<skill-name>/SKILL.md`
 - Response includes mode, source, target skill, and final prompt
 

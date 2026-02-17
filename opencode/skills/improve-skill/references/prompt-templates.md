@@ -20,7 +20,7 @@ Then analyze this session transcript to understand:
 - What I had to figure out on my own
 
 <session_transcript>
-<paste transcript here>
+/tmp/opencode-session.txt
 </session_transcript>
 
 Based on this analysis, improve the skill by:
@@ -44,7 +44,7 @@ COPY THE FOLLOWING PROMPT INTO A NEW OPENCODE SESSION:
 Analyze this session transcript to extract a reusable skill called "<skill-name>":
 
 <session_transcript>
-<paste transcript here>
+/tmp/opencode-session.txt
 </session_transcript>
 
 Create a new skill that captures:
