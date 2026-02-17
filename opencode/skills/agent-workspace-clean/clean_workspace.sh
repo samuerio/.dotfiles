@@ -34,15 +34,9 @@ case "$repo_root/" in
 esac
 
 if [ "$force" = "--force" ]; then
-  if ! git -C "$repo_main" worktree remove --force "$repo_root" 2>/dev/null; then
-    echo "error: failed to force remove worktree" >&2
-    exit 1
-  fi
+  git -C "$repo_main" worktree remove --force -- "$repo_root"
 else
-  if ! git -C "$repo_main" worktree remove "$repo_root" 2>/dev/null; then
-    echo "error: failed to remove worktree (try --force)" >&2
-    exit 1
-  fi
+  git -C "$repo_main" worktree remove -- "$repo_root"
 fi
 
 echo "success: worktree removed"
