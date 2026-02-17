@@ -22,24 +22,6 @@ bash opencode/skills/agent-workspace/create_workspace.sh "<branch>"
 
 3. If command succeeds, report `branch`, `worktree_path`, `worktree_created`, and `attach` (if present).
 
-## Failure Handling (Critical)
+## Failure Handling
 
-If the script prints:
-
-- `error: current workspace has uncommitted changes`
-- `please commit or stash your changes before creating a new agent workspace`
-
-Then you must:
-
-1. Stop workspace creation flow immediately.
-2. Tell the user they need to resolve local changes first.
-3. Offer read-only help only (for example `git status`), but do not mutate git state.
-
-Never do these automatically:
-
-- `git add`
-- `git commit`
-- `git stash`
-- any command that changes tracked/untracked state
-
-Only run the workspace command again after the user confirms they handled it.
+If execution fails (non-zero exit), report the exact error output to the user and stop.
