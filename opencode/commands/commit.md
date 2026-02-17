@@ -8,3 +8,5 @@ If the user does not specify files, commit all tracked and untracked changes.
 If the user specifies files, only commit those files.
 
 Only commit. Do not push.
+
+User inputs (if provided): `$ARGUMENTS`
