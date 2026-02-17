@@ -5,190 +5,98 @@ description: "Analyze coding agent session transcripts to improve existing skill
 
 # Improve Skill
 
-This skill helps analyze coding agent sessions to improve or create skills. It works with opencode session files.
+Analyze an OpenCode session transcript, then generate a prompt for a fresh session to either improve an existing skill or create a new one.
 
-## Quick Start
+## Inputs
 
-List recent sessions, let the user choose one, then export it:
+Resolve transcript source from this priority order:
+
+1. Transcript file path provided by user
+2. Explicit `session-id` provided by user
+3. User asks for `latest`
+4. No source provided -> list sessions and ask user to choose
+
+## Commands
+
+Use these commands as the single source of truth:
+
 ```bash
-# List recent sessions (user picks session ID)
+# List recent sessions
 opencode session list -n 10
 
-# Export selected session transcript
-SESSION_ID=<user-selected-session-id>
-opencode export $SESSION_ID > /tmp/session-transcript.txt
-```
-
-## Session Extraction
-
-OpenCode provides built-in commands to list and export sessions:
-```bash
-# List recent sessions (shows session IDs)
-opencode session list -n 10
-
-# Export a specific session
+# Export transcript to stdout
 opencode export <session-id>
 
-# Export selected session to file
+# Export transcript to file
 SESSION_ID=<session-id>
-opencode export $SESSION_ID > /tmp/session-transcript.txt
+opencode export "$SESSION_ID" > /tmp/opencode-session.txt
 ```
 
-## Session Selection Rule
+## Skill Path
 
-Always list sessions first and let the user choose which session to use.
+Target skill file path:
 
-1. Run:
 ```bash
-opencode session list -n 10
-```
-2. Show the list to the user.
-3. Ask for a specific session ID.
-4. Only export after the user confirms the session ID.
-
-Do not auto-pick the latest session unless the user explicitly asks for "latest".
-
-**Skill location:**
-- OpenCode skills: `~/.config/opencode/skills/<skill-name>/SKILL.md`
-- If `~/.config/opencode` is a symlink (common in dotfiles setups), the equivalent real path works too: `/home/zhe/github/.dotfiles/opencode/skills/<skill-name>/SKILL.md`
-
-## Workflow: Improve an Existing Skill
-
-When asked to improve a skill based on a session:
-
-1. **List sessions and ask the user to choose one:**
-```bash
-   opencode session list -n 10
+~/.config/opencode/skills/<skill-name>/SKILL.md
 ```
 
-2. **Extract the chosen session transcript:**
-```bash
-   SESSION_ID=<user-selected-session-id>
-   opencode export $SESSION_ID > /tmp/session-transcript.txt
+## Workflow
+
+1. Resolve transcript source.
+2. Resolve task mode:
+   - `improve-existing`: user wants to improve an existing skill
+   - `create-new`: user wants to extract a new reusable skill
+3. Load verbatim templates from `references/prompt-templates.md`.
+4. Fill placeholders only:
+   - `<skill-name>`
+   - `<session_transcript>` block content
+5. Return the final prompt for a fresh OpenCode session.
+
+## Transcript Source Resolution
+
+Apply these branches in order:
+
+1. If user gives transcript file path, read it and continue.
+2. If user gives `session-id`, export directly and continue.
+3. If user says `latest`, list sessions and use the latest one.
+4. Otherwise:
+   - Run `opencode session list -n 10`
+   - Show list
+   - Ask user to choose session ID
+   - Export selected session
+
+## Prompt Templates
+
+Read `references/prompt-templates.md` and keep the template body verbatim.
+
+- Do not rewrite template wording.
+- Do not add or remove template sections.
+- Only substitute placeholders.
+
+## Output Format
+
+Use this structure when returning results:
+
+```markdown
+Mode: <improve-existing|create-new>
+Transcript source: <file path|session-id>
+Target skill: <skill-name>
+
+Prompt:
+<final prompt text>
 ```
 
-3. **Find the existing skill:**
-```bash
-   ls ~/.config/opencode/skills/<skill-name>/SKILL.md
-```
+## Validation Checklist
 
-4. **Generate an improvement prompt** for a new session:
-```
-═══════════════════════════════════════════════════════════════════════════════
-COPY THE FOLLOWING PROMPT INTO A NEW OPENCODE SESSION:
-═══════════════════════════════════════════════════════════════════════════════
+Before returning:
 
-I need to improve the "<skill-name>" skill based on a session where I used it.
+- Template text is unchanged (verbatim)
+- Exactly one transcript source is used
+- Session export path is `/tmp/opencode-session.txt` when writing to file
+- Skill path uses `~/.config/opencode/skills/<skill-name>/SKILL.md`
+- Response includes mode, source, target skill, and final prompt
 
-First, read the current skill at: ~/.config/opencode/skills/<skill-name>/SKILL.md
+## Notes
 
-Then analyze this session transcript to understand:
-- Where I struggled to use the skill correctly
-- What information was missing from the skill
-- What examples would have helped
-- What I had to figure out on my own
-
-<session_transcript>
-<paste transcript here>
-</session_transcript>
-
-Based on this analysis, improve the skill by:
-1. Adding missing instructions or clarifications
-2. Adding examples for common use cases discovered
-3. Fixing any incorrect guidance
-4. Making the skill more concise where possible
-
-Write the improved skill back to the same location.
-
-═══════════════════════════════════════════════════════════════════════════════
-```
-
-## Workflow: Create a New Skill
-
-When asked to create a new skill from a session:
-
-1. **List sessions and ask the user to choose one:**
-```bash
-   opencode session list -n 10
-```
-
-2. **Extract the chosen session transcript:**
-```bash
-   SESSION_ID=<user-selected-session-id>
-   opencode export $SESSION_ID > /tmp/session-transcript.txt
-```
-
-3. **Generate a creation prompt** for a new session:
-```
-═══════════════════════════════════════════════════════════════════════════════
-COPY THE FOLLOWING PROMPT INTO A NEW OPENCODE SESSION:
-═══════════════════════════════════════════════════════════════════════════════
-
-Analyze this session transcript to extract a reusable skill called "<skill-name>":
-
-<session_transcript>
-<paste transcript here>
-</session_transcript>
-
-Create a new skill that captures:
-1. The core capability or workflow demonstrated
-2. Key commands, APIs, or patterns used
-3. Common pitfalls and how to avoid them
-4. Example usage for typical scenarios
-
-Write the skill to: ~/.config/opencode/skills/<skill-name>/SKILL.md
-
-Use this format:
----
-name: <skill-name>
-description: "<one-line description>"
----
-
-# <Skill Name> Skill
-
-<overview and quick reference>
-
-## <Section for each major capability>
-
-<instructions and examples>
-
-═══════════════════════════════════════════════════════════════════════════════
-```
-
-## Why a Separate Session?
-
-The improvement prompt is meant to be copied into a **fresh OpenCode session** because:
-
-1. **Token efficiency** - The current session already has a lot of context; starting fresh means only the transcript and skill are loaded
-2. **Clean analysis** - The new session can focus purely on improvement without being influenced by the current task
-3. **Reproducibility** - The prompt is self-contained and can be shared or reused
-
-## Tips for Good Skill Improvements
-
-When analyzing a transcript, look for:
-
-- **Confusion patterns** - Where did the agent retry or change approach?
-- **Missing examples** - What specific commands or code patterns were discovered?
-- **Workarounds** - What did the agent have to figure out that wasn't documented?
-- **Errors** - What failed and how was it resolved?
-- **Successful patterns** - What worked well and should be highlighted?
-
-Keep skills concise - focus on the most important information and examples.
-
-## Quick Reference
-```bash
-# List sessions
-opencode session list -n 10
-
-# Set chosen session ID
-SESSION_ID=<session-id>
-
-# Export session
-opencode export $SESSION_ID
-
-# Save to file
-opencode export $SESSION_ID > /tmp/session.txt
-
-# View skill
-cat ~/.config/opencode/skills/<skill-name>/SKILL.md
-```
+- Use a fresh session for execution to keep analysis clean and token-efficient.
+- If `~/.config/opencode` is symlinked, equivalent real paths are acceptable.
