@@ -32,9 +32,20 @@ bash ~/.config/opencode/skills/agent-workspace-clean/clean_workspace.sh --force
 
 ## Output Contract
 
-If command succeeds, report:
+If command succeeds, parse and report:
 
 - `success: worktree removed`
+- `workspace_path=<absolute path>`
+- `workspace_leftover_count=<number>`
+- zero or more `workspace_leftover=<relative path>`
+- optional `workspace_leftover_truncated=<number>`
+- optional `action_required=ask_user_cleanup_leftovers`
+
+If `action_required=ask_user_cleanup_leftovers` is present:
+
+- Show leftover file paths to user.
+- Ask exactly one question and stop: `Detected <count> leftover files. Continue cleaning files under this agent workspace directory?`
+- Do not delete additional files unless user explicitly confirms.
 
 If command fails (non-zero exit):
 
@@ -49,6 +60,7 @@ If command fails (non-zero exit):
 - Explicit force intent in latest user instruction (`--force`, "force remove") -> run force command.
 - Otherwise -> run non-force command.
 - Never infer force intent from previous turns.
+- If leftover action is required, ask once and stop; wait for explicit user confirmation before any extra cleanup.
 
 ## Failure Handling
 
