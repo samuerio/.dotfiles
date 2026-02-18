@@ -1,0 +1,65 @@
+{
+    "$schema": "https://raw.githubusercontent.com/code-yeongyu/oh-my-opencode/master/assets/oh-my-opencode.schema.json",
+    "agents": {
+        "sisyphus": {
+            "model": "volcengine/doubao-seed-2.0-code"
+        },
+        "hephaestus": {
+            "model": "volcengine/doubao-seed-2.0-code"
+        },
+        "oracle": {
+            "model": "volcengine/doubao-seed-2.0-code"
+        },
+        "librarian": {
+            "model": "volcengine/glm-4.7"
+        },
+        "explore": {
+            "model": "volcengine/doubao-seed-2.0-code"
+        },
+        "multimodal-looker": {
+            "model": "volcengine/kimi-k2.5"
+        },
+        "prometheus": {
+            "model": "volcengine/doubao-seed-2.0-code"
+        },
+        "metis": {
+            "model": "volcengine/doubao-seed-2.0-code"
+        },
+        "momus": {
+            "model": "volcengine/doubao-seed-2.0-code"
+        },
+        "atlas": {
+            "model": "volcengine/doubao-seed-2.0-code"
+        }
+    },
+    "categories": {
+        "visual-engineering": {
+            "model": "volcengine/kimi-k2.5"
+        },
+        "ultrabrain": {
+            "model": "volcengine/doubao-seed-2.0-code"
+        },
+        "deep": {
+            "model": "volcengine/doubao-seed-2.0-code"
+        },
+        "quick": {
+            "model": "volcengine/doubao-seed-2.0-code"
+        },
+        "unspecified-low": {
+            "model": "volcengine/doubao-seed-2.0-code"
+        },
+        "unspecified-high": {
+            "model": "volcengine/doubao-seed-2.0-code"
+        },
+        "writing": {
+            "model": "volcengine/doubao-seed-2.0-code"
+        }
+    },
+    "sisyphus_agent": {
+        "disabled": false
+    },
+    "tmux": {
+        "enabled": false,
+        "layout": "main-vertical"
+    }
+}
