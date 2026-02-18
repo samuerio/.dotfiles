@@ -6,7 +6,7 @@ license: Vibecoded
 
 # tmux Skill
 
-Use tmux as a programmable terminal multiplexer for interactive work. Works on Linux and macOS with stock tmux; avoid custom config by using a private socket.
+Use tmux as a programmable terminal multiplexer for interactive work. Works on Linux and macOS with stock tmux; use user's tmux config with a private socket for isolation.
 
 ## Quickstart (isolated socket)
 
@@ -15,7 +15,7 @@ SOCKET_DIR=${TMPDIR:-/tmp}/claude-tmux-sockets  # well-known dir for all agent s
 mkdir -p "$SOCKET_DIR"
 SOCKET="$SOCKET_DIR/claude.sock"                # keep agent sessions separate from your personal tmux
 SESSION=claude-python                           # slug-like names; avoid spaces
-TMUX=(tmux -f /dev/null -S "$SOCKET")            # -f /dev/null avoids user base-index overrides
+TMUX=(tmux -S "$SOCKET")                           # Loads user's ~/.tmux.conf config
 "${TMUX[@]}" new -d -s "$SESSION" -n shell
 TARGET="$SESSION:0.0"
 "${TMUX[@]}" send-keys -t "$TARGET" -- 'PYTHON_BASIC_REPL=1 python3 -q' Enter
@@ -43,7 +43,7 @@ This must ALWAYS be printed right after a session was started and once again at 
 ## Targeting panes and naming
 
 - Target format: `{session}:{window}.{pane}`, defaults to `:0.0` if omitted. Keep names short (e.g., `claude-py`, `claude-gdb`).
-- Use `-S "$SOCKET"` consistently to stay on the private socket path. If you need user config, drop `-f /dev/null`; otherwise `-f /dev/null` gives a clean config.
+- Use `-S "$SOCKET"` consistently to stay on the private socket path. By default uses user's tmux config; use `-f /dev/null` for a clean config if needed.
 - If you use your tmux config (no `-f /dev/null`), do not assume `:0.0`; discover pane ids via `tmux -S "$SOCKET" list-panes -t "$SESSION" -F '#{session_name}:#{window_index}.#{pane_index}'`.
 - Inspect: `tmux -S "$SOCKET" list-sessions`, `tmux -S "$SOCKET" list-panes -a`.
 
