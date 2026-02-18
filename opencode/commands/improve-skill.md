@@ -8,6 +8,19 @@ User inputs (if provided): `$ARGUMENTS`
 
 ## Inputs
 
+Resolve mode, target skill, and transcript source.
+
+Mode options:
+
+- `improve-existing`: improve an existing skill
+- `create-new`: extract a new reusable skill
+
+When mode is `improve-existing`, available skills are directories under:
+
+```bash
+~/.config/opencode/skills
+```
+
 Resolve transcript source from this priority order:
 
 1. Explicit `session-id` provided by user
@@ -18,6 +31,12 @@ Resolve transcript source from this priority order:
 Use these commands as the single source of truth:
 
 ```bash
+# List available skills (for improve-existing mode)
+ls ~/.config/opencode/skills
+
+# List available skills with numbers (for user selection)
+ls ~/.config/opencode/skills | nl -w1 -s'. '
+
 # List recent sessions
 opencode session list -n 15
 
@@ -39,15 +58,30 @@ Target skill file path:
 
 ## Workflow
 
-1. Resolve transcript source.
-2. Resolve task mode:
+1. Resolve task mode:
    - `improve-existing`: user wants to improve an existing skill
    - `create-new`: user wants to extract a new reusable skill
-3. Use the inline prompt templates in this command file as the single source of truth.
-4. Fill placeholders only:
+2. Resolve target skill name.
+3. Resolve transcript source.
+4. Use the inline prompt templates in this command file as the single source of truth.
+5. Fill placeholders only:
    - `<skill-name>`
    - `<session_transcript>` block content = `/tmp/opencode-session.txt`
-5. Return the final prompt for a fresh OpenCode session.
+6. Return the final prompt for a fresh OpenCode session.
+
+## Skill Name Resolution
+
+Apply these branches in order:
+
+1. If mode is `improve-existing`:
+   - If user provided `<skill-name>`, verify it exists under `~/.config/opencode/skills`
+   - Otherwise, run `ls ~/.config/opencode/skills | nl -w1 -s'. '`, show numbered options, and ask user to choose
+   - Accept either a number or exact skill name from the user
+   - If a number is provided, map it to the corresponding listed skill name
+   - If selection is invalid, show the list again and ask once more
+2. If mode is `create-new`:
+   - Use provided `<skill-name>`
+   - If missing, ask user to provide one
 
 ## Transcript Source Resolution
 
@@ -59,6 +93,17 @@ Apply these branches in order:
    - Show list
    - Ask user to choose session ID
    - Export selected session
+
+## Interaction Prompts
+
+When mode is `improve-existing` and `<skill-name>` is missing, ask using this format:
+
+```text
+Available skills in ~/.config/opencode/skills:
+<numbered list>
+
+Choose a skill by number or exact name.
+```
 
 ## Prompt Templates
 
@@ -163,6 +208,7 @@ Before returning:
 - Session export path is `/tmp/opencode-session.txt` when writing to file
 - `<session_transcript>` block content is `/tmp/opencode-session.txt`
 - Skill path uses `~/.config/opencode/skills/<skill-name>/SKILL.md`
+- In `improve-existing` mode, `<skill-name>` is selected from `~/.config/opencode/skills`
 - Response includes mode, source, target skill, and final prompt
 
 ## Notes
