@@ -1,6 +1,6 @@
 ---
 name: agent-workspace-clean
-description: "Safely remove the current git worktree when it is an agent workspace under <repo>/.worktree/*. Use when the user asks to clean/remove/delete the current agent workspace/worktree. Apply --force only when explicitly requested in the latest user instruction."
+description: "Safely remove the current git worktree only when it is an agent workspace under <repo>/.worktree/*. Use when asked to clean/remove/delete the current agent workspace/worktree. Use --force only if explicitly requested in the latest user message."
 ---
 
 # Agent Workspace Clean
