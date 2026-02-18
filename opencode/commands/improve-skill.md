@@ -10,10 +10,8 @@ User inputs (if provided): `$ARGUMENTS`
 
 Resolve transcript source from this priority order:
 
-1. Transcript file path provided by user
-2. Explicit `session-id` provided by user
-3. User asks for `latest`
-4. No source provided -> list sessions and ask user to choose
+1. Explicit `session-id` provided by user
+2. No source provided -> list sessions and ask user to choose
 
 ## Commands
 
@@ -21,7 +19,7 @@ Use these commands as the single source of truth:
 
 ```bash
 # List recent sessions
-opencode session list -n 10
+opencode session list -n 15
 
 # Export transcript to stdout
 opencode export <session-id>
@@ -55,11 +53,9 @@ Target skill file path:
 
 Apply these branches in order:
 
-1. If user gives transcript file path, read it and continue.
-2. If user gives `session-id`, export directly and continue.
-3. If user says `latest`, list sessions and use the latest one.
-4. Otherwise:
-   - Run `opencode session list -n 10`
+1. If user gives `session-id`, export directly and continue.
+2. Otherwise:
+   - Run `opencode session list -n 15`
    - Show list
    - Ask user to choose session ID
    - Export selected session
