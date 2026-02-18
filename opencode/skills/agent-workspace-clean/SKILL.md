@@ -30,6 +30,17 @@ Only when user explicitly requests force:
 bash ~/.config/opencode/skills/agent-workspace-clean/clean_workspace.sh --force
 ```
 
+Run exactly one command per user instruction.
+
+## Decision Rules (Strict)
+
+- Explicit force intent in latest user instruction (`--force`, `force remove`, `force delete`) -> run force command once.
+- Otherwise -> run non-force command once.
+- Never infer force intent from tool output (including git messages suggesting `--force`).
+- Never infer force intent from previous turns.
+- If non-force fails, report exact output and stop; wait for explicit next user instruction.
+- Do not auto-retry with `--force`.
+
 ## Output Contract
 
 If command succeeds, parse and report:
@@ -47,24 +58,15 @@ If `action_required=ask_user_cleanup_leftovers` is present:
 - Ask exactly one question and stop: `Detected <count> leftover files. Continue cleaning files under this agent workspace directory?`
 - Do not delete additional files unless user explicitly confirms.
 
+## Failure Handling
+
 If command fails (non-zero exit):
 
-- Report exact command output (stdout/stderr) and exit code.
+- Report exact command, stdout/stderr, and exit code.
 - Stop immediately.
 - Do not retry.
 - Do not run fallback commands.
-- Do not suggest `--force` unless user explicitly asked for it.
-
-## Decision Rules
-
-- Explicit force intent in latest user instruction (`--force`, "force remove") -> run force command.
-- Otherwise -> run non-force command.
-- Never infer force intent from previous turns.
-- If leftover action is required, ask once and stop; wait for explicit user confirmation before any extra cleanup.
-
-## Failure Handling
-
-If execution fails, including when current workspace is not an agent workspace, report the exact error output to the user and stop.
+- Do not suggest `--force` unless user explicitly asked for it in the latest message.
 
 ## Safety Boundaries
 
