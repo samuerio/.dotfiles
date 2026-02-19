@@ -1,0 +1,17 @@
+# Agent specific
+agent/sessions/
+agent/auth.json
+agent/bin/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

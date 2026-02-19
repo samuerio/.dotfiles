@@ -22,12 +22,10 @@
 [keyboard]
 bindings = [
   { key = "N", mods = "Control | Shift", action = "CreateNewWindow" },
-  #Nvim Keymap Hack: C-enter 映射为自定义码值, 由于C-enter的码值和enter是一样的，
-  #会导致nvim无法识别，故使用自定义码值(nvim中也定义将该自定义码值识别为C-CR)
+  #CSI u 扩展键盘协议； Shift+Enter, Ctrl+Enter
+  #Nvim 、Pi agent 支持识别其为Shift+Enter, Ctrl+Enter；general multi-line
   { key = "Return", mods = "Control", chars = "\u001b[13;5u" },
-  #Aider Keymap Hack: emitting ESC (a.k.a. \x1b) and Ctrl+M (\x0d) makes aider 
-  #insert a newline without submitting the prompt. Got it working now.
-  { key = "Return", mods = "Shift", chars = "\u001b\u000d" }
+  { key = "Return", mods = "Shift", chars = "\u001b[13;2u" },
 ]
 
 # Colors (Nord)
