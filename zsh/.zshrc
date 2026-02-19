@@ -186,6 +186,8 @@ if [[ $(uname) == "Darwin" ]]; then
 
 elif [[ $(uname) == "Linux" ]]; then
     # 针对 Linux 的命令
+    # Puppeteer/Mermaid CLI configuration
+    export PUPPETEER_EXECUTABLE_PATH="/usr/bin/google-chrome-stable"
     alias vpn='export https_proxy=http://127.0.0.1:7890 http_proxy=http://127.0.0.1:7890 all_proxy=socks5://127.0.0.1:7890'
     alias nd='cd ~/github/.dotfiles && nvim ./'
 
