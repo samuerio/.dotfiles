@@ -1,6 +1,6 @@
 ---
 name: awb
-description: Single-pass Aider Web Bridge: use tmux + Claude Web automation to run /copy-context once, send once, /paste once.
+description: Single-pass Aider Web Bridge，use tmux + Claude Web automation to run /copy-context once, send once, /paste once.
 ---
 
 # awb Skill
