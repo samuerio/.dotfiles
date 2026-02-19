@@ -1,20 +1,28 @@
 /**
- * Desktop Notification Extension
+ * Notification Extension
  *
- * Sends a native desktop notification when the agent finishes and is waiting for input.
- * Uses OSC 777 escape sequence - no external dependencies.
- *
- * Supported terminals: Ghostty, iTerm2, WezTerm, rxvt-unicode
- * Not supported: Kitty (uses OSC 99), Terminal.app, Windows Terminal, Alacritty
+ * Sends a tmux status-line notification when the agent finishes and is waiting for input.
+ * If not running inside tmux, it falls back to OSC 777 desktop notifications.
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Markdown, type MarkdownTheme } from "@mariozechner/pi-tui";
 
+const inTmux = (): boolean => Boolean(process.env.TMUX);
+
+const sendTmuxMessage = async (pi: ExtensionAPI, message: string): Promise<boolean> => {
+	const text = message.trim();
+	if (!text) return false;
+
+	const args = ["display-message", text];
+	const { code } = await pi.exec("tmux", args);
+	return code === 0;
+};
+
 /**
  * Send a desktop notification via OSC 777 escape sequence.
  */
-const notify = (title: string, body: string): void => {
+const notifyDesktop = (title: string, body: string): void => {
 	// OSC 777 format: ESC ] 777 ; notify ; title ; body BEL
 	process.stdout.write(`\x1b]777;notify;${title};${body}\x07`);
 };
@@ -83,6 +91,13 @@ export default function (pi: ExtensionAPI) {
 	pi.on("agent_end", async (event) => {
 		const lastText = extractLastAssistantText(event.messages ?? []);
 		const { title, body } = formatNotification(lastText);
-		notify(title, body);
+		const message = body ? `${title}: ${body}` : title;
+
+		if (inTmux()) {
+			const ok = await sendTmuxMessage(pi, message);
+			if (ok) return;
+		}
+
+		notifyDesktop(title, body);
 	});
 }
