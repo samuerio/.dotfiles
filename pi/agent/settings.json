@@ -3,5 +3,8 @@
   "theme": "light",
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-5.3-codex",
-  "packages": []
+  "packages": [],
+  "compaction": {
+    "enabled": false
+  }
 }
