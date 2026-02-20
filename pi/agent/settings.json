@@ -6,5 +6,7 @@
   "packages": [],
   "compaction": {
     "enabled": false
-  }
+  },
+  "showHardwareCursor": false,
+  "defaultThinkingLevel": "medium"
 }
