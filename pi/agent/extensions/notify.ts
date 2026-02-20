@@ -46,11 +46,39 @@ const shouldNotifyInTmux = async (pi: ExtensionAPI): Promise<boolean> => {
 	return !activePaneIds.includes(notifyPaneId);
 };
 
+const getWindowIdFromPaneId = async (pi: ExtensionAPI, paneId: string): Promise<string | null> => {
+	const { stdout, code } = await pi.exec("tmux", ["display-message", "-p", "-t", paneId, "#{window_id}"]);
+	if (code !== 0) return null;
+	return stdout.trim() || null;
+};
+
+const markWindowAsUnread = async (pi: ExtensionAPI, windowId: string): Promise<boolean> => {
+	// Set @unread option
+	const { code: setCode } = await pi.exec("tmux", ["set", "-w", "-t", windowId, "@unread", "1"]);
+	if (setCode !== 0) return false;
+
+	// Refresh client to update status line immediately
+	const { code: refreshCode } = await pi.exec("tmux", ["refresh-client", "-S"]);
+	return refreshCode === 0;
+};
+
 const sendTmuxMessage = async (pi: ExtensionAPI, message: string): Promise<boolean> => {
 	const text = message.trim();
 	if (!text) return false;
 
 	const { code } = await pi.exec("tmux", ["display-message", text]);
+	
+	// If message sent successfully, mark the window as unread
+	if (code === 0) {
+		const paneId = getNotifyPaneId();
+		if (paneId) {
+			const windowId = await getWindowIdFromPaneId(pi, paneId);
+			if (windowId) {
+				await markWindowAsUnread(pi, windowId);
+			}
+		}
+	}
+	
 	return code === 0;
 };
 
