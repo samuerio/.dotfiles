@@ -7,3 +7,4 @@ linux_rime/user.yaml
 .env
 
 .aider*
+.pi/todos
