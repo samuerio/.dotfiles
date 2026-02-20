@@ -1,8 +1,8 @@
 {
   "lastChangelogVersion": "0.53.0",
   "theme": "light",
-  "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-5.3-codex",
+  "defaultProvider": "volcengine",
+  "defaultModel": "doubao-seed-2.0-code",
   "packages": [],
   "compaction": {
     "enabled": false

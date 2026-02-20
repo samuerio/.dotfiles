@@ -1,0 +1,28 @@
+{
+    "providers": {
+        "volcengine": {
+            "baseUrl": "https://ark.cn-beijing.volces.com/api/coding/v3",
+            "api": "openai-completions",
+            "apiKey": "ARK_API_KEY",
+            "models": [
+                {
+                    "id": "doubao-seed-2.0-code",
+                    "name": "doubao-seed-2.0-code",
+                    "reasoning": false,
+                    "input": [
+                        "text",
+                        "image"
+                    ],
+                    "contextWindow": 256000,
+                    "maxTokens": 32000,
+                    "cost": {
+                        "input": 0.5,
+                        "output": 2.1,
+                        "cacheRead": 0.1,
+                        "cacheWrite": 0
+                    }
+                }
+            ]
+        }
+    }
+}
