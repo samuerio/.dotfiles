@@ -1,9 +1,35 @@
 
 [Default Applications]
-text/html=google-chrome.desktop
+text/html=cursor-text.desktop
 x-scheme-handler/http=google-chrome.desktop
 x-scheme-handler/https=google-chrome.desktop
 x-scheme-handler/about=google-chrome.desktop
 x-scheme-handler/unknown=google-chrome.desktop
 x-scheme-handler/baiduyunguanjia=baidunetdisk.desktop
 inode/directory=thunar.desktop
+text/plain=cursor-text.desktop
+text/markdown=typora.desktop
+text/x-markdown=typora.desktop
+text/x-python=cursor-text.desktop
+text/x-shellscript=cursor-text.desktop
+application/json=cursor-text.desktop
+application/ld+json=cursor-text.desktop
+text/yaml=cursor-text.desktop
+application/yaml=cursor-text.desktop
+application/x-yaml=cursor-text.desktop
+text/x-c=cursor-text.desktop
+text/x-c++src=cursor-text.desktop
+text/x-c++hdr=cursor-text.desktop
+text/x-java=cursor-text.desktop
+text/x-rustsrc=cursor-text.desktop
+text/x-go=cursor-text.desktop
+text/x-typescript=cursor-text.desktop
+application/typescript=cursor-text.desktop
+text/javascript=cursor-text.desktop
+application/javascript=cursor-text.desktop
+application/x-javascript=cursor-text.desktop
+text/css=cursor-text.desktop
+text/xml=cursor-text.desktop
+application/xml=cursor-text.desktop
+application/toml=cursor-text.desktop
+text/x-toml=cursor-text.desktop
