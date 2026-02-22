@@ -21,13 +21,13 @@ Remove the current agent worktree deterministically via the bundled script.
 Default:
 
 ```bash
-bash ~/.config/opencode/skills/agent-workspace-clean/clean_workspace.sh
+bash ~/.agents/skills/agent-workspace-clean/clean_workspace.sh
 ```
 
 Only when user explicitly requests force:
 
 ```bash
-bash ~/.config/opencode/skills/agent-workspace-clean/clean_workspace.sh --force
+bash ~/.agents/skills/agent-workspace-clean/clean_workspace.sh --force
 ```
 
 Run exactly one command per user instruction.

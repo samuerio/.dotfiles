@@ -48,7 +48,7 @@ Then use tmux conventions from that skill (private socket, monitor command, `cap
 Use `skills/awb/scripts/awb-helpers.sh` for deterministic tmux/clipboard operations.
 
 ```bash
-source ~/.config/opencode/skills/awb/scripts/awb-helpers.sh
+source ~/.agents/skills/awb/scripts/awb-helpers.sh
 readarray -t tmux_info < <(awb_init_tmux)
 SOCKET="${tmux_info[0]}"
 SESSION="${tmux_info[1]}"

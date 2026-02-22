@@ -20,7 +20,7 @@ Create an isolated workspace with `git worktree` + `tmux`.
 ## Execute
 
 ```bash
-bash ~/.config/opencode/skills/agent-workspace/create_workspace.sh ["<branch>"]
+bash ~/.agents/skills/agent-workspace/create_workspace.sh ["<branch>"]
 ```
 
 When `branch` is omitted:
@@ -32,7 +32,7 @@ When `branch` is omitted:
 To list only (no switch/create):
 
 ```bash
-bash ~/.config/opencode/skills/agent-workspace/create_workspace.sh --list
+bash ~/.agents/skills/agent-workspace/create_workspace.sh --list
 ```
 
 ## Success Output Contract
@@ -54,7 +54,7 @@ On success, parse command output and report:
 
 Use this caller flow when `branch` is omitted:
 
-1. Run `bash ~/.config/opencode/skills/agent-workspace/create_workspace.sh`.
+1. Run `bash ~/.agents/skills/agent-workspace/create_workspace.sh`.
 2. Parse stdout as `key=value` pairs.
 3. If stdout does not include `mode=list`, treat it as switch/create success and continue.
 4. If `mode=list` and `workspace_count>1`, prompt user to choose one `workspace_<i>_branch` and rerun with that branch.
@@ -68,7 +68,7 @@ Question template for multi-workspace choice:
 Then run:
 
 ```bash
-bash ~/.config/opencode/skills/agent-workspace/create_workspace.sh "<selected-branch>"
+bash ~/.agents/skills/agent-workspace/create_workspace.sh "<selected-branch>"
 ```
 
 If user asks to create a new one instead, ask for a new branch name and run the same command with that branch.

@@ -65,6 +65,9 @@ Plug 'nvim-lua/plenary.nvim'
 Plug 'NickvanDyke/opencode.nvim'
 Plug 'folke/snacks.nvim'
 
+" --- Amp IDE integration
+Plug 'sourcegraph/amp.nvim'
+
 " Plug 'David-Kunz/gen.nvim'
 
 " Plug 'Exafunction/codeium.vim', { 'branch': 'main' }

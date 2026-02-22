@@ -32,7 +32,7 @@ Generate one LOG artifact package with only `symbol` and `trade_time` provided b
 Use:
 
 ```bash
-bash ~/.config/opencode/skills/gen-log-kline/list_symbols.sh
+bash ~/.agents/skills/gen-log-kline/list_symbols.sh
 ```
 
 - If output is `(empty)`: ask user to provide a valid `symbol` manually.
@@ -50,13 +50,13 @@ Template:
 ## Execute
 
 ```bash
-bash ~/.config/opencode/skills/gen-log-kline/gen_log.sh "<trade_time>" --symbol <symbol>
+bash ~/.agents/skills/gen-log-kline/gen_log.sh "<trade_time>" --symbol <symbol>
 ```
 
 Optional mark override:
 
 ```bash
-bash ~/.config/opencode/skills/gen-log-kline/gen_log.sh "<trade_time>" --symbol <symbol> --mark <mark>
+bash ~/.agents/skills/gen-log-kline/gen_log.sh "<trade_time>" --symbol <symbol> --mark <mark>
 ```
 
 ## Report Format

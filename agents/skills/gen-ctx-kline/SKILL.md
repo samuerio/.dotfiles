@@ -34,7 +34,7 @@ Generate context K-line charts once for one symbol + one timestamp.
 Use:
 
 ```bash
-bash ~/.config/opencode/skills/gen-ctx-kline/list_symbols.sh
+bash ~/.agents/skills/gen-ctx-kline/list_symbols.sh
 ```
 
 - If output is `(empty)`: ask user to provide `symbol` manually.
@@ -54,7 +54,7 @@ Template:
 ## Execute
 
 ```bash
-bash ~/.config/opencode/skills/gen-ctx-kline/gen_ctx.sh "<ctx_time>" <mark> --symbol <symbol>
+bash ~/.agents/skills/gen-ctx-kline/gen_ctx.sh "<ctx_time>" <mark> --symbol <symbol>
 ```
 
 ## Report Format
