@@ -11,6 +11,11 @@
       "provider": "openai-codex",
       "modelId": "gpt-5.3-codex",
       "thinkingLevel": "off"
+    },
+    "rush": {
+      "provider": "volcengine",
+      "modelId": "doubao-seed-2.0-code",
+      "thinkingLevel": "medium"
     }
   }
 }

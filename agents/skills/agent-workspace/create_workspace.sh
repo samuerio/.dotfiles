@@ -191,7 +191,7 @@ left_pane="$(tmux display-message -p -t "$target_window" '#{pane_id}')"
 right_pane="$(tmux split-window -h -P -F '#{pane_id}' -t "$target_window" -c "$worktree_path")"
 tmux select-layout -t "$target_window" even-horizontal >/dev/null
 tmux send-keys -t "$left_pane" 'nvim' C-m
-tmux send-keys -t "$right_pane" 'omo' C-m
+tmux send-keys -t "$right_pane" 'amp --ide' C-m
 
 printf 'branch=%s\n' "$branch"
 printf 'worktree_path=%s\n' "$worktree_path"
