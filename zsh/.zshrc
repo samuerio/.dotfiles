@@ -211,8 +211,8 @@ elif [[ $(uname) == "Linux" ]]; then
 
     alias nn='cd ~/Dropbox/EXP/Notes && nvim ./'
     alias ns='cd ~/Dropbox/EXP/Scripts && nvim ./'
-    alias nt='cd ~/Dropbox/GTD/Todo && nvim ./'
-    alias nr='cd ~/Dropbox/GTD/Daily_Report && nvim ./'
+    alias nt='cd ~/Dropbox/GTD/Todo && nvim ./1_flagged.todo.txt'
+    alias nr='cd ~/Dropbox/GTD/Daily_Report && nvim ./template.report.txt'
     alias no='cd ~/Dropbox/GTD/OKR && nvim ./'
     alias td='cd ~/Dropbox/EXP/Notes/DayOne && typora ./'
     alias tt='cd ~/Dropbox/EXP/Notes/Inbox/trade && typora ./'
@@ -257,6 +257,8 @@ elif [[ $(uname) == "Linux" ]]; then
 
 else
 fi
+
+alias todo-workspace="bash ~/.agents/skills/todo-workspace-init/init_todo_workspace.sh"
 
 # To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
