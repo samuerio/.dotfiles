@@ -5,7 +5,7 @@ description: Fetch a YouTube transcript and convert timestamped transcript entri
 
 # YouTube Transcript
 
-Convert YouTube timestamped captions into a **continuous Chinese transcript** (default final deliverable).
+Convert YouTube timestamped captions into a **faithful, non-summarized continuous Chinese transcript** (default final deliverable).
 
 ## Setup
 
@@ -35,23 +35,36 @@ Accepted formats:
 
 2. Read `/tmp/timestamped-transcript-entries.txt`.
 
-3. Convert timestamped entries into a **continuous Chinese transcript**.
+3. Convert timestamped entries into a **continuous Chinese transcript (verbatim-faithful, non-summarized)**.
    - Remove `[mm:ss]` markers in the final Chinese output.
-   - Keep semantic accuracy; do not fabricate missing details.
+   - Keep semantic accuracy and information completeness; do not summarize, compress, or omit content.
+   - Preserve original order and all substantive points/examples/qualifiers.
+   - If content is unclear, mark `[inaudible]`; do not guess.
 
 4. By default, output only: `Continuous Chinese Transcript`.
    - Include timestamped entries only when the user explicitly asks for timestamped output, bilingual output, or segment mapping.
 
-## Conversion Rules (continuous Chinese transcript)
+## Conversion Rules (continuous Chinese transcript, non-summarized)
 
-- Remove timestamp markers (e.g. `[0:12]`) and line-by-line segmentation; merge into natural paragraphs.
-- Fix spoken-style fragmentation and repetitive fillers (e.g. `you know`, `um`, duplicated phrasing).
-- Preserve key information; do not invent facts.
-- Handle proper nouns contextually:
+- This is a transcript conversion task, NOT a summarization task.
+- Remove timestamp markers (e.g. `[0:12]`) and line-by-line segmentation, but keep full content in original order.
+- Do NOT summarize, condense, abstract, or drop “minor” details.
+- You may only do minimal readability cleanup:
+  - fix obvious ASR punctuation/casing issues,
+  - remove accidental exact duplicate fragments caused by subtitle glitches.
+- Keep spoken meaning faithfully; do not rewrite into a shorter form.
+- Preserve key information, examples, caveats, and speaker intent; do not invent facts.
+- Proper nouns:
   - Keep common technical terms in English when appropriate (e.g. React, TypeScript, CUDA).
-  - If a standard Chinese translation exists, you may provide Chinese (optionally Chinese + English on first mention).
+  - If standard Chinese exists, you may use Chinese (optionally Chinese + English on first mention).
 - For missing/unclear content caused by audio/subtitle gaps:
-  - Do not guess specifics; use `[inaudible]` when necessary.
+  - Do not guess specifics; use `[inaudible]`.
+
+## Hard Constraints
+
+- Forbidden output style: summary, bullet-point recap, key takeaways, shortened rewrite.
+- Required output style: full continuous Chinese transcript faithful to source utterances.
+- If the model cannot preserve full content, it must state the missing span explicitly instead of compressing.
 
 ## Final Output Format
 
