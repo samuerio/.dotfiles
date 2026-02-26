@@ -8,3 +8,4 @@ linux_rime/user.yaml
 
 .aider*
 .pi/todos
+**/node_modules/
