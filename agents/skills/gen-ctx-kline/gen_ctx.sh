@@ -2,20 +2,24 @@
 
 set -euo pipefail
 
-if [ "$#" -ne 4 ] || [ "$3" != "--symbol" ]; then
+USE_TEMP=false
+
+if [ "$#" -lt 4 ] || [ "$3" != "--symbol" ]; then
     cat <<EOF
-Error: 参数数量错误
+Error: invalid arguments
 
-用法: $0 <ctx-time> <mark> --symbol <symbol>
-  ctx-time: 上下文时间，格式如 "2025-11-30 14:40"（有空格时请用引号包裹）
-  mark:     时间周期，可选值: 5m, 15m, 1h, 4h
-  symbol:   交易对（必填），例如 BTCUSDT / ETHUSDT / BNBUSDT / FILUSDT
+Usage: $0 <ctx-time> <mark> --symbol <symbol> [--temp]
+  ctx-time: context time, format "YYYY-MM-DD HH:MM" (quote it if it contains spaces)
+  mark:     timeframe mode, one of: 5m, 15m, 1h, 4h
+  symbol:   trading pair (required), e.g. BTCUSDT / ETHUSDT / BNBUSDT / FILUSDT
+  --temp:   optional, output to /home/zhe/Dropbox/Kline/TEMP
 
-示例:
+Examples:
   $0 "2025-11-30 14:40" 5m --symbol FILUSDT
   $0 "2025-12-01 08:30" 15m --symbol BTCUSDT
   $0 "2025-06-15 12:00" 1h --symbol ETHUSDT
   $0 "2025-03-20 00:00" 4h --symbol BNBUSDT
+  $0 "2025-11-30 14:40" 5m --symbol FILUSDT --temp
 EOF
     exit 1
 fi
@@ -23,43 +27,65 @@ fi
 CTX_TIME="$1"
 MARK="$2"
 SYMBOL_INPUT="$4"
+shift 4
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --temp)
+            USE_TEMP=true
+            ;;
+        *)
+            echo "Error: unsupported argument '$1'"
+            echo "Optional flags: --temp"
+            exit 1
+            ;;
+    esac
+    shift
+done
+
 SYMBOL="$(printf '%s' "$SYMBOL_INPUT" | tr '[:lower:]' '[:upper:]')"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 PROJECT_DIR="$HOME/github/crypto-kline-toolkit"
 SYMBOL_ROOT="$HOME/Dropbox/Kline/$SYMBOL"
 INDICATORS_DIR="$SYMBOL_ROOT/data/indicators"
-OUTPUT_DIR="$SYMBOL_ROOT/ctx"
+TEMP_OUTPUT_DIR="/home/zhe/Dropbox/Kline/TEMP"
+
+if [ "$USE_TEMP" = true ]; then
+    OUTPUT_DIR="$TEMP_OUTPUT_DIR"
+else
+    OUTPUT_DIR="$SYMBOL_ROOT/ctx"
+fi
 
 if ! [[ "$CTX_TIME" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]][0-9]{2}:[0-9]{2}$ ]]; then
-    echo "Error: ctx-time 格式错误，必须为 YYYY-MM-DD HH:MM"
+    echo "Error: invalid ctx-time format, expected YYYY-MM-DD HH:MM"
     exit 1
 fi
 
 if [ -z "$SYMBOL" ]; then
-    echo "Error: --symbol 不能为空"
+    echo "Error: --symbol cannot be empty"
     exit 1
 fi
 
 if ! [[ "$SYMBOL" =~ ^[A-Z0-9]+$ ]]; then
-    echo "Error: symbol 格式错误，必须是字母数字组合，例如 BTCUSDT"
+    echo "Error: invalid symbol format, expected uppercase alphanumeric, e.g. BTCUSDT"
     exit 1
 fi
 
 if ! command -v uv >/dev/null 2>&1; then
-    echo "Error: uv 命令未找到，请确保已安装 uv (https://github.com/astral-sh/uv)"
+    echo "Error: uv command not found. Please install uv: https://github.com/astral-sh/uv"
     exit 1
 fi
 
 if [ ! -f "$PROJECT_DIR/pyproject.toml" ]; then
-    echo "Error: 项目目录无效或缺少 pyproject.toml: $PROJECT_DIR"
+    echo "Error: invalid project directory or missing pyproject.toml: $PROJECT_DIR"
     exit 1
 fi
 
 if [ ! -d "$INDICATORS_DIR" ]; then
-    echo "Error: 数据目录不存在: $INDICATORS_DIR"
+    echo "Error: indicators directory not found: $INDICATORS_DIR"
     if [ -f "$SCRIPT_DIR/list_symbols.sh" ]; then
-        echo "可用 symbol 列表（本地有指标数据）:"
+        echo "Available symbols (with local indicator data):"
         bash "$SCRIPT_DIR/list_symbols.sh" || true
     fi
     exit 1
@@ -73,7 +99,7 @@ select_latest_indicators() {
     shopt -u nullglob
 
     if [ "${#candidates[@]}" -eq 0 ]; then
-        echo "Error: 未找到周期 ${timeframe} 的指标文件: $INDICATORS_DIR/${SYMBOL}_${timeframe}_*_indicators.csv" >&2
+        echo "Error: no indicator file found for timeframe ${timeframe}: $INDICATORS_DIR/${SYMBOL}_${timeframe}_*_indicators.csv" >&2
         return 1
     fi
 
@@ -110,13 +136,13 @@ case "$MARK" in
         TIMEFRAMES=("1h" "4h" "1d" "1w")
         ;;
     *)
-        echo "Error: 不支持的 mark 值 '$MARK'"
-        echo "支持的值: 5m, 15m, 1h, 4h"
+        echo "Error: unsupported mark value '$MARK'"
+        echo "Supported values: 5m, 15m, 1h, 4h"
         exit 1
         ;;
 esac
 
-echo "[$MARK 模式] 选择数据源..."
+echo "[$MARK mode] selecting indicator sources..."
 for timeframe in "${TIMEFRAMES[@]}"; do
     selected_file="$(select_latest_indicators "$timeframe")"
     FILES+=("$selected_file")
@@ -126,10 +152,11 @@ done
 mkdir -p "$OUTPUT_DIR"
 
 echo ""
-echo "开始生成上下文..."
+echo "Generating context K-line..."
 echo "  Symbol: $SYMBOL"
 echo "  Context Time: $CTX_TIME"
 echo "  Mark: $MARK"
+echo "  Temp Mode: $USE_TEMP"
 echo "  Output Root: $OUTPUT_DIR"
 echo ""
 
@@ -144,4 +171,4 @@ ctx_time_formatted="$(date -d "$CTX_TIME" +"%Y%m%d_%H%M")"
 final_output_dir="$OUTPUT_DIR/CTX_${SYMBOL}_${ctx_time_formatted}_${MARK}"
 
 echo ""
-echo "✓ 执行成功，输出位于: $final_output_dir"
+echo "✓ Success. Output: $final_output_dir"

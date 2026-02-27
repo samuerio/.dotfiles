@@ -230,11 +230,21 @@ customCommands:
     output: terminal
   - key: '<c-g>'
     context: 'files'
-    command: "git d HEAD -- {{.SelectedPath}}"
-    description: "Show selected file changes"
+    command: "git d -- {{.SelectedPath}}"
+    description: "Show selected file unstaged changes"
     output: terminal
   - key: '<c-o>'
     context: 'files'
-    command: "git diff HEAD -- {{.SelectedPath}}"
-    description: "Show selected file changes"
+    command: "clear && git diff -- {{.SelectedPath}}"
+    description: "Show selected file unstaged  changes"
+    output: terminal
+  - key: 'G'
+    context: 'files'
+    command: "git d --staged -- {{.SelectedPath}}"
+    description: "Show selected file staged changes"
+    output: terminal
+  - key: 'O'
+    context: 'files'
+    command: "clear && git diff --staged -- {{.SelectedPath}}"
+    description: "Show selected file staged  changes"
     output: terminal

@@ -26,10 +26,12 @@ bindings = [
   #Nvim 、Pi agent 支持识别其为Shift+Enter, Ctrl+Enter；general multi-line
   { key = "Return", mods = "Control", chars = "\u001b[13;5u" },
   { key = "Return", mods = "Shift", chars = "\u001b[13;2u" },
-  # 显式发送 Ctrl+Shift+M/W/R，使用自定义序列避免歧义
+  # 显式发送 Ctrl+Shift+M/W/R/O/G，使用自定义序列避免歧义
   { key = "M", mods = "Control | Shift", chars = "\u001b[5;30012~" },
   { key = "W", mods = "Control | Shift", chars = "\u001b[5;30013~" },
   { key = "R", mods = "Control | Shift", chars = "\u001b[5;30014~" },
+  { key = "O", mods = "Control | Shift", chars = "\u001b[5;30015~" },
+  { key = "G", mods = "Control | Shift", chars = "\u001b[5;30016~" },
 ]
 
 # Colors (Nord)
