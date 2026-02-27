@@ -1,6 +1,6 @@
 ---
 name: youtube-transcript
-description: Fetch a YouTube transcript and convert timestamped transcript entries into a continuous Chinese transcript for reading.
+description: Fetch a YouTube transcript and convert timestamped transcript entries into a continuous Chinese transcript for reading. Optionally render transcript output to shareable HTML and publish via filecoin-pin when the user explicitly requests sharing.
 ---
 
 # YouTube Transcript
@@ -44,6 +44,22 @@ Accepted formats:
 4. By default, output only: `Continuous Chinese Transcript`.
    - Include timestamped entries only when the user explicitly asks for timestamped output, bilingual output, or segment mapping.
 
+## Optional Share Branch (only on explicit share request)
+
+Run this branch only when the user explicitly asks to share, publish, or provide a public link.
+
+1. Render transcript output (and optional analysis if requested) as HTML under `/tmp`.
+2. Upload with:
+
+```bash
+filecoin-pin add /tmp/<html-file>
+```
+
+3. Parse `filecoin-pin add` stdout and return the share URL exactly as provided by the command output.
+4. Also return the raw upload command output for traceability.
+
+If stdout does not include a share URL, return a clear error and include full stdout/stderr.
+
 ## Conversion Rules (continuous Chinese transcript, non-summarized)
 
 - This is a transcript conversion task, NOT a summarization task.
@@ -72,6 +88,10 @@ Return in this structure:
 
 1. `Continuous Chinese Transcript` (required)
 2. `Optional Appendix: Timestamped Transcript Entries` (only when requested)
+3. `Optional Share Artifacts` (only when share branch is triggered):
+   - `HTML Path`
+   - `Share URL` (from `filecoin-pin add` output)
+   - `Upload Command Output` (raw)
 
 ## Notes
 
