@@ -27,8 +27,9 @@ SYMBOL="$(printf '%s' "$SYMBOL_INPUT" | tr '[:lower:]' '[:upper:]')"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 PROJECT_DIR="$HOME/github/crypto-kline-toolkit"
-BASE_DIR="$HOME/Dropbox/Kline/$SYMBOL/data/indicators"
-OUTPUT_DIR="$HOME/Dropbox/Kline/$SYMBOL/CTX"
+SYMBOL_ROOT="$HOME/Dropbox/Kline/$SYMBOL"
+INDICATORS_DIR="$SYMBOL_ROOT/data/indicators"
+OUTPUT_DIR="$SYMBOL_ROOT/ctx"
 
 if ! [[ "$CTX_TIME" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]][0-9]{2}:[0-9]{2}$ ]]; then
     echo "Error: ctx-time 格式错误，必须为 YYYY-MM-DD HH:MM"
@@ -55,8 +56,8 @@ if [ ! -f "$PROJECT_DIR/pyproject.toml" ]; then
     exit 1
 fi
 
-if [ ! -d "$BASE_DIR" ]; then
-    echo "Error: 数据目录不存在: $BASE_DIR"
+if [ ! -d "$INDICATORS_DIR" ]; then
+    echo "Error: 数据目录不存在: $INDICATORS_DIR"
     if [ -f "$SCRIPT_DIR/list_symbols.sh" ]; then
         echo "可用 symbol 列表（本地有指标数据）:"
         bash "$SCRIPT_DIR/list_symbols.sh" || true
@@ -68,11 +69,11 @@ select_latest_indicators() {
     local timeframe="$1"
     local -a candidates=()
     shopt -s nullglob
-    candidates=("$BASE_DIR/${SYMBOL}_${timeframe}_"*_indicators.csv)
+    candidates=("$INDICATORS_DIR/${SYMBOL}_${timeframe}_"*_indicators.csv)
     shopt -u nullglob
 
     if [ "${#candidates[@]}" -eq 0 ]; then
-        echo "Error: 未找到周期 ${timeframe} 的指标文件: $BASE_DIR/${SYMBOL}_${timeframe}_*_indicators.csv" >&2
+        echo "Error: 未找到周期 ${timeframe} 的指标文件: $INDICATORS_DIR/${SYMBOL}_${timeframe}_*_indicators.csv" >&2
         return 1
     fi
 
