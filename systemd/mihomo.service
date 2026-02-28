@@ -1,0 +1,12 @@
+[Unit]
+Description=mihomo Service
+After=network.target
+
+[Service]
+Type=simple
+User=zhe
+Restart=always
+ExecStart=/usr/bin/mihomo
+
+[Install]
+WantedBy=multi-user.target

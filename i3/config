@@ -216,7 +216,8 @@ exec --no-startup-id fcitx5 -d
 #exec --no-startup-id /usr/lib/geoclue-2.0/demos/agent
 #exec --no-startup-id redshift-gtk
 
-exec --no-startup-id mihomo
+# 改为mihomo.service了，用systemctl控制
+# exec --no-startup-id mihomo
 
 #exec --no-startup-id xmodmap ~/.Xmodmap
 #exec --no-startup-id xbindkeys
