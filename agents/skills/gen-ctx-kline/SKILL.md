@@ -74,9 +74,9 @@ bash ~/.agents/skills/gen-ctx-kline/gen_ctx.sh "<ctx_time>" <mark> --symbol <sym
 
 - `inputs`: normalized `ctx_time`, `mark`, `symbol`
 - `temp_mode`: true or false
-- `output_root`: actual output root path used by the script
+- `output_dir`: output dir
 - `status`: success or failure
 - `artifacts`: output files/paths
 - `error`: concise reason + next user action when failed
 
-Then tell the user to use `ranger <output_root>` to continue.
+Then tell the user to use `ranger <output_dir>` to continue.
