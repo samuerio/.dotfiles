@@ -258,7 +258,7 @@ elif [[ $(uname) == "Linux" ]]; then
 else
 fi
 
-alias todo-workspace="bash ~/.agents/skills/todo-workspace-init/init_todo_workspace.sh"
+alias init-todo-workspace="bash ~/github/.dotfiles/tmux/scripts/init_todo_workspace.sh"
 
 # To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
