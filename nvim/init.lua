@@ -149,8 +149,8 @@ vim.cmd([[
 utils.nmap('<leader>p', ':<C-u>set paste<cr>')
 utils.nmap('<leader>P', ':<C-u>set nopaste<cr>')
 
-utils.nmap('cp', ':let @+ = fnamemodify(resolve(expand("%:p")), ":p")<cr>')
-utils.nmap('cP', ':let @+ = fnamemodify(expand("%:p"), ":.")<cr>')
+utils.nmap('cP', ':let @+ = fnamemodify(resolve(expand("%:p")), ":p")<cr>')
+utils.nmap('cp', ':let @+ = fnamemodify(expand("%:p"), ":.")<cr>')
 utils.nmap('cn', ':let @+ = expand("%:t")<cr>')
 
 

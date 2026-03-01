@@ -360,9 +360,9 @@ map <silent> <leader>n :NvimTreeFindFile<CR>
 
 
 "Copy File Path
-nnoremap <silent><leader>cp :let @+ = fnamemodify(resolve(expand("%:p")), ":p")<cr>
+nnoremap <silent><leader>cP :let @+ = fnamemodify(resolve(expand("%:p")), ":p")<cr>
 "Copy File Path (Relative)
-nnoremap <silent><leader>cP :let @+ = fnamemodify(expand("%:p"), ":.")<cr>
+nnoremap <silent><leader>cp :let @+ = fnamemodify(expand("%:p"), ":.")<cr>
 "Copy File Name
 nnoremap <silent><leader>cn :let @+ = expand("%:t")<cr>
 " 转化为垂直/水平分屏
