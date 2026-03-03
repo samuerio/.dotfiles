@@ -2,6 +2,7 @@
 agent/sessions/
 agent/auth.json
 agent/bin/
+agent/settings.json
 
 # Logs
 *.log
