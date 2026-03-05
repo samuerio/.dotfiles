@@ -1,6 +1,6 @@
 ---
 name: ui-preview
-description: ""
+description: "Start local services in tmux, open the app in browser, and validate UI preview flows with actionable feedback."
 ---
 
 # Ui Preview
