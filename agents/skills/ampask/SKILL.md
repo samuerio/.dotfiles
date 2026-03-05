@@ -1,11 +1,11 @@
 ---
 name: ampask
-description: Searches for AMPASK comments in the codebase, answers the embedded questions, then removes AMPASK markers after resolution.
+description: Searches for AMPASK comments in the codebase, answers the embedded questions, then removes AMPASK comments after resolution.
 ---
 
 # Ampask
 
-Search for `AMPASK:` comments in the codebase, answer each question directly, and remove the `AMPASK:` marker once resolved.
+Search for `AMPASK:` comments in the codebase, answer each question directly, and remove resolved `AMPASK:` comments.
 
 ## When to Use
 
@@ -26,9 +26,8 @@ rg "AMPASK:" -C 3
 - Read each `AMPASK:` question with surrounding context
 - Provide a direct answer to the user
 - Do not implement feature/code/doc changes for answering
-- Only edit the marker line itself after resolution:
-  - resolved: remove `AMPASK:` marker
-  - unresolved (insufficient context): keep it and rename to `AMPASK(BLOCKED):`
+- After resolution, remove the `AMPASK:` comment
+- If unresolved (insufficient context), keep the comment as-is
 - Preserve all unrelated code and comments exactly as-is
 
 ## Output Format
@@ -38,7 +37,7 @@ rg "AMPASK:" -C 3
   - line number
   - original question (1 line)
   - direct answer
-  - marker action (`removed` or `blocked`)
+  - marker action (`removed` or `kept`)
 - End with unresolved blockers (if any)
 
 ## Expected Actions
@@ -47,6 +46,6 @@ After finding `AMPASK:` comments:
 
 1. Understand each question from local context
 2. Answer the question directly
-3. Remove resolved `AMPASK:` markers only
-4. Convert unresolved markers to `AMPASK(BLOCKED): ...`
+3. Remove resolved `AMPASK:` comments once addressed
+4. Keep unresolved comments unchanged
 5. Report all handled items and blockers
