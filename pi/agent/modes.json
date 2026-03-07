@@ -14,7 +14,7 @@
     },
     "smart": {
       "provider": "openai-codex",
-      "modelId": "gpt-5.2",
+      "modelId": "gpt-5.4",
       "thinkingLevel": "off"
     },
     "deep": {
