@@ -7,14 +7,19 @@
       "modelId": "gpt-5.3-codex",
       "thinkingLevel": "medium"
     },
-    "fast": {
-      "provider": "openai-codex",
-      "modelId": "gpt-5.3-codex",
-      "thinkingLevel": "off"
-    },
     "rush": {
       "provider": "volcengine",
       "modelId": "doubao-seed-2.0-code",
+      "thinkingLevel": "medium"
+    },
+    "smart": {
+      "provider": "openai-codex",
+      "modelId": "gpt-5.2",
+      "thinkingLevel": "off"
+    },
+    "deep": {
+      "provider": "openai-codex",
+      "modelId": "gpt-5.3-codex",
       "thinkingLevel": "medium"
     }
   }
