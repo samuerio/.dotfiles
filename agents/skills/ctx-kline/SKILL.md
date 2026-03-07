@@ -1,9 +1,9 @@
 ---
-name: gen-ctx-kline
+name: ctx-kline
 description: "Generate multi-symbol context K-line charts at a target timestamp and report output artifacts."
 ---
 
-# Gen Ctx Kline
+# Ctx Kline
 
 Generate context K-line charts once for one symbol + one timestamp.
 
@@ -45,7 +45,7 @@ When `temp_mode=true`, append `--temp` to the execution command.
 Use:
 
 ```bash
-bash ~/.agents/skills/gen-ctx-kline/list_symbols.sh
+bash ~/.agents/skills/ctx-kline/list_symbols.sh
 ```
 
 - If output is `(empty)`: ask user to provide `symbol` manually.
@@ -65,7 +65,7 @@ Template:
 ## Execute
 
 ```bash
-bash ~/.agents/skills/gen-ctx-kline/gen_ctx.sh "<ctx_time>" <mark> --symbol <symbol> [--temp]
+bash ~/.agents/skills/ctx-kline/gen_ctx.sh "<ctx_time>" <mark> --symbol <symbol> [--temp]
 ```
 
 - Append `--temp` when `temp_mode=true`.

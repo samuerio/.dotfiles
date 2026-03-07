@@ -5,7 +5,7 @@ set -euo pipefail
 BASE_ROOT="${1:-$HOME/Dropbox/Kline}"
 
 if [ ! -d "$BASE_ROOT" ]; then
-    echo "Error: 目录不存在: $BASE_ROOT" >&2
+    echo "Error: directory not found: $BASE_ROOT" >&2
     exit 1
 fi
 
