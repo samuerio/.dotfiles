@@ -110,6 +110,9 @@
     "workspace.workspaceFolderCheckCwd": false,
     "rust-analyzer.workspace.symbol.search.scope": "workspace_and_dependencies",
     "rust-analyzer.server.path": "/usr/local/bin/rust-analyzer",
+    "typescript.format.enable": false,
+    "javascript.format.enable": false,
+    "prettier.disableLanguages": [],
     "coc.preferences.extensionUpdateCheck": "never",
     "coc.preferences.formatOnSaveFiletypes": [
         "rust",
@@ -117,8 +120,8 @@
         "json",
         "python",
         "javascript",
-        "lua",
         "typescript",
+        "lua",
         "java"
     ],
     "rust-analyzer.updates.checkOnStartup": false,
