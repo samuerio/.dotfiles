@@ -127,6 +127,10 @@
     "python.analysis.typeCheckingMode": "on",
     "python.formatting.provider": "black",
     "python.formatting.blackPath": "/home/zhe/.local/bin/black",
+    "python.formatting.blackArgs": [
+        "--fast"
+    ],
+    "python.formatting.timeout": 1000,
     "python.formatting.autopep8Path": "/usr/bin/autopep8",
     "list.normalMappings": {
         "<C-o>": "do:togglemode",
