@@ -1,75 +1,65 @@
 {
-    "$schema": "https://raw.githubusercontent.com/code-yeongyu/oh-my-opencode/master/assets/oh-my-opencode.schema.json",
-    "agents": {
-        "sisyphus": {
-            "model": "openai/gpt-5.3-codex",
-            "variant": "high"
-        },
-        "hephaestus": {
-            "model": "openai/gpt-5.3-codex",
-            "variant": "medium"
-        },
-        "oracle": {
-            "model": "openai/gpt-5.2",
-            "variant": "high"
-        },
-        "librarian": {
-            "model": "volcengine/doubao-seed-2.0-code"
-        },
-        "explore": {
-            "model": "opencode/gpt-5.1-codex-mini"
-        },
-        "multimodal-looker": {
-            "model": "volcengine/doubao-seed-2.0-code"
-        },
-        "prometheus": {
-            "model": "openai/gpt-5.2",
-            "variant": "high"
-        },
-        "metis": {
-            "model": "openai/gpt-5.2",
-            "variant": "high"
-        },
-        "momus": {
-            "model": "openai/gpt-5.2",
-            "variant": "medium"
-        },
-        "atlas": {
-            "model": "openai/gpt-5.2"
-        }
+  "$schema": "https://raw.githubusercontent.com/code-yeongyu/oh-my-opencode/master/assets/oh-my-opencode.schema.json",
+  "agents": {
+    "sisyphus": {
+      "model": "volcengine/doubao-seed-2.0-pro"
     },
-    "categories": {
-        "visual-engineering": {
-            "model": "volcengine/doubao-seed-2.0-code"
-        },
-        "ultrabrain": {
-            "model": "openai/gpt-5.3-codex",
-            "variant": "xhigh"
-        },
-        "deep": {
-            "model": "openai/gpt-5.3-codex",
-            "variant": "medium"
-        },
-        "quick": {
-            "model": "openai/gpt-5.3-codex"
-        },
-        "unspecified-low": {
-            "model": "openai/gpt-5.3-codex",
-            "variant": "medium"
-        },
-        "unspecified-high": {
-            "model": "openai/gpt-5.3-codex",
-            "variant": "medium"
-        },
-        "writing": {
-            "model": "openai/gpt-5.2"
-        }
+    "hephaestus": {
+      "model": "volcengine/doubao-seed-2.0-code"
     },
-    "sisyphus_agent": {
-        "disabled": false
+    "oracle": {
+      "model": "volcengine/doubao-seed-2.0-pro"
     },
-    "tmux": {
-        "enabled": false,
-        "layout": "main-vertical"
+    "librarian": {
+      "model": "volcengine/glm-4.7"
+    },
+    "explore": {
+      "model": "volcengine/doubao-seed-2.0-code"
+    },
+    "multimodal-looker": {
+      "model": "volcengine/kimi-k2.5"
+    },
+    "prometheus": {
+      "model": "volcengine/doubao-seed-2.0-pro"
+    },
+    "metis": {
+      "model": "volcengine/doubao-seed-2.0-pro"
+    },
+    "momus": {
+      "model": "volcengine/doubao-seed-2.0-pro"
+    },
+    "atlas": {
+      "model": "volcengine/doubao-seed-2.0-pro"
     }
+  },
+  "categories": {
+    "visual-engineering": {
+      "model": "volcengine/kimi-k2.5"
+    },
+    "ultrabrain": {
+      "model": "volcengine/doubao-seed-2.0-code"
+    },
+    "deep": {
+      "model": "volcengine/doubao-seed-2.0-code"
+    },
+    "quick": {
+      "model": "volcengine/doubao-seed-2.0-code"
+    },
+    "unspecified-low": {
+      "model": "volcengine/doubao-seed-2.0-code"
+    },
+    "unspecified-high": {
+      "model": "volcengine/doubao-seed-2.0-code"
+    },
+    "writing": {
+      "model": "volcengine/doubao-seed-2.0-code"
+    }
+  },
+  "sisyphus_agent": {
+    "disabled": false
+  },
+  "tmux": {
+    "enabled": false,
+    "layout": "main-vertical"
+  }
 }

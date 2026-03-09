@@ -5,10 +5,6 @@
             "model": "openai/gpt-5.3-codex",
             "variant": "high"
         },
-        "Sisyphus-Junior": {
-            "model": "openai/gpt-5.3-codex",
-            "variant": "medium"
-        },
         "hephaestus": {
             "model": "openai/gpt-5.3-codex",
             "variant": "medium"
@@ -18,13 +14,13 @@
             "variant": "high"
         },
         "librarian": {
-            "model": "volcengine/glm-4.7"
+            "model": "volcengine/doubao-seed-2.0-code"
         },
         "explore": {
             "model": "opencode/gpt-5.1-codex-mini"
         },
         "multimodal-looker": {
-            "model": "volcengine/kimi-k2.5"
+            "model": "volcengine/doubao-seed-2.0-code"
         },
         "prometheus": {
             "model": "openai/gpt-5.2",
@@ -44,7 +40,7 @@
     },
     "categories": {
         "visual-engineering": {
-            "model": "volcengine/kimi-k2.5"
+            "model": "volcengine/doubao-seed-2.0-code"
         },
         "ultrabrain": {
             "model": "openai/gpt-5.3-codex",
@@ -55,7 +51,7 @@
             "variant": "medium"
         },
         "quick": {
-            "model": "volcengine/glm-4.7"
+            "model": "openai/gpt-5.3-codex"
         },
         "unspecified-low": {
             "model": "openai/gpt-5.3-codex",
@@ -71,5 +67,9 @@
     },
     "sisyphus_agent": {
         "disabled": false
+    },
+    "tmux": {
+        "enabled": false,
+        "layout": "main-vertical"
     }
 }
