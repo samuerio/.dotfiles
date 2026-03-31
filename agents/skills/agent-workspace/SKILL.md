@@ -3,8 +3,6 @@ name: agent-workspace
 description: "Create a branch-scoped git worktree + tmux workspace."
 ---
 
-# Agent Workspace
-
 Create an isolated workspace with `git worktree` + `tmux`.
 
 ## Usage

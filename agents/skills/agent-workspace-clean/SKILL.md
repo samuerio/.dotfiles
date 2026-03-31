@@ -3,8 +3,6 @@ name: agent-workspace-clean
 description: "Remove current git worktree under <repo>/.worktree/*. Pass --force only if explicitly requested."
 ---
 
-# Agent Workspace Clean
-
 ## Execute
 
 ```bash
