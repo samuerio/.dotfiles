@@ -1,6 +1,6 @@
 ---
 name: agent-workspace
-description: "Create a branch-scoped git worktree and tmux workspace. Use when the user asks to start/switch an isolated branch workspace, create a worktree for a branch, or open a branch-specific tmux coding environment."
+description: "Create a branch-scoped git worktree + tmux workspace."
 ---
 
 # Agent Workspace
