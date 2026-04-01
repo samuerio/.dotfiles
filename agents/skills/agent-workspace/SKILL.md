@@ -9,28 +9,21 @@ Create an isolated workspace with `git worktree` + `tmux`.
 
 ```bash
 # Create or switch to a branch workspace
-bash ~/.agents/skills/agent-workspace/create_workspace.sh ["<branch>"]
+bash ~/.agents/skills/agent-workspace/workspace.sh open "<branch>"
 
 # List existing workspaces
-bash ~/.agents/skills/agent-workspace/create_workspace.sh --list
+bash ~/.agents/skills/agent-workspace/workspace.sh list
 ```
 
-**When `branch` is omitted:**
-- 1 workspace → auto-select and switch
-- Multiple → print list and exit 0
-- None → exit non-zero, ask for branch
+`workspace.sh open` requires the `open` subcommand explicitly.
+
+`workspace.sh open` requires `branch` explicitly. If it is omitted, the script prints an error and usage, then exits with code `2`.
 
 ## Output (key=value)
 
 **Switch/create:** `branch`, `worktree_path`, `worktree_created=<yes|no>`, `attach=<cmd>` (outside tmux only)
 
 **List:** `mode=list`, `workspace_count`, `workspace_<i>_branch`, `workspace_<i>_path`
-
-## Multi-workspace Flow
-
-1. Run without branch → parse stdout
-2. If `mode=list` and `workspace_count>1` → prompt user to choose a branch
-3. Rerun with chosen branch
 
 ## Notes
 

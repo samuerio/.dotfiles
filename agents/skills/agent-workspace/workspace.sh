@@ -2,25 +2,40 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: $0 [--list] [branch]" >&2
+  echo "usage: $0 open <branch> | list" >&2
 }
 
-list_only="no"
+command="${1:-}"
 branch=""
 
-if [ "${1:-}" = "--list" ]; then
-  list_only="yes"
-  shift
-fi
-
-if [ "$#" -gt 1 ] || { [ "$list_only" = "yes" ] && [ "$#" -gt 0 ]; }; then
+if [ -z "$command" ]; then
   usage
   exit 2
 fi
 
-if [ "$#" -eq 1 ]; then
-  branch="$1"
-fi
+shift
+
+case "$command" in
+  list)
+    if [ "$#" -ne 0 ]; then
+      usage
+      exit 2
+    fi
+    ;;
+  open)
+    if [ "$#" -ne 1 ]; then
+      echo "error: branch is required for 'open'" >&2
+      usage
+      exit 2
+    fi
+
+    branch="$1"
+    ;;
+  *)
+    usage
+    exit 2
+    ;;
+esac
 
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 if [ -z "$repo_root" ]; then
@@ -112,26 +127,9 @@ branch_for_workspace_path() {
 
 collect_agent_workspaces
 
-if [ "$list_only" = "yes" ]; then
+if [ "$command" = "list" ]; then
   print_agent_workspace_list
   exit 0
-fi
-
-if [ -z "$branch" ]; then
-  workspace_count="${#AGENT_BRANCHES[@]}"
-
-  if [ "$workspace_count" -eq 0 ]; then
-    echo "error: no existing agent workspace found; provide <branch> to create one" >&2
-    exit 1
-  fi
-
-  if [ "$workspace_count" -gt 1 ]; then
-    print_agent_workspace_list
-    echo "select a branch from the list and rerun with: $0 <branch>" >&2
-    exit 0
-  fi
-
-  branch="${AGENT_BRANCHES[0]}"
 fi
 
 branch_tail="${branch##*/}"
