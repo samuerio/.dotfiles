@@ -10,7 +10,7 @@
     "rush": {
       "provider": "volcengine",
       "modelId": "doubao-seed-2.0-code",
-      "thinkingLevel": "medium"
+      "thinkingLevel": "off"
     },
     "smart": {
       "provider": "openai-codex",
