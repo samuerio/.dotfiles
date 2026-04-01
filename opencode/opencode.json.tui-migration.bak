@@ -54,5 +54,9 @@
       "type": "local",
       "command": ["npx", "-y", "chrome-devtools-mcp@latest"]
     }
+  },
+  "keybinds": {
+    "input_clear": "ctrl+y",
+    "model_list": "ctrl+l"
   }
 }

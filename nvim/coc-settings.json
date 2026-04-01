@@ -9,32 +9,15 @@
     "languageserver": {
         "go": {
             "command": "gopls",
-            "rootPatterns": [
-                "go.mod",
-                ".vim/",
-                ".git/",
-                ".hg/"
-            ],
+            "rootPatterns": ["go.mod", ".vim/", ".git/", ".hg/"],
             "trace.server": "verbose",
-            "filetypes": [
-                "go"
-            ]
+            "filetypes": ["go"]
         },
         "clangd": {
             "command": "clangd",
-            "rootPatterns": [
-                "compile_flags.txt",
-                "compile_commands.json"
-            ],
-            "filetypes": [
-                "c",
-                "cc",
-                "cpp",
-                "c++",
-                "objc",
-                "objcpp"
-            ]
-        },
+            "rootPatterns": ["compile_flags.txt", "compile_commands.json"],
+            "filetypes": ["c", "cc", "cpp", "c++", "objc", "objcpp"]
+        }
         //"solidity": {
         //"command": "/Users/zhenghe/source/github/.dotfiles/solc-macos",
         //"args": [
@@ -101,10 +84,7 @@
         //}
     },
     //为了避免将GOPATH里面的依赖，也当成工作区。保证一个项目只能有一个工作区
-    "workspace.ignoredFolders": [
-        "$GOPATH/**",
-        "$HOME"
-    ],
+    "workspace.ignoredFolders": ["$GOPATH/**", "$HOME"],
     //当找不到当前文件的工作区的时候，也不要将当前文件的所在路径当成工作区
     "workspace.workspaceFolderFallbackCwd": false,
     "workspace.workspaceFolderCheckCwd": false,
@@ -113,6 +93,8 @@
     "typescript.format.enable": false,
     "javascript.format.enable": false,
     "prettier.disableLanguages": [],
+    "prettier.tabWidth": 4,
+    "prettier.useTabs": false,
     "coc.preferences.extensionUpdateCheck": "never",
     "coc.preferences.formatOnSaveFiletypes": [
         "rust",
@@ -130,9 +112,7 @@
     "python.analysis.typeCheckingMode": "on",
     "python.formatting.provider": "black",
     "python.formatting.blackPath": "/home/zhe/.local/bin/black",
-    "python.formatting.blackArgs": [
-        "--fast"
-    ],
+    "python.formatting.blackArgs": ["--fast"],
     "python.formatting.timeout": 1000,
     "python.formatting.autopep8Path": "/usr/bin/autopep8",
     "list.normalMappings": {
