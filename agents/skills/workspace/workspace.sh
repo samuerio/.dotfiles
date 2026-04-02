@@ -2,11 +2,12 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: $0 open <branch> | list" >&2
+  echo "usage: $0 open <branch> | list | clean [--force]" >&2
 }
 
 command="${1:-}"
 branch=""
+force=""
 
 if [ -z "$command" ]; then
   usage
@@ -31,6 +32,19 @@ case "$command" in
 
     branch="$1"
     ;;
+  clean)
+    if [ "$#" -gt 1 ]; then
+      usage
+      exit 2
+    fi
+
+    force="${1:-}"
+    if [ -n "$force" ] && [ "$force" != "--force" ]; then
+      echo "error: only optional flag is --force" >&2
+      usage
+      exit 2
+    fi
+    ;;
   *)
     usage
     exit 2
@@ -41,6 +55,70 @@ repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 if [ -z "$repo_root" ]; then
   echo "error: not inside a git repository" >&2
   exit 2
+fi
+
+if [ "$command" = "clean" ]; then
+  git_common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+  if [ -z "$git_common_dir" ]; then
+    echo "error: unable to resolve git common dir" >&2
+    exit 2
+  fi
+
+  repo_main="$(dirname "$git_common_dir")"
+  agent_root="$repo_main/.worktree"
+  workspace_path="$repo_root"
+
+  case "$repo_root/" in
+    "$agent_root"/*)
+      ;;
+    *)
+      echo "error: not an agent workspace" >&2
+      exit 1
+      ;;
+  esac
+
+  if [ "$force" = "--force" ]; then
+    git -C "$repo_main" worktree remove --force -- "$workspace_path"
+  else
+    git -C "$repo_main" worktree remove -- "$workspace_path"
+  fi
+
+  echo "success: worktree removed"
+  printf 'workspace_path=%s\n' "$workspace_path"
+
+  leftovers=()
+  if [ -d "$workspace_path" ]; then
+    shopt -s dotglob nullglob
+    leftovers=( "$workspace_path"/* )
+    shopt -u dotglob nullglob
+  fi
+
+  leftover_count="${#leftovers[@]}"
+  printf 'workspace_leftover_count=%s\n' "$leftover_count"
+
+  if [ "$leftover_count" -gt 0 ]; then
+    max_items=200
+    print_count="$leftover_count"
+    if [ "$leftover_count" -gt "$max_items" ]; then
+      print_count="$max_items"
+    fi
+
+    i=0
+    while [ "$i" -lt "$print_count" ]; do
+      path="${leftovers[$i]}"
+      rel_path="${path#$workspace_path/}"
+      printf 'workspace_leftover=%s\n' "$rel_path"
+      i=$((i + 1))
+    done
+
+    if [ "$leftover_count" -gt "$max_items" ]; then
+      printf 'workspace_leftover_truncated=%s\n' "$((leftover_count - max_items))"
+    fi
+
+    echo "action_required=ask_user_cleanup_leftovers"
+  fi
+
+  exit 0
 fi
 
 AGENT_BRANCHES=()
@@ -189,7 +267,7 @@ left_pane="$(tmux display-message -p -t "$target_window" '#{pane_id}')"
 right_pane="$(tmux split-window -h -P -F '#{pane_id}' -t "$target_window" -c "$worktree_path")"
 tmux select-layout -t "$target_window" even-horizontal >/dev/null
 tmux send-keys -t "$left_pane" 'nvim' C-m
-tmux send-keys -t "$right_pane" 'amp --ide' C-m
+tmux send-keys -t "$right_pane" 'pi' C-m
 
 printf 'branch=%s\n' "$branch"
 printf 'worktree_path=%s\n' "$worktree_path"
