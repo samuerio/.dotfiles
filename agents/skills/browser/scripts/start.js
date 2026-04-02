@@ -89,36 +89,22 @@ function getListeningPids9222() {
   }
 }
 
-function killAllChromeProcesses() {
-  if (process.platform === "darwin") {
-    for (const cmd of ["killall 'Google Chrome'", "killall Chromium"]) {
-      try {
-        execSync(cmd, { stdio: "ignore" });
-      } catch {}
-    }
-    return;
-  }
-
-  if (process.platform === "linux") {
-    for (const cmd of [
-      "killall -q chrome",
-      "killall -q chromium",
-      "killall -q chromium-browser",
-      "killall -q google-chrome",
-      "killall -q google-chrome-stable",
-    ]) {
-      try {
-        execSync(cmd, { stdio: "ignore" });
-      } catch {}
-    }
-  }
-}
-
 const platformConfig = getPlatformConfig();
 
+// Wait a bit for processes to fully die
+await new Promise((r) => setTimeout(r, 1200));
+
+// Setup profile directory
+execSync(`mkdir -p "${cacheDir}"`, { stdio: "ignore" });
+
 if (useProfile) {
-  // use profile: kill all Chrome/Chromium instances to avoid profile lock conflicts
-  // killAllChromeProcesses();
+  // Sync profile with rsync (much faster on subsequent runs)
+  execSync(
+    `rsync -a --delete --exclude 'Singleton*' --exclude 'DevToolsActivePort*' "${platformConfig.profileSource}" "${cacheDir}/"`,
+    {
+      stdio: "pipe",
+    },
+  );
 } else {
   // fresh profile: only release :9222 if a Chrome-like process is using it
   for (const pid of getListeningPids9222()) {
@@ -136,23 +122,7 @@ if (useProfile) {
 
     process.kill(Number(pid), "SIGTERM");
   }
-}
 
-// Wait a bit for processes to fully die
-await new Promise((r) => setTimeout(r, 1200));
-
-// Setup profile directory
-execSync(`mkdir -p "${cacheDir}"`, { stdio: "ignore" });
-
-if (useProfile) {
-  // Sync profile with rsync (much faster on subsequent runs)
-  execSync(
-    `rsync -a --delete --exclude 'Singleton*' --exclude 'DevToolsActivePort*' "${platformConfig.profileSource}" "${cacheDir}/"`,
-    {
-      stdio: "pipe",
-    },
-  );
-} else {
   // Fresh mode: ensure user-data-dir is clean
   execSync(`find "${cacheDir}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +`, {
     stdio: "ignore",
