@@ -32,7 +32,8 @@ function commandExists(command) {
 function getPlatformConfig() {
   if (process.platform === "darwin") {
     return {
-      chromeCommand: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      chromeCommand:
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
       profileSource: `${home}/Library/Application Support/Google/Chrome/`,
     };
   }
@@ -117,7 +118,7 @@ const platformConfig = getPlatformConfig();
 
 if (useProfile) {
   // use profile: kill all Chrome/Chromium instances to avoid profile lock conflicts
-  killAllChromeProcesses();
+  // killAllChromeProcesses();
 } else {
   // fresh profile: only release :9222 if a Chrome-like process is using it
   for (const pid of getListeningPids9222()) {
@@ -127,7 +128,9 @@ if (useProfile) {
     }).trim();
 
     if (!/chrome|chromium/i.test(cmd)) {
-      console.error(`✗ Port 9222 is occupied by non-Chrome process: pid=${pid}, cmd=${cmd}`);
+      console.error(
+        `✗ Port 9222 is occupied by non-Chrome process: pid=${pid}, cmd=${cmd}`,
+      );
       process.exit(1);
     }
 
@@ -143,9 +146,12 @@ execSync(`mkdir -p "${cacheDir}"`, { stdio: "ignore" });
 
 if (useProfile) {
   // Sync profile with rsync (much faster on subsequent runs)
-  execSync(`rsync -a --delete "${platformConfig.profileSource}" "${cacheDir}/"`, {
-    stdio: "pipe",
-  });
+  execSync(
+    `rsync -a --delete --exclude 'Singleton*' --exclude 'DevToolsActivePort*' "${platformConfig.profileSource}" "${cacheDir}/"`,
+    {
+      stdio: "pipe",
+    },
+  );
 } else {
   // Fresh mode: ensure user-data-dir is clean
   execSync(`find "${cacheDir}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +`, {
@@ -189,7 +195,10 @@ if (!connected) {
 // Start background watcher for logs/network (detached)
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const watcherPath = join(scriptDir, "watch.js");
-spawn(process.execPath, [watcherPath], { detached: true, stdio: "ignore" }).unref();
+spawn(process.execPath, [watcherPath], {
+  detached: true,
+  stdio: "ignore",
+}).unref();
 
 console.log(
   `✓ Chrome started on :9222${useProfile ? " with your profile" : ""}`,
