@@ -1,99 +1,84 @@
 ---
 name: youtube-transcript
-description: Fetch a YouTube transcript and convert timestamped transcript entries into a continuous Chinese transcript for reading. Optionally render transcript output to shareable HTML and publish via filecoin-pin when the user explicitly requests sharing.
+description: Fetch a YouTube transcript, convert it into a faithful continuous Chinese transcript, and optionally render/publish HTML when explicitly requested.
 ---
 
 # YouTube Transcript
 
-Convert YouTube timestamped captions into a **faithful, non-summarized continuous Chinese transcript** (default final deliverable).
+Convert YouTube timestamped captions into a **faithful, non-summarized continuous Chinese transcript**.
 
-## Setup
+## Goal
+
+- Default deliverable: `Chinese Transcript Temp File` (`ZH_TRANSCRIPT_FILE`).
+- Run the share/publish flow only when the user explicitly asks for a public link or sharing.
+
+## Run
+
+Assume dependencies are installed. If needed:
 
 ```bash
 cd {baseDir}
 npm install
 ```
 
-## Input
-
-```bash
-{baseDir}/transcript.js <video-id-or-url>
-```
+Input: a video ID or a YouTube URL.
 
 Accepted formats:
 - `EBw7gsDPAYQ`
 - `https://www.youtube.com/watch?v=EBw7gsDPAYQ`
 - `https://youtu.be/EBw7gsDPAYQ`
 
-## Mandatory Workflow (must run in order)
-
-1. Generate timestamped transcript entries into a temp file (required):
+Use these fixed temp files:
 
 ```bash
-{baseDir}/transcript.js <video-id-or-url> > /tmp/timestamped-transcript-entries.txt
+RAW_ENTRIES_FILE="/tmp/timestamped-transcript-entries.txt"
+ZH_TRANSCRIPT_FILE="/tmp/youtube-transcript.zh.txt"
+HTML_FILE="/tmp/youtube-transcript.share.html"
+
+node {baseDir}/transcript.js <video-id-or-url> > "$RAW_ENTRIES_FILE"
 ```
 
-2. Read `/tmp/timestamped-transcript-entries.txt`.
+Read `RAW_ENTRIES_FILE`, convert it into continuous Chinese text, and write the result to `ZH_TRANSCRIPT_FILE`.
 
-3. Convert timestamped entries into a **continuous Chinese transcript (verbatim-faithful, non-summarized)**.
-   - Remove `[mm:ss]` markers in the final Chinese output.
-   - Keep semantic accuracy and information completeness; do not summarize, compress, or omit content.
-   - Preserve original order and all substantive points/examples/qualifiers.
-   - If content is unclear, mark `[inaudible]`; do not guess.
+## Rules
 
-4. By default, output only: `Continuous Chinese Transcript`.
-   - Include timestamped entries only when the user explicitly asks for timestamped output, bilingual output, or segment mapping.
+- Remove timestamp markers (e.g. `[0:12]`) and line-by-line segmentation; produce continuous Chinese text.
+- Preserve full meaning and original order; do not summarize, condense, omit details, or invent facts.
+- Only do minimal cleanup for obvious ASR punctuation issues and exact duplicate glitches.
+- Keep common technical terms in English when appropriate; use standard Chinese when natural.
+- If audio or subtitle content is unclear, use `[inaudible]`.
+- If any span cannot be preserved fully, state the missing span explicitly instead of compressing it.
 
-## Optional Share Branch (only on explicit share request)
-
-Run this branch only when the user explicitly asks to share, publish, or provide a public link.
-
-1. Render transcript output (and optional analysis if requested) as HTML under `/tmp`.
-2. Upload with:
-
-```bash
-filecoin-pin add /tmp/<html-file>
-```
-
-3. Parse `filecoin-pin add` stdout and return the share URL exactly as provided by the command output.
-4. Also return the raw upload command output for traceability.
-
-If stdout does not include a share URL, return a clear error and include full stdout/stderr.
-
-## Conversion Rules (continuous Chinese transcript, non-summarized)
-
-- This is a transcript conversion task, NOT a summarization task.
-- Remove timestamp markers (e.g. `[0:12]`) and line-by-line segmentation, but keep full content in original order.
-- Do NOT summarize, condense, abstract, or drop “minor” details.
-- You may only do minimal readability cleanup:
-  - fix obvious ASR punctuation/casing issues,
-  - remove accidental exact duplicate fragments caused by subtitle glitches.
-- Keep spoken meaning faithfully; do not rewrite into a shorter form.
-- Preserve key information, examples, caveats, and speaker intent; do not invent facts.
-- Proper nouns:
-  - Keep common technical terms in English when appropriate (e.g. React, TypeScript, CUDA).
-  - If standard Chinese exists, you may use Chinese (optionally Chinese + English on first mention).
-- For missing/unclear content caused by audio/subtitle gaps:
-  - Do not guess specifics; use `[inaudible]`.
-
-## Hard Constraints
-
-- Forbidden output style: summary, bullet-point recap, key takeaways, shortened rewrite.
-- Required output style: full continuous Chinese transcript faithful to source utterances.
-- If the model cannot preserve full content, it must state the missing span explicitly instead of compressing.
-
-## Final Output Format
+## Output
 
 Return in this structure:
 
-1. `Continuous Chinese Transcript` (required)
-2. `Optional Appendix: Timestamped Transcript Entries` (only when requested)
-3. `Optional Share Artifacts` (only when share branch is triggered):
+1. `Chinese Transcript Temp File` (required: return the `ZH_TRANSCRIPT_FILE` path)
+2. `Optional Share Artifacts` (only when share branch is triggered):
    - `HTML Path`
-   - `Share URL` (from `filecoin-pin add` output)
-   - `Upload Command Output` (raw)
+   - `Share URL`
 
-## Notes
+## Share
+
+Only when the user explicitly asks to share, publish, or provide a public link:
+
+1. Render the Chinese transcript from `ZH_TRANSCRIPT_FILE` into `HTML_FILE` by running:
+
+```bash
+node {baseDir}/render-share-html.js "$ZH_TRANSCRIPT_FILE" "$HTML_FILE"
+```
+
+2. Upload it with:
+
+```bash
+filecoin-pin add "$HTML_FILE"
+```
+
+3. Return the share URL exactly as provided by the command output.
+4. Use `Continuous Chinese Transcript` as the HTML page title.
+5. Do not delete the temp files; leave them under `/tmp` for normal system cleanup.
+
+## Failure
 
 - The target video must have available captions (manual or auto-generated).
-- On failure, return a concrete error and actionable retry hints (URL check, geo restriction, caption availability).
+- If captions are unavailable, the URL is invalid, access is restricted, or share output does not include a URL, return a concrete error with actionable retry hints.
