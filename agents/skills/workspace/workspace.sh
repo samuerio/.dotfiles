@@ -57,6 +57,11 @@ if [ -z "$repo_root" ]; then
   exit 2
 fi
 
+if [ "$command" = "open" ] && ! command -v tmux >/dev/null 2>&1; then
+  echo "error: tmux is required for 'open'" >&2
+  exit 2
+fi
+
 if [ "$command" = "clean" ]; then
   git_common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
   if [ -z "$git_common_dir" ]; then
