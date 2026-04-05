@@ -1,0 +1,44 @@
+window-decoration = none
+cursor-style = block
+
+# =========================
+# Font
+# =========================
+font-family = Monaco
+font-style = Regular
+font-size = 14
+
+# =========================
+# Window
+# =========================
+window-width = 110
+window-height = 25
+
+# =========================
+# Colors
+# =========================
+background = #fafafa
+foreground = #383a42
+
+cursor-color = #383a42
+selection-background = #dddddd
+selection-foreground = #000000
+
+# ANSI colors
+palette = 0=#383a42
+palette = 1=#e45649
+palette = 2=#50a14f
+palette = 3=#c18401
+palette = 4=#0184bc
+palette = 5=#a626a4
+palette = 6=#0997b3
+palette = 7=#fafafa
+
+palette = 8=#383a42
+palette = 9=#e45649
+palette = 10=#50a14f
+palette = 11=#c18401
+palette = 12=#0184bc
+palette = 13=#a626a4
+palette = 14=#0997b3
+palette = 15=#fafafa

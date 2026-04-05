@@ -21,6 +21,7 @@ tmux_conf_new_pane_reconnect_ssh=false
 tmux_conf_new_session_prompt=false
 
 unbind c
+bind c run-shell -b 'out=/tmp/pane.html; if tmux capture-pane -t "#{pane_id}" -e -p -S - -E - | aha --title "claude_code" --style "zoom:110%" > "$out" && printf "%s" "$out" | xclip -selection clipboard; then tmux display-message "saved and copied: $out"; else tmux display-message "export failed"; fi'
 bind -r n new-window -a -c "#{pane_current_path}"
 bind -r N new-window -c "#{pane_current_path}"
 
