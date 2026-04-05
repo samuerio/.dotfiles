@@ -8,15 +8,7 @@ description: Upload a local .html or .md file via filecoin-pin and return a publ
 ## Run
 
 ```bash
-if [[ "$INPUT_FILE" == *.md ]]; then
-  pandoc "$INPUT_FILE" \
-    --template gh-markdown-template.html \
-    --highlight-style=none \
-    -o /tmp/pandoc.html
-  HTML_FILE=/tmp/pandoc.html
-fi
-
-filecoin-pin add "$HTML_FILE"
+./share.sh "$INPUT_FILE"
 ```
 
 ## Output
