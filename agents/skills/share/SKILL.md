@@ -1,6 +1,6 @@
 ---
 name: share
-description: Share a local HTML file by uploading it with filecoin-pin and returning a public URL. Use when the user explicitly asks to share, publish, or provide a public link for a local .html file.
+description: Upload a local .html file via filecoin-pin and return a public URL. Trigger on: share, publish, public link.
 ---
 
 # Share
