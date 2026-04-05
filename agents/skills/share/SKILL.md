@@ -1,6 +1,6 @@
 ---
 name: share
-description: Upload a local .html or .md file via filecoin-pin and return a public URL. Trigger on: share, publish, public link.
+description: Share/publish a .html or .md file and return a public URL.
 ---
 
 # Share
