@@ -7,35 +7,35 @@ description: Convert files and URLs to Markdown, and optionally translate the re
 
 Convert anything to Markdown. Also use when the user wants to fetch a URL or file, convert it to Markdown, and translate the result into Chinese.
 
-## CLI
+## Convert
 
 ```bash
 # Convert a file
-npx markit-ai report.pdf -q
+markit report.pdf -q
 
 # Convert a URL
-npx markit-ai https://en.wikipedia.org/wiki/Markdown -q
+markit https://en.wikipedia.org/wiki/Markdown -q
 
 # GitHub URLs (repos, files, gists, issues, PRs)
-npx markit-ai https://github.com/owner/repo -q
-npx markit-ai https://github.com/owner/repo/issues/42 -q
-npx markit-ai https://gist.github.com/user/id -q
+markit https://github.com/owner/repo -q
+markit https://github.com/owner/repo/issues/42 -q
+markit https://gist.github.com/user/id -q
 
 # Write to file
-npx markit-ai document.docx -q -o output.md
+markit document.docx -q -o output.md
 
 # See all options
-npx markit-ai --help
+markit --help
 
 # See supported formats
-npx markit-ai formats
+markit formats
 ```
 
 `-q` gives raw markdown. `--json` gives `{ markdown, title }`.
 
 ## Convert + Translate
 
-Pipe to `pi` to translate and save:
+**Trigger**: Use this flow whenever the user asks to convert AND translate in the same request (e.g. "convert to markdown and translate"). 
 
 ```bash
 # Translate a URL's content to Chinese and save to /tmp/markit.zh.md
