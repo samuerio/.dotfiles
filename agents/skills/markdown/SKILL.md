@@ -10,19 +10,23 @@ Convert anything to Markdown. Also use when the user wants to fetch a URL or fil
 ## Convert
 
 ```bash
+
+MARKIT_FILE="/tmp/markit.md"
+
 # Convert a file
-markit report.pdf -q
+markit report.pdf -o $MARKIT_FILE
+markit document.docx -o $MARKIT_FILE
 
 # Convert a URL
-markit https://en.wikipedia.org/wiki/Markdown -q
+markit https://en.wikipedia.org/wiki/Markdown -o $MARKIT_FILE
+
+# Convert a zip
+markit design.zip -o $MARKIT_FILE
 
 # GitHub URLs (repos, files, gists, issues, PRs)
-markit https://github.com/owner/repo -q
-markit https://github.com/owner/repo/issues/42 -q
-markit https://gist.github.com/user/id -q
-
-# Write to file
-markit document.docx -q -o output.md
+markit https://github.com/owner/repo -o $MARKIT_FILE
+markit https://github.com/owner/repo/issues/42 -o $MARKIT_FILE
+markit https://gist.github.com/user/id -o $MARKIT_FILE
 
 # See all options
 markit --help
@@ -31,20 +35,15 @@ markit --help
 markit formats
 ```
 
-`-q` gives raw markdown. `--json` gives `{ markdown, title }`.
+`-o` write to file. `-q` gives raw markdown. `--json` gives `{ markdown, title }`. 
 
 ## Convert + Translate
 
 **Trigger**: Use this flow whenever the user asks to convert AND translate in the same request (e.g. "convert to markdown and translate"). 
 
 ```bash
-# Translate a URL's content to Chinese and save to /tmp/markit.zh.md
-markit <URL> | \
-pi -p "Translate to Chinese and write to /tmp/markit.zh.md; RULE: 1.Preserve full meaning and original order; do not summarize, condense, omit details, or invent facts. 2.Keep common technical terms in English when appropriate; use standard Chinese when natural." \
-   --model volcengine/doubao-seed-2.0-code
-
-# Works with local files too
-markit report.pdf | \
+# <URL|FILE|ZIP> can be a URL, local file, or ZIP archive
+markit <URL|FILE|ZIP> | \
 pi -p "Translate to Chinese and write to /tmp/markit.zh.md; RULE: 1.Preserve full meaning and original order; do not summarize, condense, omit details, or invent facts. 2.Keep common technical terms in English when appropriate; use standard Chinese when natural." \
    --model volcengine/doubao-seed-2.0-code
 ```
