@@ -35,8 +35,7 @@ npx markit-ai formats
 
 ## Convert + Translate
 
-Pipe `markit` output to `pi` (a CLI agent tool) to translate content and save to file.
-`pi` runs in non-streaming mode.
+Pipe to `pi` to translate and save:
 
 ```bash
 # Translate a URL's content to Chinese and save to /tmp/markit.zh.md
