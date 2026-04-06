@@ -45,11 +45,23 @@ Read `RAW_ENTRIES_FILE`, convert it into continuous Chinese text, and write the 
 - Organize the output into paragraphs separated by blank lines, following natural topic or speaker shifts; do not add headings or bullet points.
 - If any span cannot be preserved fully, state the missing span explicitly instead of compressing it.
 
+## Final Step
+
+After writing `ZH_TRANSCRIPT_FILE`, move it to its permanent location at `~/Dropbox/agents/markdowns/[timestamp]-[slug].md`.
+
+- **timestamp**: current date in `YYYY-MM-DD` format
+- **slug**: a short kebab-case slug derived from the semantic content of the transcript (e.g. `openai-gpt4-announcement`, `react-hooks-tutorial`)
+
+```bash
+mkdir -p ~/Dropbox/agents/markdowns
+mv "$ZH_TRANSCRIPT_FILE" ~/Dropbox/agents/markdowns/[timestamp]-[slug].md
+```
+
 ## Output
 
 Return in this structure:
 
-1. `Chinese Transcript File` (required: return the `ZH_TRANSCRIPT_FILE` path)
+`Chinese Transcript File` (required: return the final `~/Dropbox/agents/markdowns/[timestamp]-[slug].md` path)
 
 ## Failure
 
