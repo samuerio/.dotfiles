@@ -42,6 +42,7 @@ Read `RAW_ENTRIES_FILE`, convert it into continuous Chinese text, and write the 
 - Only do minimal cleanup for obvious ASR punctuation issues and exact duplicate glitches.
 - Keep common technical terms in English when appropriate; use standard Chinese when natural.
 - If audio or subtitle content is unclear, use `[inaudible]`.
+- Organize the output into paragraphs separated by blank lines, following natural topic or speaker shifts; do not add headings or bullet points.
 - If any span cannot be preserved fully, state the missing span explicitly instead of compressing it.
 
 ## Output

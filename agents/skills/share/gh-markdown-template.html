@@ -9,8 +9,33 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
 <script>document.addEventListener('DOMContentLoaded', () => hljs.highlightAll());</script>
 <style>
-  body { box-sizing: border-box; min-width: 200px; max-width: 980px; margin: 0 auto; padding: 45px; }
-  @media (max-width: 767px) { body { padding: 15px; } }
+  body {
+    box-sizing: border-box;
+    margin: 0;
+    background: #f6f8fa;
+  }
+
+  .markdown-body {
+    max-width: 880px;              /* ⭐ 核心：阅读宽度 */
+    margin: 40px auto;             /* 居中 */
+    padding: 48px 56px;            /* 留白 */
+    background: #ffffff;
+    border-radius: 12px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.05);
+
+    font-size: 16px;
+    line-height: 1.75;             /* ⭐ 更易读 */
+    letter-spacing: 0.02em;
+  }
+
+  /* 移动端 */
+  @media (max-width: 767px) {
+    .markdown-body {
+      padding: 24px;
+      margin: 0;
+      border-radius: 0;
+    }
+  }
 </style>
 </head>
 <body class="markdown-body">
