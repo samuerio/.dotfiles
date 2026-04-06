@@ -3,7 +3,7 @@ name: pi-inline
 description: Searches for PIDO and PIASK comments in the codebase, answers questions and executes requested changes, then removes resolved markers.
 ---
 
-# Ampdo
+# Pi inline
 
 Search for `PIDO:` and `PIASK:` comments in the codebase in a single scan. Answer embedded questions and implement requested changes, then remove resolved markers.
 
