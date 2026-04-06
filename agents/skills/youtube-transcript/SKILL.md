@@ -32,7 +32,7 @@ Use these fixed temp files:
 
 ```bash
 RAW_ENTRIES_FILE="/tmp/timestamped-transcript-entries.txt"
-ZH_TRANSCRIPT_FILE="/tmp/youtube-transcript.zh.txt"
+ZH_TRANSCRIPT_FILE="/tmp/youtube-transcript.zh.md"
 HTML_FILE="/tmp/youtube-transcript.share.html"
 
 node {baseDir}/transcript.js <video-id-or-url> > "$RAW_ENTRIES_FILE"
@@ -42,6 +42,7 @@ Read `RAW_ENTRIES_FILE`, convert it into continuous Chinese text, and write the 
 
 ## Rules
 
+- Start the output file with a blockquote reference block: `> [<video title or video ID>](<full YouTube URL>)`
 - Remove timestamp markers (e.g. `[0:12]`) and line-by-line segmentation; produce continuous Chinese text.
 - Preserve full meaning and original order; do not summarize, condense, omit details, or invent facts.
 - Only do minimal cleanup for obvious ASR punctuation issues and exact duplicate glitches.
@@ -54,31 +55,8 @@ Read `RAW_ENTRIES_FILE`, convert it into continuous Chinese text, and write the 
 Return in this structure:
 
 1. `Chinese Transcript Temp File` (required: return the `ZH_TRANSCRIPT_FILE` path)
-2. `Optional Share Artifacts` (only when share branch is triggered):
-   - `HTML Path`
-   - `Share URL`
-
-## Share
-
-Only when the user explicitly asks to share, publish, or provide a public link:
-
-1. Render the Chinese transcript from `ZH_TRANSCRIPT_FILE` into `HTML_FILE` by running:
-
-```bash
-node {baseDir}/render-share-html.js "$ZH_TRANSCRIPT_FILE" "$HTML_FILE"
-```
-
-2. Upload it with:
-
-```bash
-filecoin-pin add "$HTML_FILE"
-```
-
-3. Return the share URL exactly as provided by the command output.
-4. Use `Continuous Chinese Transcript` as the HTML page title.
-5. Do not delete the temp files; leave them under `/tmp` for normal system cleanup.
 
 ## Failure
 
 - The target video must have available captions (manual or auto-generated).
-- If captions are unavailable, the URL is invalid, access is restricted, or share output does not include a URL, return a concrete error with actionable retry hints.
+- If captions are unavailable, the URL is invalid, or access is restricted, return a concrete error with actionable retry hints.
