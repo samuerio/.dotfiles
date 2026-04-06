@@ -55,3 +55,17 @@ node agents/skills/markdown/twitter.js https://x.com/username/status/<id> | \
 pi -p "Translate to Chinese and write to /tmp/markdown.zh.md; RULE: 1.Preserve full meaning and original order; do not summarize, condense, omit details, or invent facts. 2.Keep common technical terms in English when appropriate; use standard Chinese when natural." \
    --model volcengine/doubao-seed-2.0-code
 ```
+
+## Backup
+
+After conversion (or conversion + translation), back up the final output file to `~/Dropbox/agents/markdowns/[timestamp]-[slug].md`.
+
+- **timestamp**: current date in `YYYY-MM-DD` format
+- **slug**: a short kebab-case slug derived from the semantic content of the markdown (e.g. `openai-gpt4-release`, `react-hooks-guide`)
+
+```bash
+mkdir -p ~/Dropbox/agents/markdowns
+cp /tmp/markdown.md ~/Dropbox/agents/markdowns/[timestamp]-[slug].md
+# If the final output is a translated file, back up that instead:
+# cp /tmp/markdown.zh.md ~/Dropbox/agents/markdowns/[timestamp]-[slug].md
+```
