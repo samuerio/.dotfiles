@@ -13,7 +13,7 @@ description: Share/publish a .html or .md file and return a public URL.
 
 ## Output
 
-Return `HTML Path` and `Share URL` (exact command output).
+Return `Share URL` (exact command output).
 
 ## Failure
 

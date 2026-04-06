@@ -18,8 +18,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 if [[ "$INPUT_FILE" == *.md ]]; then
   pandoc "$INPUT_FILE" \
     --template "$SCRIPT_DIR/gh-markdown-template.html" \
-    -o /tmp/pandoc.html
-  HTML_FILE=/tmp/pandoc.html
+    -o "/tmp/$(basename "${INPUT_FILE%.md}").html"
+  HTML_FILE="/tmp/$(basename "${INPUT_FILE%.md}").html"
 elif [[ "$INPUT_FILE" == *.html ]]; then
   HTML_FILE="$INPUT_FILE"
 else
