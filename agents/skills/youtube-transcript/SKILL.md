@@ -1,6 +1,6 @@
 ---
 name: youtube-transcript
-description: Fetch a YouTube transcript, convert it into a faithful continuous Chinese transcript, and optionally render/publish HTML when explicitly requested.
+description: Fetch a YouTube transcript, convert it into a faithful continuous Chinese transcript.
 ---
 
 # YouTube Transcript
