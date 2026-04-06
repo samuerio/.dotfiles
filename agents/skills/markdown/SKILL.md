@@ -1,11 +1,11 @@
 ---
 name: markdown
-description: Convert files and URLs to Markdown. Supports PDF, DOCX, PPTX, XLSX, HTML, EPUB, CSV, JSON, GitHub URLs, images, audio, ZIP, and more. Use when you need to extract content from any document format.
+description: Convert files and URLs to Markdown, and optionally translate the result. Supports PDF, DOCX, PPTX, XLSX, HTML, EPUB, CSV, JSON, GitHub URLs, images, audio, ZIP, and more. 
 ---
 
 # markdown
 
-Convert anything to Markdown.
+Convert anything to Markdown. Also use when the user wants to fetch a URL or file, convert it to Markdown, and translate the result into Chinese.
 
 ## CLI
 
@@ -32,3 +32,20 @@ npx markit-ai formats
 ```
 
 `-q` gives raw markdown. `--json` gives `{ markdown, title }`.
+
+## Convert + Translate
+
+Pipe `markit` output to `pi` (a CLI agent tool) to translate content and save to file.
+`pi` runs in non-streaming mode.
+
+```bash
+# Translate a URL's content to Chinese and save to /tmp/markit.zh.md
+markit <URL> | \
+pi -p "Translate to Chinese and write to /tmp/markit.zh.md; RULE: 1.Preserve full meaning and original order; do not summarize, condense, omit details, or invent facts. 2.Keep common technical terms in English when appropriate; use standard Chinese when natural." \
+   --model volcengine/doubao-seed-2.0-code
+
+# Works with local files too
+markit report.pdf | \
+pi -p "Translate to Chinese and write to /tmp/markit.zh.md; RULE: 1.Preserve full meaning and original order; do not summarize, condense, omit details, or invent facts. 2.Keep common technical terms in English when appropriate; use standard Chinese when natural." \
+   --model volcengine/doubao-seed-2.0-code
+```
