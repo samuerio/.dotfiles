@@ -9,8 +9,7 @@ Convert YouTube timestamped captions into a **faithful, non-summarized continuou
 
 ## Goal
 
-- Default deliverable: `Chinese Transcript Temp File` (`ZH_TRANSCRIPT_FILE`).
-- Run the share/publish flow only when the user explicitly asks for a public link or sharing.
+- Default deliverable: `Chinese Transcript File` (`ZH_TRANSCRIPT_FILE`).
 
 ## Run
 
@@ -33,7 +32,6 @@ Use these fixed temp files:
 ```bash
 RAW_ENTRIES_FILE="/tmp/timestamped-transcript-entries.txt"
 ZH_TRANSCRIPT_FILE="/tmp/youtube-transcript.zh.md"
-HTML_FILE="/tmp/youtube-transcript.share.html"
 
 node {baseDir}/transcript.js <video-id-or-url> > "$RAW_ENTRIES_FILE"
 ```
@@ -54,7 +52,7 @@ Read `RAW_ENTRIES_FILE`, convert it into continuous Chinese text, and write the 
 
 Return in this structure:
 
-1. `Chinese Transcript Temp File` (required: return the `ZH_TRANSCRIPT_FILE` path)
+1. `Chinese Transcript File` (required: return the `ZH_TRANSCRIPT_FILE` path)
 
 ## Failure
 
