@@ -5,11 +5,7 @@ description: Fetch a YouTube transcript, convert it into a faithful continuous C
 
 # YouTube Transcript
 
-Convert YouTube timestamped captions into a **faithful, non-summarized continuous Chinese transcript**.
-
-## Goal
-
-- Default deliverable: `Chinese Transcript File` (`ZH_TRANSCRIPT_FILE`).
+Convert YouTube timestamped captions into a **faithful, non-summarized continuous Chinese transcript** (`ZH_TRANSCRIPT_FILE`).
 
 ## Run
 
@@ -56,5 +52,4 @@ Return in this structure:
 
 ## Failure
 
-- The target video must have available captions (manual or auto-generated).
-- If captions are unavailable, the URL is invalid, or access is restricted, return a concrete error with actionable retry hints.
+If captions are unavailable, the URL is invalid, or access is restricted, return a concrete error with actionable retry hints.
