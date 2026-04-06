@@ -46,13 +46,13 @@ function renderQuote(quote) {
     return `
 ---
 
-**引用推文** — [${quote.author.name}](${quote.author.url}) (@${quote.author.screen_name})
+**Quoted Tweet** — [${quote.author.name}](${quote.author.url}) (@${quote.author.screen_name})
 
 ${text}${media}
 
 > 🕐 ${formatDate(quote.created_at)} · 👍 ${quote.likes} · 🔁 ${quote.retweets} · 💬 ${quote.replies} · 🔖 ${quote.bookmarks} · 👁 ${quote.views}
 >
-> [查看原推](${quote.url})`;
+> [View original](${quote.url})`;
 }
 
 function tweetToMarkdown(tweet) {
@@ -83,7 +83,7 @@ ${quoteSection}
 
 🕐 ${formatDate(created_at)} · 👍 ${likes} · 🔁 ${retweets} · 💬 ${replies} · 🔖 ${bookmarks} · 👁 ${views}
 
-[查看原推](${url})
+[View original](${url})
 `;
 }
 

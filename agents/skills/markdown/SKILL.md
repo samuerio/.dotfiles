@@ -1,6 +1,6 @@
 ---
 name: markdown
-description: Convert files and URLs to Markdown, and optionally translate the result. Supports PDF, DOCX, PPTX, XLSX, HTML, EPUB, CSV, JSON, GitHub URLs, images, audio, ZIP, and more. 
+description: Convert files, URLs, and more to Markdown, with optional Chinese translation.
 ---
 
 # markdown
