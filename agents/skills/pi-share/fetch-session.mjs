@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
  * Fetch and parse pi-share (shittycodingagent.ai/buildwithpi.ai/buildwithpi.com/pi.dev) session exports.
- * 
+ *
  * Usage:
  *   node fetch-session.mjs <url-or-gist-id> [--header] [--entries] [--system] [--tools] [--human-summary] [--no-cache]
- * 
+ *
  * Options:
  *   (no flag)        Output full session data JSON
  *   --header         Output just the session header
@@ -15,257 +15,267 @@
  *   --no-cache       Bypass cache and fetch fresh
  */
 
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'fs';
-import { tmpdir } from 'os';
-import { join } from 'path';
-import { spawnSync } from 'child_process';
+import { mkdirSync, readFileSync, writeFileSync, existsSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
+import { spawnSync } from "child_process";
 
-const CACHE_DIR = join(tmpdir(), 'pi-share-cache');
+const CACHE_DIR = join(tmpdir(), "pi-share-cache");
 
 const args = process.argv.slice(2);
-const input = args.find(a => !a.startsWith('--'));
-const flags = new Set(args.filter(a => a.startsWith('--')));
+const input = args.find((a) => !a.startsWith("--"));
+const flags = new Set(args.filter((a) => a.startsWith("--")));
 
 if (!input) {
-  console.error('Usage: node fetch-session.mjs <url-or-gist-id> [--header|--entries|--system|--tools]');
-  process.exit(1);
+    console.error(
+        "Usage: node fetch-session.mjs <url-or-gist-id> [--header|--entries|--system|--tools]",
+    );
+    process.exit(1);
 }
 
 // Cache functions
 function getCachePath(gistId) {
-  return join(CACHE_DIR, `${gistId}.json`);
+    return join(CACHE_DIR, `${gistId}.json`);
 }
 
 function readCache(gistId) {
-  const path = getCachePath(gistId);
-  if (existsSync(path)) {
-    return JSON.parse(readFileSync(path, 'utf-8'));
-  }
-  return null;
+    const path = getCachePath(gistId);
+    if (existsSync(path)) {
+        return JSON.parse(readFileSync(path, "utf-8"));
+    }
+    return null;
 }
 
 function writeCache(gistId, data) {
-  mkdirSync(CACHE_DIR, { recursive: true });
-  writeFileSync(getCachePath(gistId), JSON.stringify(data));
+    mkdirSync(CACHE_DIR, { recursive: true });
+    writeFileSync(getCachePath(gistId), JSON.stringify(data));
 }
 
 // Extract gist ID from URL or use directly
 function extractGistId(input) {
-  const HEX_ID_RE = /^[a-f0-9]{8,40}$/i;
-  const normalize = (value = '') => value.trim().replace(/^#/, '');
+    const HEX_ID_RE = /^[a-f0-9]{8,40}$/i;
+    const normalize = (value = "") => value.trim().replace(/^#/, "");
 
-  // Handle direct gist ID and #<gist-id>
-  const normalizedInput = normalize(input);
-  if (HEX_ID_RE.test(normalizedInput)) return normalizedInput;
+    // Handle direct gist ID and #<gist-id>
+    const normalizedInput = normalize(input);
+    if (HEX_ID_RE.test(normalizedInput)) return normalizedInput;
 
-  // Parse URL forms (supports shittycodingagent.ai, buildwithpi.ai/.com, pi.dev aliases)
-  try {
-    const url = new URL(input);
+    // Parse URL forms (supports shittycodingagent.ai, buildwithpi.ai/.com, pi.dev aliases)
+    try {
+        const url = new URL(input);
 
-    // Handle old query style: /session/?<gist-id>
-    const bareQuery = normalize(url.search.replace(/^\?/, ''));
-    if (HEX_ID_RE.test(bareQuery)) return bareQuery;
+        // Handle old query style: /session/?<gist-id>
+        const bareQuery = normalize(url.search.replace(/^\?/, ""));
+        if (HEX_ID_RE.test(bareQuery)) return bareQuery;
 
-    // Handle keyed query params: ?id=<gist-id>, ?gist=<gist-id>, etc.
-    for (const value of url.searchParams.values()) {
-      const normalizedValue = normalize(value);
-      if (HEX_ID_RE.test(normalizedValue)) return normalizedValue;
+        // Handle keyed query params: ?id=<gist-id>, ?gist=<gist-id>, etc.
+        for (const value of url.searchParams.values()) {
+            const normalizedValue = normalize(value);
+            if (HEX_ID_RE.test(normalizedValue)) return normalizedValue;
+        }
+
+        // Handle hash style: /session/#<gist-id>
+        const hashValue = normalize(url.hash);
+        if (HEX_ID_RE.test(hashValue)) return hashValue;
+
+        // Handle path-based URLs like /session/<gist-id>
+        const segments = url.pathname.split("/").filter(Boolean);
+        for (let i = 0; i < segments.length; i++) {
+            if (
+                segments[i] === "session" &&
+                HEX_ID_RE.test(segments[i + 1] || "")
+            ) {
+                return segments[i + 1];
+            }
+        }
+
+        // Handle gist.github.com URLs
+        if (url.hostname === "gist.github.com") {
+            const gistCandidate = segments[segments.length - 1];
+            if (HEX_ID_RE.test(gistCandidate || "")) return gistCandidate;
+        }
+    } catch {
+        // Not a URL; continue with regex fallback below
     }
 
-    // Handle hash style: /session/#<gist-id>
-    const hashValue = normalize(url.hash);
-    if (HEX_ID_RE.test(hashValue)) return hashValue;
+    // Regex fallback for unknown URL formats containing a gist ID
+    const fallbackMatch = input.match(/([a-f0-9]{8,40})/i);
+    if (fallbackMatch) return fallbackMatch[1];
 
-    // Handle path-based URLs like /session/<gist-id>
-    const segments = url.pathname.split('/').filter(Boolean);
-    for (let i = 0; i < segments.length; i++) {
-      if (segments[i] === 'session' && HEX_ID_RE.test(segments[i + 1] || '')) {
-        return segments[i + 1];
-      }
-    }
-
-    // Handle gist.github.com URLs
-    if (url.hostname === 'gist.github.com') {
-      const gistCandidate = segments[segments.length - 1];
-      if (HEX_ID_RE.test(gistCandidate || '')) return gistCandidate;
-    }
-  } catch {
-    // Not a URL; continue with regex fallback below
-  }
-
-  // Regex fallback for unknown URL formats containing a gist ID
-  const fallbackMatch = input.match(/([a-f0-9]{8,40})/i);
-  if (fallbackMatch) return fallbackMatch[1];
-
-  throw new Error(`Cannot extract gist ID from: ${input}`);
+    throw new Error(`Cannot extract gist ID from: ${input}`);
 }
 
 // Fetch session HTML from gist
 async function fetchSessionHtml(gistId) {
-  const gistRes = await fetch(`https://api.github.com/gists/${gistId}`);
-  if (!gistRes.ok) {
-    if (gistRes.status === 404) throw new Error('Session not found (gist deleted or invalid ID)');
-    throw new Error(`GitHub API error: ${gistRes.status}`);
-  }
-  
-  const gist = await gistRes.json();
-  const file = gist.files?.['session.html'];
-  if (!file) {
-    const available = Object.keys(gist.files || {}).join(', ') || 'none';
-    throw new Error(`No session.html in gist. Available: ${available}`);
-  }
-  
-  // Fetch raw content if truncated
-  if (file.truncated && file.raw_url) {
-    const rawRes = await fetch(file.raw_url);
-    if (!rawRes.ok) throw new Error('Failed to fetch raw content');
-    return rawRes.text();
-  }
-  
-  return file.content;
+    const gistRes = await fetch(`https://api.github.com/gists/${gistId}`);
+    if (!gistRes.ok) {
+        if (gistRes.status === 404)
+            throw new Error("Session not found (gist deleted or invalid ID)");
+        throw new Error(`GitHub API error: ${gistRes.status}`);
+    }
+
+    const gist = await gistRes.json();
+    const file = gist.files?.["session.html"];
+    if (!file) {
+        const available = Object.keys(gist.files || {}).join(", ") || "none";
+        throw new Error(`No session.html in gist. Available: ${available}`);
+    }
+
+    // Fetch raw content if truncated
+    if (file.truncated && file.raw_url) {
+        const rawRes = await fetch(file.raw_url);
+        if (!rawRes.ok) throw new Error("Failed to fetch raw content");
+        return rawRes.text();
+    }
+
+    return file.content;
 }
 
 // Extract base64 session data from HTML
 function extractSessionData(html) {
-  // New format: <script id="session-data" type="application/json">BASE64</script>
-  const match = html.match(/<script[^>]*id="session-data"[^>]*>([^<]+)<\/script>/);
-  if (match) {
-    const base64 = match[1].trim();
-    const json = Buffer.from(base64, 'base64').toString('utf-8');
-    return JSON.parse(json);
-  }
-  
-  throw new Error('No session data found in HTML. This may be an older export format without embedded data.');
+    // New format: <script id="session-data" type="application/json">BASE64</script>
+    const match = html.match(
+        /<script[^>]*id="session-data"[^>]*>([^<]+)<\/script>/,
+    );
+    if (match) {
+        const base64 = match[1].trim();
+        const json = Buffer.from(base64, "base64").toString("utf-8");
+        return JSON.parse(json);
+    }
+
+    throw new Error(
+        "No session data found in HTML. This may be an older export format without embedded data.",
+    );
 }
 
 // Truncate text to maxLen, adding ellipsis if truncated
 function truncate(text, maxLen = 150) {
-  if (!text || text.length <= maxLen) return text;
-  return text.slice(0, maxLen) + '...';
+    if (!text || text.length <= maxLen) return text;
+    return text.slice(0, maxLen) + "...";
 }
 
 // Extract condensed session data for human summary
 function extractForSummary(data) {
-  const turns = [];
-  let turnNumber = 0;
-  
-  for (const entry of data.entries) {
-    if (entry.type !== 'message') continue;
-    
-    const msg = entry.message;
-    if (!msg || !msg.role) continue;
-    
-    if (msg.role === 'user') {
-      turnNumber++;
-      // Extract user text
-      const textParts = (msg.content || [])
-        .filter(c => c.type === 'text')
-        .map(c => c.text)
-        .join('\n');
-      
-      if (textParts.trim()) {
-        turns.push({
-          turn: turnNumber,
-          role: 'human',
-          text: textParts
-        });
-      }
-    } else if (msg.role === 'assistant') {
-      // Extract condensed assistant info: brief text + tool summary
-      const textParts = [];
-      const toolCalls = [];
-      
-      for (const block of (msg.content || [])) {
-        if (block.type === 'text' && block.text) {
-          // Just first 200 chars of assistant text for context
-          textParts.push(truncate(block.text, 200));
-        } else if (block.type === 'toolCall') {
-          // Condense tool call: name + truncated key info
-          let summary = block.toolName;
-          if (block.args) {
-            if (block.args.path) {
-              summary += `: ${truncate(block.args.path, 100)}`;
-            } else if (block.args.command) {
-              summary += `: ${truncate(block.args.command, 100)}`;
-            } else {
-              // Generic args truncation
-              const argsStr = JSON.stringify(block.args);
-              summary += `: ${truncate(argsStr, 100)}`;
+    const turns = [];
+    let turnNumber = 0;
+
+    for (const entry of data.entries) {
+        if (entry.type !== "message") continue;
+
+        const msg = entry.message;
+        if (!msg || !msg.role) continue;
+
+        if (msg.role === "user") {
+            turnNumber++;
+            // Extract user text
+            const textParts = (msg.content || [])
+                .filter((c) => c.type === "text")
+                .map((c) => c.text)
+                .join("\n");
+
+            if (textParts.trim()) {
+                turns.push({
+                    turn: turnNumber,
+                    role: "human",
+                    text: textParts,
+                });
             }
-          }
-          toolCalls.push(summary);
+        } else if (msg.role === "assistant") {
+            // Extract condensed assistant info: brief text + tool summary
+            const textParts = [];
+            const toolCalls = [];
+
+            for (const block of msg.content || []) {
+                if (block.type === "text" && block.text) {
+                    // Just first 200 chars of assistant text for context
+                    textParts.push(truncate(block.text, 200));
+                } else if (block.type === "toolCall") {
+                    // Condense tool call: name + truncated key info
+                    let summary = block.toolName;
+                    if (block.args) {
+                        if (block.args.path) {
+                            summary += `: ${truncate(block.args.path, 100)}`;
+                        } else if (block.args.command) {
+                            summary += `: ${truncate(block.args.command, 100)}`;
+                        } else {
+                            // Generic args truncation
+                            const argsStr = JSON.stringify(block.args);
+                            summary += `: ${truncate(argsStr, 100)}`;
+                        }
+                    }
+                    toolCalls.push(summary);
+                }
+            }
+
+            if (textParts.length || toolCalls.length) {
+                turns.push({
+                    turn: turnNumber,
+                    role: "assistant",
+                    text: textParts.length ? textParts[0] : null,
+                    tools: toolCalls.length ? toolCalls : null,
+                });
+            }
+        } else if (msg.role === "toolResult") {
+            // Just note if there was an error
+            const hasError = (msg.content || []).some((c) => c.isError);
+            if (hasError) {
+                turns.push({
+                    turn: turnNumber,
+                    role: "tool_error",
+                    text: "Tool returned an error",
+                });
+            }
         }
-      }
-      
-      if (textParts.length || toolCalls.length) {
-        turns.push({
-          turn: turnNumber,
-          role: 'assistant',
-          text: textParts.length ? textParts[0] : null,
-          tools: toolCalls.length ? toolCalls : null
-        });
-      }
-    } else if (msg.role === 'toolResult') {
-      // Just note if there was an error
-      const hasError = (msg.content || []).some(c => c.isError);
-      if (hasError) {
-        turns.push({
-          turn: turnNumber,
-          role: 'tool_error',
-          text: 'Tool returned an error'
-        });
-      }
     }
-  }
-  
-  return {
-    sessionId: data.header?.id,
-    timestamp: data.header?.timestamp,
-    cwd: data.header?.cwd,
-    turns
-  };
+
+    return {
+        sessionId: data.header?.id,
+        timestamp: data.header?.timestamp,
+        cwd: data.header?.cwd,
+        turns,
+    };
 }
 
 // Format condensed data as text for the summarizer
 function formatForSummary(condensed) {
-  const lines = [];
-  
-  lines.push(`Session: ${condensed.sessionId || 'unknown'}`);
-  lines.push(`Time: ${condensed.timestamp || 'unknown'}`);
-  lines.push(`Directory: ${condensed.cwd || 'unknown'}`);
-  lines.push('');
-  lines.push('=== Conversation ===');
-  lines.push('');
-  
-  for (const turn of condensed.turns) {
-    if (turn.role === 'human') {
-      lines.push(`[Turn ${turn.turn}] HUMAN:`);
-      lines.push(turn.text);
-      lines.push('');
-    } else if (turn.role === 'assistant') {
-      lines.push(`[Turn ${turn.turn}] ASSISTANT (condensed):`);
-      if (turn.text) {
-        lines.push(`  Response: ${turn.text}`);
-      }
-      if (turn.tools && turn.tools.length) {
-        lines.push(`  Tools used: ${turn.tools.join(', ')}`);
-      }
-      lines.push('');
-    } else if (turn.role === 'tool_error') {
-      lines.push(`[Turn ${turn.turn}] ⚠️ Tool error occurred`);
-      lines.push('');
+    const lines = [];
+
+    lines.push(`Session: ${condensed.sessionId || "unknown"}`);
+    lines.push(`Time: ${condensed.timestamp || "unknown"}`);
+    lines.push(`Directory: ${condensed.cwd || "unknown"}`);
+    lines.push("");
+    lines.push("=== Conversation ===");
+    lines.push("");
+
+    for (const turn of condensed.turns) {
+        if (turn.role === "human") {
+            lines.push(`[Turn ${turn.turn}] HUMAN:`);
+            lines.push(turn.text);
+            lines.push("");
+        } else if (turn.role === "assistant") {
+            lines.push(`[Turn ${turn.turn}] ASSISTANT (condensed):`);
+            if (turn.text) {
+                lines.push(`  Response: ${turn.text}`);
+            }
+            if (turn.tools && turn.tools.length) {
+                lines.push(`  Tools used: ${turn.tools.join(", ")}`);
+            }
+            lines.push("");
+        } else if (turn.role === "tool_error") {
+            lines.push(`[Turn ${turn.turn}] ⚠️ Tool error occurred`);
+            lines.push("");
+        }
     }
-  }
-  
-  return lines.join('\n');
+
+    return lines.join("\n");
 }
 
 // Generate human summary using haiku via pi
 async function generateHumanSummary(data) {
-  const condensed = extractForSummary(data);
-  const formatted = formatForSummary(condensed);
-  
-  const prompt = `You are analyzing a coding agent session transcript. Your task is to summarize what the HUMAN did, not what the AI agent did.
+    const condensed = extractForSummary(data);
+    const formatted = formatForSummary(condensed);
+
+    const prompt = `You are analyzing a coding agent session transcript. Your task is to summarize what the HUMAN did, not what the AI agent did.
 
 Focus on:
 1. What was the human's initial goal/request?
@@ -281,73 +291,79 @@ Here is the condensed session transcript:
 
 ${formatted}`;
 
-  try {
-    const result = spawnSync('pi', [
-      '--provider', 'anthropic',
-      '--model', 'claude-haiku-4-5',
-      '--no-tools',
-      '--no-session',
-      '-p',
-      prompt
-    ], {
-      encoding: 'utf-8',
-      maxBuffer: 10 * 1024 * 1024,
-      timeout: 60000
-    });
-    
-    if (result.error) {
-      throw result.error;
+    try {
+        const result = spawnSync(
+            "pi",
+            [
+                "--provider",
+                "volcengine",
+                "--model",
+                "doubao-seed-2.0-pro",
+                "--no-tools",
+                "--no-session",
+                "-p",
+                prompt,
+            ],
+            {
+                encoding: "utf-8",
+                maxBuffer: 10 * 1024 * 1024,
+                timeout: 60000,
+            },
+        );
+
+        if (result.error) {
+            throw result.error;
+        }
+        if (result.status !== 0) {
+            throw new Error(result.stderr || "pi command failed");
+        }
+
+        return result.stdout.trim();
+    } catch (err) {
+        throw new Error(`Failed to generate summary: ${err.message}`);
     }
-    if (result.status !== 0) {
-      throw new Error(result.stderr || 'pi command failed');
-    }
-    
-    return result.stdout.trim();
-  } catch (err) {
-    throw new Error(`Failed to generate summary: ${err.message}`);
-  }
 }
 
 // Main
 async function main() {
-  try {
-    const gistId = extractGistId(input);
-    
-    // Check cache first (unless --no-cache)
-    let data = null;
-    if (!flags.has('--no-cache')) {
-      data = readCache(gistId);
+    try {
+        const gistId = extractGistId(input);
+
+        // Check cache first (unless --no-cache)
+        let data = null;
+        if (!flags.has("--no-cache")) {
+            data = readCache(gistId);
+        }
+
+        if (!data) {
+            const html = await fetchSessionHtml(gistId);
+            data = extractSessionData(html);
+            writeCache(gistId, data);
+        }
+
+        if (flags.has("--header")) {
+            console.log(JSON.stringify(data.header));
+        } else if (flags.has("--entries")) {
+            // Output as JSON lines - one entry per line
+            for (const entry of data.entries) {
+                console.log(JSON.stringify(entry));
+            }
+        } else if (flags.has("--system")) {
+            console.log(data.systemPrompt || "");
+        } else if (flags.has("--tools")) {
+            console.log(JSON.stringify(data.tools || []));
+        } else if (flags.has("--human-summary")) {
+            // Generate human-centric summary using haiku
+            const summary = await generateHumanSummary(data);
+            console.log(summary);
+        } else {
+            // Default: full session data
+            console.log(JSON.stringify(data));
+        }
+    } catch (err) {
+        console.error(err.message);
+        process.exit(1);
     }
-    
-    if (!data) {
-      const html = await fetchSessionHtml(gistId);
-      data = extractSessionData(html);
-      writeCache(gistId, data);
-    }
-    
-    if (flags.has('--header')) {
-      console.log(JSON.stringify(data.header));
-    } else if (flags.has('--entries')) {
-      // Output as JSON lines - one entry per line
-      for (const entry of data.entries) {
-        console.log(JSON.stringify(entry));
-      }
-    } else if (flags.has('--system')) {
-      console.log(data.systemPrompt || '');
-    } else if (flags.has('--tools')) {
-      console.log(JSON.stringify(data.tools || []));
-    } else if (flags.has('--human-summary')) {
-      // Generate human-centric summary using haiku
-      const summary = await generateHumanSummary(data);
-      console.log(summary);
-    } else {
-      // Default: full session data
-      console.log(JSON.stringify(data));
-    }
-  } catch (err) {
-    console.error(err.message);
-    process.exit(1);
-  }
 }
 
 main();
