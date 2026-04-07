@@ -9,7 +9,7 @@
     },
     "rush": {
       "provider": "volcengine",
-      "modelId": "doubao-seed-2.0-code",
+      "modelId": "doubao-seed-2.0-pro",
       "thinkingLevel": "off"
     },
     "smart": {
