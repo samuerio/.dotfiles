@@ -1,11 +1,11 @@
 ---
 name: markdown
-description: Convert files, URLs, and more to Markdown. Only translate to Chinese when the user explicitly requests it.
+description: Convert anything to Markdown.
 ---
 
 # markdown
 
-Convert anything to Markdown. Use the Convert + Translate flow only when the user explicitly asks to both convert AND translate in the same request.
+Convert anything to Markdown. Use the optional Translate step after conversion when the user explicitly requests translation.
 
 ## Convert
 
@@ -38,20 +38,12 @@ markit formats
 node agents/skills/markdown/twitter.js https://x.com/username/status/<id> -o $MARKDOWN_FILE
 ```
 
-## Convert + Translate
+## Translate (optional)
 
-**Trigger**: Use this flow whenever the user asks to convert AND translate in the same request (e.g. "convert to markdown and translate"). Also works with Twitter/X tweet URLs.
-
-```bash
-# <URL|FILE|ZIP> can be a URL, local file, or ZIP archive
-markit <URL|FILE|ZIP> | \
-pi -p "Translate to Chinese and write to /tmp/markdown.md; RULE: 1.Preserve full meaning and original order; do not summarize, condense, omit details, or invent facts. 2.Keep common technical terms in English when appropriate; use standard Chinese when natural." \
-   --model volcengine/doubao-seed-2.0-code
-```
+**Trigger**: Run this step when the user explicitly requests a translation.
 
 ```bash
-# Twitter/X tweet URL — convert + translate
-node agents/skills/markdown/twitter.js https://x.com/username/status/<id> | \
+cat $MARKDOWN_FILE | \
 pi -p "Translate to Chinese and write to /tmp/markdown.md; RULE: 1.Preserve full meaning and original order; do not summarize, condense, omit details, or invent facts. 2.Keep common technical terms in English when appropriate; use standard Chinese when natural." \
    --model volcengine/doubao-seed-2.0-code
 ```
