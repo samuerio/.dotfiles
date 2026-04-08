@@ -63,11 +63,15 @@ markit design.zip -o $MARKDOWN_FILE
 
 ## Translate (optional)
 
-**Trigger**: Run this step when the user explicitly requests a translation.
+IF the user's input message explicitly requests translation (e.g. "translate to Japanese", "translate to French"):
+  → Infer <TARGET_LANG> from the user's request (e.g. "Japanese", "French", "Chinese")
+  → Run the translation command below with <TARGET_LANG> substituted
+ELSE:
+  → Skip this step entirely, proceed to Final Step
 
 ```bash
 cat $MARKDOWN_FILE | \
-pi -p "Translate to Chinese and write to /tmp/markdown.md; RULE: 1.Preserve full meaning and original order; do not summarize, condense, omit details, or invent facts. 2.Keep common technical terms in English when appropriate; use standard Chinese when natural." \
+pi -p "Translate to <TARGET_LANG> and write to /tmp/markdown.md; RULE: 1.Preserve full meaning and original order; do not summarize, condense, omit details, or invent facts. 2.Keep common technical terms in English when appropriate; use natural <TARGET_LANG> phrasing." \
    --model volcengine/doubao-seed-2.0-code
 ```
 
