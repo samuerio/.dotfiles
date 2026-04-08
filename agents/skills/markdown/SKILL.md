@@ -10,32 +10,34 @@ Convert anything to Markdown. Use the optional Translate step after conversion w
 ## Convert
 
 ```bash
-
 MARKDOWN_FILE="/tmp/markdown.md"
+```
 
-# Convert a file
+### Twitter/X
+
+If the input is a `x.com` or `twitter.com` URL:
+
+```bash
+node agents/skills/markdown/twitter.js https://x.com/username/status/<id> -o $MARKDOWN_FILE
+```
+
+### Everything else
+
+For all other inputs (files, URLs, GitHub, ZIP, etc.), use `markit`:
+
+```bash
+# Files
 markit report.pdf -o $MARKDOWN_FILE
 markit document.docx -o $MARKDOWN_FILE
 
-# Convert a URL
+# URLs & web pages
 markit https://en.wikipedia.org/wiki/Markdown -o $MARKDOWN_FILE
 
-# Convert a zip
-markit design.zip -o $MARKDOWN_FILE
-
-# GitHub URLs (repos, files, gists, issues, PRs)
+# GitHub (repos, files, gists, issues, PRs)
 markit https://github.com/owner/repo -o $MARKDOWN_FILE
-markit https://github.com/owner/repo/issues/42 -o $MARKDOWN_FILE
-markit https://gist.github.com/user/id -o $MARKDOWN_FILE
 
-# See all options
-markit --help
-
-# See supported formats
-markit formats
-
-# Convert a Twitter/X tweet
-node agents/skills/markdown/twitter.js https://x.com/username/status/<id> -o $MARKDOWN_FILE
+# ZIP archives
+markit design.zip -o $MARKDOWN_FILE
 ```
 
 ## Translate (optional)
