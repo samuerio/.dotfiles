@@ -1,18 +1,15 @@
 ---
-description: Rewrite image-containing problems into text-only format for pure reasoning models
+description: Rewrite image problems to text-only format for pure reasoning models
 agent: general
 ---
-Rewrite the following problem with reference images into a pure text version that text-only reasoning models can fully understand without seeing the images:
+Rewrite this image-containing problem into fully text-only version:
 
-1. First extract the core requirement from the original problem
-2. For each image: describe ALL visible content in detail, including text, diagrams, UI interfaces, code snippets, error messages, visual elements, etc.
-3. Ask me clarifying questions if any content in the images or problem is ambiguous or unclear
-4. Combine the original problem and all image descriptions into a complete text-only problem
-5. Ensure no visual information is omitted, descriptions are accurate and clear
+- Describe ALL image content in full detail (text, UI, code, errors, diagrams, etc.)
+- Ask clarifying questions if any content is ambiguous
+- Combine original problem + image descriptions into complete text problem
+- No extra explanations, output only the rewritten problem
 
 <original_problem>
 $ARGUMENTS
 </original_problem>
-
-Output only the rewritten text-only problem directly, no extra explanations.
 
