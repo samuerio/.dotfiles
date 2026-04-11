@@ -37,22 +37,22 @@ The human summary focuses on: initial goals, re-prompts, steering/corrections, i
 
 ```bash
 # Get full session data (default)
-node ~/.pi/agent/skills/pi-share/fetch-session.mjs "<url-or-gist-id>"
+node ~/.agents/skills/pi-share/fetch-session.mjs "<url-or-gist-id>"
 
 # Get just the header
-node ~/.pi/agent/skills/pi-share/fetch-session.mjs <gist-id> --header
+node ~/.agents/skills/pi-share/fetch-session.mjs <gist-id> --header
 
 # Get entries as JSON lines (one entry per line)
-node ~/.pi/agent/skills/pi-share/fetch-session.mjs <gist-id> --entries
+node ~/.agents/skills/pi-share/fetch-session.mjs <gist-id> --entries
 
 # Get the system prompt
-node ~/.pi/agent/skills/pi-share/fetch-session.mjs <gist-id> --system
+node ~/.agents/skills/pi-share/fetch-session.mjs <gist-id> --system
 
 # Get tool definitions
-node ~/.pi/agent/skills/pi-share/fetch-session.mjs <gist-id> --tools
+node ~/.agents/skills/pi-share/fetch-session.mjs <gist-id> --tools
 
 # Get human-centric summary (what did the human do in this session?)
-node ~/.pi/agent/skills/pi-share/fetch-session.mjs <gist-id> --human-summary
+node ~/.agents/skills/pi-share/fetch-session.mjs <gist-id> --human-summary
 ```
 
 ## Human Summary
@@ -101,8 +101,8 @@ Message content block types:
 
 ```bash
 # Pipe entries through jq to filter
-node ~/.pi/agent/skills/pi-share/fetch-session.mjs "<url>" --entries | jq 'select(.type == "message" and .message.role == "user")'
+node ~/.agents/skills/pi-share/fetch-session.mjs "<url>" --entries | jq 'select(.type == "message" and .message.role == "user")'
 
 # Count tool calls
-node ~/.pi/agent/skills/pi-share/fetch-session.mjs "<url>" --entries | jq -s '[.[] | select(.type == "message") | .message.content[]? | select(.type == "toolCall")] | length'
+node ~/.agents/skills/pi-share/fetch-session.mjs "<url>" --entries | jq -s '[.[] | select(.type == "message") | .message.content[]? | select(.type == "toolCall")] | length'
 ```
