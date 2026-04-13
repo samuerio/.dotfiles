@@ -1,21 +1,23 @@
 ---
 description: Generate design.md with Mermaid architecture and flow diagrams
 ---
-Create `design.md` based on the current solution. Focus on design, not implementation.
+Create design.md based on the current plan.
+
+## Step 0 – Clarify
+Ask about any ambiguities in responsibilities, data flow, or design intent that cannot be inferred from the plan. Proceed only after receiving answers.
 
 ## Required Sections
 
-**Architecture Pattern & Boundary Map**
-Mermaid architecture diagram showing: chosen pattern, system boundaries, major components, external systems, and dependency direction.
+### 1. Architecture Diagram
+Mermaid diagram (e.g., pattern, system boundaries, major components, external systems, dependency direction).
 
-**System Flows**
-Mermaid flow diagram for the primary behavior. Choose the best fit: sequence, process/state, or data/event flow.
+### 2. Primary Flow
+Mermaid sequence/state/data-flow diagram for the core behavior.
 
-**Design Notes**
-Concise prose covering: component responsibilities, interfaces, data flow, state boundaries, error handling, testing approach, risks, and open questions. Prefer tables over narrative text. Do not restate diagram steps verbatim.
+### 3. Design Notes
+Cover relevant aspects, e.g., component responsibilities, interfaces, data flow, state boundaries, error handling, risks. Tables preferred.
 
 ## Diagram Rules
-- Pure Mermaid only, no custom styling
-- Node IDs: letters, numbers, underscores only
-- Labels: short, plain — no parentheses, brackets, quotes, or slashes
-- Directed edges for control/data flow; subgraphs only when they aid clarity
+- Node IDs: alphanumeric + underscore only
+- Labels: short, no parentheses/brackets/quotes/slashes
+- Use directed edges; subgraphs only when they add clarity
