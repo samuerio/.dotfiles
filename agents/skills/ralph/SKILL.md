@@ -1,11 +1,15 @@
 ---
 name: ralph
-description: "Convert plan/design docs to task.json for Ralph."
+description: "Convert plan and optional design docs into task.json for Ralph autonomous execution."
 ---
 
 # Ralph Task Generator
 
-Converts plan (solution approach) and design (architecture + core flows) into `task.json` for Ralph autonomous execution. Ralph has access to the plan and design at execution time, so tasks do not need to repeat technical details.
+Converts a **plan** (solution approach) and an optional **design** (architecture + core flows)
+into `task.json` for Ralph autonomous execution.
+ 
+Ralph has access to the plan and design at execution time, so tasks do not need to repeat
+technical details — describe *what* to implement, not *how*.
 
 ## Output Format
 
@@ -30,14 +34,20 @@ Converts plan (solution approach) and design (architecture + core flows) into `t
 
 ## Task Rules
 
-- Target **1–3 hours of engineering work** per task
-- Describe functionality and behavior — not file paths, function names, or type definitions
-- Include only implementation, testing, and technical setup
-- Each task must build on previous outputs and progress incrementally
-- End with integration tasks
-- **Prefer vertical slices** — split by business closure, not technical layer
-- Always append `"Typecheck passes"` · logic tasks add `"Tests pass"` · UI tasks add `"Verify in browser using dev-browser skill"`
+- **Scope**: Target 1–3 hours of engineering work per task
+- **Language**: Describe functionality and behavior — not file paths, function names, or type definitions
+- **Content**: Include only implementation, testing, and technical setup
+- **Ordering**: Each task must build on previous outputs and progress incrementally
+- **Closure**: End with integration tasks
+- **Slicing**: Prefer vertical slices — split by business closure, not technical layer
 
+### Acceptance Criteria — mandatory additions
+ 
+| Task type | Always append |
+|-----------|--------------|
+| All tasks | `"Typecheck passes"` |
+| Logic / backend | `"Tests pass"` |
+| UI | `"Verify in browser using dev-browser skill"` |
 
 ## Example
 
