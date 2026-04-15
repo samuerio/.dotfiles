@@ -2,6 +2,8 @@
 description: Generate design.md with Mermaid architecture and flow diagrams
 ---
 
+<$ARGUMENTS>
+
 Create design.md based on the current plan.
 
 ## Step 0 – Clarify
@@ -27,4 +29,3 @@ error handling, risks. Tables preferred.
 
 ## Output Path
 If the plan exists as a file (e.g. `spec/[slug]/plan.md`), write `design.md` to the same directory.
-
