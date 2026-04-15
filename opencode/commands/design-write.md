@@ -1,6 +1,7 @@
 ---
 description: Generate design.md with Mermaid architecture and flow diagrams
 ---
+
 Create design.md based on the current plan.
 
 ## Step 0 – Clarify

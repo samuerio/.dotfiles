@@ -1,6 +1,7 @@
 ---
 description: Analyze a repository and generate or improve an AGENTS.md file with build/test commands and architecture overview.
 ---
+
 Please analyze this codebase and create a AGENTS.md file, which will be given to future instances of Agent to operate in this repository.
 
 What to add:

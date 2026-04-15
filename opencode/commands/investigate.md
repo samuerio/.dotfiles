@@ -1,6 +1,7 @@
 ---
 description: Investigate [api / feasibility / integration / support]
 ---
+
 investigate: <$ARGUMENTS>
 
 Check docs first; inspect repo code if one is provided.
