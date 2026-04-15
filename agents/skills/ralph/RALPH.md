@@ -23,14 +23,17 @@ You are an autonomous coding agent working on a software project.
 - Follow existing code patterns.
 - Before committing, run the relevant quality checks and only commit if they pass.
 - Do not reply until all changes for the task have been committed.
-- Commit must not include task ID.
+- The git commit subject and body must never contain any task ID (e.g. T-001).
+  ✅ `feat: implement SQL assembly and output logic`
+  ❌ `feat: implement SQL assembly and output logic for T-005`
+  Task IDs belong only in progress.txt.
 
 ## Progress Entry Format
 
 Append only:
 
 ```md
-## [Date/Time] - [Task ID]
+## [Date/Time] - [Task ID]   ← internal tracking only, NOT for commit message
 - What was implemented
 - Files changed
 - **Learnings for future iterations:**
