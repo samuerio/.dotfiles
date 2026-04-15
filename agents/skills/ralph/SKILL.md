@@ -1,17 +1,17 @@
 ---
 name: ralph
-description: "Convert plan and optional design docs into task.json for Ralph autonomous execution."
+description: "Convert a plan and optional design into task.json for Ralph autonomous execution."
 ---
 
 # Ralph Task Generator
 
-Converts a **plan** (solution approach) and an optional **design** (architecture + core flows)
-into `task.json` for Ralph autonomous execution.
- 
-Ralph has access to the plan and design at execution time, so tasks do not need to repeat
-technical details — describe *what* to implement, not *how*.
+Generate `task.json` from a plan and optional design.
 
-## Output Format
+Ralph will have access to the original plan and design during execution, so tasks should describe **what to implement**, not **how to implement it**. Do not repeat architecture, file paths, function names, or type definitions unless absolutely necessary.
+
+## Output
+
+Write a `task.json` file in this format:
 
 ```json
 {
@@ -32,22 +32,31 @@ technical details — describe *what* to implement, not *how*.
 }
 ```
 
-## Task Rules
+## Task generation rules
 
-- **Scope**: Target 1–3 hours of engineering work per task
-- **Language**: Describe functionality and behavior — not file paths, function names, or type definitions
-- **Content**: Include only implementation, testing, and technical setup
-- **Ordering**: Each task must build on previous outputs and progress incrementally
-- **Closure**: End with integration tasks
-- **Slicing**: Prefer vertical slices — split by business closure, not technical layer
+- Each task should represent roughly **1–3 hours** of engineering work.
+- Prefer **vertical slices** grouped by user-visible/business closure, not by technical layer.
+- Order tasks so each one builds on prior outputs.
+- End with **integration / end-to-end validation** tasks.
+- Include only:
+  - implementation work
+  - testing
+  - required technical setup
+- Do not include:
+  - file paths
+  - function/type names
+  - low-level implementation details already covered by the plan/design
 
-### Acceptance Criteria — mandatory additions
- 
-| Task type | Always append |
-|-----------|--------------|
-| All tasks | `"Typecheck passes"` |
-| Logic / backend | `"Tests pass"` |
-| UI | `"Verify in browser using dev-browser skill"` |
+### Acceptance criteria rules
+
+For every task:
+- append `"Typecheck passes"`
+
+For non-UI tasks:
+- append `"Tests pass"`
+
+For UI tasks:
+- append `"Verify in browser using dev-browser skill"`
 
 ## Example
 
@@ -57,11 +66,10 @@ technical details — describe *what* to implement, not *how*.
     {
       "id": "T-001",
       "title": "Implement user registration",
-      "description": "Users table, POST /api/auth/register endpoint, input validation.",
+      "description": "Add registration flow with validation and duplicate-email handling.",
       "acceptanceCriteria": [
-        "Migration creates `users` table with all specified columns",
-        "`POST /api/auth/register` returns 201 with `{ userId, email }` on success",
-        "`POST /api/auth/register` returns 409 if email already exists",
+        "Registration succeeds for a new email",
+        "Registration fails for an existing email",
         "Typecheck passes",
         "Tests pass"
       ],
@@ -71,34 +79,41 @@ technical details — describe *what* to implement, not *how*.
     },
     {
       "id": "T-002",
-      "title": "Implement user login",
-      "description": "POST /api/auth/login endpoint: validate credentials, issue JWT, return token.",
+      "title": "Integration: auth flow end-to-end",
+      "description": "Verify registration, login, and protected-route access work together.",
       "acceptanceCriteria": [
-        "`POST /api/auth/login` returns 200 with `{ token }` on valid credentials",
-        "`POST /api/auth/login` returns 401 on invalid credentials",
-        "JWT expiry matches config",
+        "A registered user can log in successfully",
+        "Protected access works with valid authentication",
+        "Protected access fails without authentication",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 2,
       "passes": false,
       "notes": ""
-    },
-    {
-      "id": "T-003",
-      "title": "Integration: auth flow end-to-end",
-      "description": "Verify registration and login work together. User registers, logs in, and accesses a protected route with the issued token.",
-      "acceptanceCriteria": [
-        "Registered user can log in and receive a valid JWT",
-        "Protected route returns 200 with valid token",
-        "Protected route returns 401 without token",
-        "Typecheck passes",
-        "Tests pass"
-      ],
-      "priority": 3,
-      "passes": false,
-      "notes": ""
     }
   ]
 }
 ```
+
+## After generation
+
+1. Write `task.json` to the same directory as the plan file.
+2. Ensure Ralph is installed in the current working directory:
+   - check for `ralph/ralph.sh`
+   - check for `ralph/RALPH.md`
+3. If either file is missing:
+   - create `ralph/` if needed
+   - copy `ralph.sh` and `RALPH.md` from this skill into `<cwd>/ralph/`
+4. Then tell the user:
+
+```bash
+./ralph/ralph.sh <dir-containing-task.json>
+```
+
+Use this exact phrasing:
+
+> Next step — run Ralph to execute the tasks:
+> ```bash
+> ./ralph/ralph.sh <dir-containing-task.json>
+> ```

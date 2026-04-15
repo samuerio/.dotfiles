@@ -21,6 +21,11 @@
       "provider": "openai-codex",
       "modelId": "gpt-5.3-codex",
       "thinkingLevel": "medium"
+    },
+    "inner": {
+      "provider": "openrouter",
+      "modelId": "qwen/qwen3.5-122b-a10b",
+      "thinkingLevel": "off"
     }
   }
 }
