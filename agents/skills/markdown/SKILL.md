@@ -52,10 +52,14 @@ markit report.pdf -o $MARKDOWN_FILE
 markit document.docx -o $MARKDOWN_FILE
 
 # URLs & web pages
-markit https://en.wikipedia.org/wiki/Markdown -o $MARKDOWN_FILE
+SOURCE_URL="https://en.wikipedia.org/wiki/Markdown"
+markit $SOURCE_URL -o $MARKDOWN_FILE \
+&& printf '\n\n---\n\n> **Source:** [%s](%s)\n' "$SOURCE_URL" "$SOURCE_URL" >> $MARKDOWN_FILE
 
 # GitHub (repos, files, gists, issues, PRs)
-markit https://github.com/owner/repo -o $MARKDOWN_FILE
+GH_URL="https://github.com/owner/repo"
+markit $GH_URL -o $MARKDOWN_FILE \
+&& printf '\n\n---\n\n> **Github:** [%s](%s)\n' "$GH_URL" "$GH_URL" >> $MARKDOWN_FILE
 
 # ZIP archives
 markit design.zip -o $MARKDOWN_FILE
