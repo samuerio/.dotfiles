@@ -15,202 +15,94 @@
     },
     "vim.insertModeKeyBindings": [
         {
-            "before": [
-                "<C-j>"
-            ],
-            "commands": [
-                "editor.action.triggerSuggest"
-            ]
+            "before": ["<C-j>"],
+            "commands": ["editor.action.triggerSuggest"]
         }
     ],
     "vim.normalModeKeyBindings": [
         {
-            "before": [
-                "g",
-                "d"
-            ],
-            "commands": [
-                "editor.action.revealDefinition"
-            ]
+            "before": ["g", "d"],
+            "commands": ["editor.action.revealDefinition"]
         },
         {
-            "before": [
-                "g",
-                "y"
-            ],
-            "commands": [
-                "editor.action.goToTypeDefinition"
-            ]
+            "before": ["g", "y"],
+            "commands": ["editor.action.goToTypeDefinition"]
         },
         {
-            "before": [
-                "g",
-                "i"
-            ],
-            "commands": [
-                "editor.action.goToImplementation"
-            ]
+            "before": ["g", "i"],
+            "commands": ["editor.action.goToImplementation"]
         },
         {
-            "before": [
-                "g",
-                "r"
-            ],
-            "commands": [
-                "editor.action.goToReferences"
-            ]
+            "before": ["g", "r"],
+            "commands": ["editor.action.goToReferences"]
         },
         {
-            "before": [
-                "t",
-                "h"
-            ],
-            "commands": [
-                "workbench.action.previousEditor"
-            ]
+            "before": ["t", "h"],
+            "commands": ["workbench.action.previousEditor"]
         },
         {
-            "before": [
-                "t",
-                "l"
-            ],
-            "commands": [
-                "workbench.action.nextEditor"
-            ]
+            "before": ["t", "l"],
+            "commands": ["workbench.action.nextEditor"]
         },
         {
-            "before": [
-                "t",
-                "o"
-            ],
-            "commands": [
-                "workbench.action.closeOtherEditors"
-            ]
+            "before": ["t", "o"],
+            "commands": ["workbench.action.closeOtherEditors"]
         },
         {
-            "before": [
-                "t",
-                "n"
-            ],
-            "commands": [
-                "workbench.action.files.newUntitledFile"
-            ]
+            "before": ["t", "n"],
+            "commands": ["workbench.action.files.newUntitledFile"]
         },
         {
-            "before": [
-                "t",
-                "p"
-            ],
-            "commands": [
-                "workbench.action.openPreviousRecentlyUsedEditor"
-            ]
+            "before": ["t", "p"],
+            "commands": ["workbench.action.openPreviousRecentlyUsedEditor"]
         },
         {
-            "before": [
-                "'",
-                "l"
-            ],
-            "commands": [
-                "workbench.action.navigateToLastEditLocation"
-            ]
+            "before": ["'", "l"],
+            "commands": ["workbench.action.navigateToLastEditLocation"]
         },
         {
-            "before": [
-                "<leader>",
-                "o"
-            ],
-            "commands": [
-                "workbench.action.gotoSymbol"
-            ]
+            "before": ["<leader>", "o"],
+            "commands": ["workbench.action.gotoSymbol"]
         },
         {
-            "before": [
-                "<leader>",
-                "F"
-            ],
-            "commands": [
-                "editor.action.formatDocument"
-            ]
+            "before": ["<leader>", "F"],
+            "commands": ["editor.action.formatDocument"]
         },
         {
-            "before": [
-                "<leader>",
-                "r"
-            ],
-            "commands": [
-                "editor.action.rename"
-            ]
+            "before": ["<leader>", "r"],
+            "commands": ["editor.action.rename"]
         },
         {
-            "before": [
-                "<leader>",
-                "f",
-            ],
-            "commands": [
-                "workbench.action.quickOpen"
-            ]
+            "before": ["<leader>", "f"],
+            "commands": ["workbench.action.quickOpen"]
         },
         {
-            "before": [
-                "<leader>",
-                "s"
-            ],
-            "commands": [
-                "workbench.action.showAllSymbols"
-            ]
+            "before": ["<leader>", "s"],
+            "commands": ["workbench.action.showAllSymbols"]
         },
         {
-            "before": [
-                "<leader>",
-                "h",
-            ],
-            "commands": [
-                "workbench.action.findInFiles"
-            ]
+            "before": ["<leader>", "h"],
+            "commands": ["workbench.action.findInFiles"]
         },
         {
-            "before": [
-                "<leader>",
-                "q",
-            ],
-            "commands": [
-                "editor.action.quickFix"
-            ]
+            "before": ["<leader>", "q"],
+            "commands": ["editor.action.quickFix"]
         },
         {
-            "before": [
-                "<leader>",
-                "j",
-            ],
-            "commands": [
-                "outline.focus"
-            ]
+            "before": ["<leader>", "j"],
+            "commands": ["outline.focus"]
         },
         {
-            "before": [
-                "<leader>",
-                "n",
-            ],
-            "commands": [
-                "workbench.files.action.showActiveFileInExplorer"
-            ]
+            "before": ["<leader>", "n"],
+            "commands": ["workbench.files.action.showActiveFileInExplorer"]
         },
         {
-            "before": [
-                "<leader>",
-                "m",
-            ],
-            "commands": [
-                "markdown.showPreview"
-            ]
+            "before": ["<leader>", "m"],
+            "commands": ["markdown.showPreview"]
         },
         {
-            "before": [
-                "K"
-            ],
-            "commands": [
-                "editor.action.showHover"
-            ]
+            "before": ["K"],
+            "commands": ["editor.action.showHover"]
         },
         // 重点：配合以下注释的keybindings实现类似NerdTree的菜单开合效果
         // {
@@ -219,290 +111,139 @@
         //     "when": "!editorTextFocus && vim.active && sideBarVisible "
         // }
         {
-            "before": [
-                "<C-e>"
-            ],
-            "commands": [
-                "workbench.explorer.fileView.focus"
-            ]
+            "before": ["<C-e>"],
+            "commands": ["workbench.explorer.fileView.focus"]
         },
         {
-            "before": [
-                "]",
-                "d"
-            ],
-            "commands": [
-                "editor.action.marker.next"
-            ]
+            "before": ["]", "d"],
+            "commands": ["editor.action.marker.next"]
         },
         {
-            "before": [
-                "[",
-                "d"
-            ],
-            "commands": [
-                "editor.action.marker.prev"
-            ]
-        },
+            "before": ["[", "d"],
+            "commands": ["editor.action.marker.prev"]
+        }
     ],
     "vim.normalModeKeyBindingsNonRecursive": [
         {
-            "before": [
-                "d"
-            ],
-            "after": [
-                "\"",
-                "_",
-                "d"
-            ]
+            "before": ["d"],
+            "after": ["\"", "_", "d"]
         },
         {
-            "before": [
-                "D"
-            ],
-            "after": [
-                "\"",
-                "_",
-                "D"
-            ]
+            "before": ["D"],
+            "after": ["\"", "_", "D"]
         },
         {
-            "before": [
-                "c"
-            ],
-            "after": [
-                "\"",
-                "_",
-                "c"
-            ]
+            "before": ["c"],
+            "after": ["\"", "_", "c"]
         },
         {
-            "before": [
-                "C"
-            ],
-            "after": [
-                "\"",
-                "_",
-                "C"
-            ]
+            "before": ["C"],
+            "after": ["\"", "_", "C"]
         },
         {
-            "before": [
-                "S"
-            ],
-            "after": [
-                "\"",
-                "_",
-                "S"
-            ]
+            "before": ["S"],
+            "after": ["\"", "_", "S"]
         },
         {
-            "before": [
-                "x"
-            ],
-            "after": [
-                "\"",
-                "_",
-                "x"
-            ]
+            "before": ["x"],
+            "after": ["\"", "_", "x"]
         },
         {
-            "before": [
-                ",",
-                "d"
-            ],
-            "after": [
-                "\"",
-                "+",
-                "d"
-            ]
+            "before": [",", "d"],
+            "after": ["\"", "+", "d"]
         },
         {
-            "before": [
-                ",",
-                "D"
-            ],
-            "after": [
-                "\"",
-                "+",
-                "D"
-            ]
+            "before": [",", "D"],
+            "after": ["\"", "+", "D"]
         },
         {
-            "before": [
-                "Q"
-            ],
-            "commands": [
-                ":qa"
-            ]
+            "before": ["Q"],
+            "commands": [":qa"]
         },
         {
-            "before": [
-                "S"
-            ],
-            "commands": [
-                ":w"
-            ]
+            "before": ["S"],
+            "commands": [":w"]
         },
         {
-            "before": [
-                "<C-h>"
-            ],
-            "after": [
-                "<C-w>",
-                "h"
-            ]
+            "before": ["<C-h>"],
+            "after": ["<C-w>", "h"]
         },
         {
-            "before": [
-                "<C-j>"
-            ],
-            "after": [
-                "<C-w>",
-                "j"
-            ]
+            "before": ["<C-j>"],
+            "after": ["<C-w>", "j"]
         },
         {
-            "before": [
-                "<C-k>"
-            ],
-            "after": [
-                "<C-w>",
-                "k"
-            ]
+            "before": ["<C-k>"],
+            "after": ["<C-w>", "k"]
         },
         {
-            "before": [
-                "<C-l>"
-            ],
-            "after": [
-                "<C-w>",
-                "l"
-            ]
+            "before": ["<C-l>"],
+            "after": ["<C-w>", "l"]
         },
         {
-            "before": [
-                "<C-p>"
-            ],
-            "after": [
-                "<C-w>",
-                "w"
-            ]
+            "before": ["<C-p>"],
+            "after": ["<C-w>", "w"]
         },
         {
-            "before": [
-                "X"
-            ],
-            "commands": [
-                "workbench.action.closeActiveEditor"
-            ]
+            "before": ["X"],
+            "commands": ["workbench.action.closeActiveEditor"]
         },
         {
-            "before": [
-                "<C-s>"
-            ],
-            "after": [
-                "<C-w>",
-                "s"
-            ]
+            "before": ["<C-s>"],
+            "after": ["<C-w>", "s"]
         },
         {
-            "before": [
-                "<C-t>"
-            ],
-            "commands": [
-                "workbench.action.joinAllGroups"
-            ]
+            "before": ["<C-t>"],
+            "commands": ["workbench.action.joinAllGroups"]
         },
         {
-            "before": [
-                "<C-n>"
-            ],
-            "commands": [
-                ":nohl"
-            ]
+            "before": ["<C-n>"],
+            "commands": [":nohl"]
         },
         {
-            "before": [
-                "'",
-                "i"
-            ],
-            "after": [
-                "g",
-                "i"
-            ]
+            "before": ["'", "i"],
+            "after": ["g", "i"]
         },
         {
-            "before": [
-                "z",
-                "a"
-            ],
-            "commands": [
-                "editor.toggleFold"
-            ]
+            "before": ["z", "a"],
+            "commands": ["editor.toggleFold"]
         },
         //为了兼容idea中折叠的hack操作, 保持一致的IDE VIM操作习惯
         {
-            "before": [
-                "z",
-                "c"
-            ],
-            "commands": [
-                "editor.toggleFold"
-            ]
+            "before": ["z", "c"],
+            "commands": ["editor.toggleFold"]
         },
         {
-            "before": [
-                "z",
-                "o"
-            ],
-            "commands": [
-                "editor.toggleFold"
-            ]
+            "before": ["z", "o"],
+            "commands": ["editor.toggleFold"]
         },
         {
-            "before": [
-                "s",
-                "s"
-            ],
-            "after": [
-                "leader",
-                "leader",
-                "2",
-                "s"
-            ]
+            "before": ["s", "s"],
+            "after": ["leader", "leader", "2", "s"]
+        },
+        {
+            "before": ["<leader>", "c", "P"],
+            "commands": ["copyFilePath"],
+            "silent": true
+        },
+        {
+            "before": ["<leader>", "c", "p"],
+            "commands": ["copyRelativeFilePath"],
+            "silent": true
         }
     ],
     "vim.visualModeKeyBindingsNonRecursive": [
         {
-            "before": [
-                "d"
-            ],
-            "after": [
-                "\"",
-                "_",
-                "d"
-            ]
+            "before": ["d"],
+            "after": ["\"", "_", "d"]
         },
         {
-            "before": [
-                "c"
-            ],
-            "after": [
-                "\"",
-                "_",
-                "c"
-            ]
+            "before": ["c"],
+            "after": ["\"", "_", "c"]
         },
         {
-            "before": [
-                "x"
-            ],
-            "after": [
-                "\"",
-                "+",
-                "x"
-            ]
+            "before": ["x"],
+            "after": ["\"", "+", "x"]
         }
     ],
     "editor.stickyScroll.enabled": false,
@@ -531,9 +272,7 @@
             "path": "/usr/lib/jvm/java-8-openjdk"
         }
     ],
-    "python.analysis.extraPaths": [
-        ".venv"
-    ],
+    "python.analysis.extraPaths": [".venv"],
     "terminal.integrated.fontFamily": "Fira Code",
     "terminal.integrated.fontSize": 14
 }
