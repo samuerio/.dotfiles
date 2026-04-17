@@ -60,6 +60,34 @@
                         "cacheRead": 0,
                         "cacheWrite": 0
                     }
+                },
+                {
+                    "id": "deepseek-v3.2",
+                    "name": "deepseek-v3.2",
+                    "reasoning": false,
+                    "input": ["text"],
+                    "contextWindow": 256000,
+                    "maxTokens": 32000,
+                    "cost": {
+                        "input": 0.26,
+                        "output": 0.38,
+                        "cacheRead": 0,
+                        "cacheWrite": 0
+                    }
+                },
+                {
+                    "id": "minimax-m2.5",
+                    "name": "minimax-m2.5",
+                    "reasoning": false,
+                    "input": ["text"],
+                    "contextWindow": 256000,
+                    "maxTokens": 32000,
+                    "cost": {
+                        "input": 0.26,
+                        "output": 0.38,
+                        "cacheRead": 0,
+                        "cacheWrite": 0
+                    }
                 }
             ]
         },
