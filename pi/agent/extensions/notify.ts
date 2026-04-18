@@ -2,7 +2,7 @@
  * Notification Extension
  *
  * In tmux: sends a status-line notification via `tmux display-message` when the agent
- * finishes, but only if the current active pane is different from the pane running pi.
+ * finishes, but only if the current active window is different from the window running pi.
  *
  * Outside tmux: falls back to OSC 777 desktop notifications.
  */
@@ -12,13 +12,16 @@ import { Markdown, type MarkdownTheme } from "@mariozechner/pi-tui";
 
 const inTmux = (): boolean => Boolean(process.env.TMUX);
 
-const getNotifyPaneId = (): string | null => {
+const getNotifyWindowId = async (pi: ExtensionAPI): Promise<string | null> => {
 	const paneId = process.env.TMUX_PANE?.trim();
-	return paneId || null;
+	if (!paneId) return null;
+
+	const windowId = await getWindowIdFromPaneId(pi, paneId);
+	return windowId;
 };
 
-const getActiveClientPaneIds = async (pi: ExtensionAPI): Promise<string[]> => {
-	const { stdout, code } = await pi.exec("tmux", ["list-clients", "-F", "#{pane_id}"]);
+const getActiveClientWindowIds = async (pi: ExtensionAPI): Promise<string[]> => {
+	const { stdout, code } = await pi.exec("tmux", ["list-clients", "-F", "#{window_id}"]);
 	if (code !== 0) return [];
 
 	const ids = stdout
@@ -30,20 +33,20 @@ const getActiveClientPaneIds = async (pi: ExtensionAPI): Promise<string[]> => {
 };
 
 const shouldNotifyInTmux = async (pi: ExtensionAPI): Promise<boolean> => {
-	const notifyPaneId = getNotifyPaneId();
-	if (!notifyPaneId) {
-		// If we cannot resolve the source pane, default to notifying.
+	const notifyWindowId = await getNotifyWindowId(pi);
+	if (!notifyWindowId) {
+		// If we cannot resolve the source window, default to notifying.
 		return true;
 	}
 
-	const activePaneIds = await getActiveClientPaneIds(pi);
-	if (activePaneIds.length === 0) {
+	const activeWindowIds = await getActiveClientWindowIds(pi);
+	if (activeWindowIds.length === 0) {
 		// No active client info; notify by default.
 		return true;
 	}
 
-	// Silent when any active client is currently focused on the same pane.
-	return !activePaneIds.includes(notifyPaneId);
+	// Silent when any active client is currently focused on the same window.
+	return !activeWindowIds.includes(notifyWindowId);
 };
 
 const getWindowIdFromPaneId = async (pi: ExtensionAPI, paneId: string): Promise<string | null> => {
@@ -70,12 +73,9 @@ const sendTmuxMessage = async (pi: ExtensionAPI, message: string): Promise<boole
 	
 	// If message sent successfully, mark the window as unread
 	if (code === 0) {
-		const paneId = getNotifyPaneId();
-		if (paneId) {
-			const windowId = await getWindowIdFromPaneId(pi, paneId);
-			if (windowId) {
-				await markWindowAsUnread(pi, windowId);
-			}
+		const windowId = await getNotifyWindowId(pi);
+		if (windowId) {
+			await markWindowAsUnread(pi, windowId);
 		}
 	}
 	
