@@ -14,7 +14,7 @@ if [ ! -d "$SPEC_DIR" ]; then
   exit 1
 fi
 
-MAX_ITERATIONS=10
+MAX_ITERATIONS=20
 if [[ "$2" =~ ^[0-9]+$ ]]; then
   MAX_ITERATIONS="$2"
 fi
