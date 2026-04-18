@@ -1,12 +1,11 @@
 /**
  * /watch Command - Watch other pi sessions in real-time
  */
-
 import {
   type ExtensionAPI,
   SessionManager,
 } from "@mariozechner/pi-coding-agent";
-import { watch, readFileSync, existsSync } from "node:fs";
+import { watch } from "node:fs";
 import process from "node:process";
 
 interface SessionInfo {
@@ -19,52 +18,6 @@ interface SessionInfo {
   modified: Date;
   messageCount: number;
   firstMessage: string;
-}
-
-/**
- * Format message for display
- */
-function formatMessage(entry: any): string | null {
-  if (entry.type !== "message") return null;
-
-  const msg = entry.message;
-  const role = msg.role;
-
-  switch (role) {
-    case "user":
-      return `👤 ${formatContent(msg.content)}`;
-
-    case "assistant":
-      return `🤖 ${formatContent(msg.content)}`;
-
-    case "toolResult":
-      return `🔧 [${msg.toolName}] ${formatContent(msg.content)}`;
-
-    case "bashExecution":
-      return `💻 $ ${msg.command}`;
-
-    default:
-      return `❓ [${role}] ${JSON.stringify(msg.content)}`;
-  }
-}
-
-/**
- * Extract text from content blocks
- */
-function formatContent(content: any): string {
-  if (typeof content === "string") {
-    return content.slice(0, 200);
-  }
-
-  if (Array.isArray(content)) {
-    const texts = content
-      .filter((c: any) => c.type === "text")
-      .map((c: any) => c.text)
-      .join(" ");
-    return texts.slice(0, 200);
-  }
-
-  return "";
 }
 
 /**
@@ -99,155 +52,177 @@ function shortenPath(path: string): string {
 }
 
 /**
- * List sessions in current directory
+ * 防抖工具函数
  */
-async function listSessions(cwd: string): Promise<SessionInfo[]> {
-  return await SessionManager.list(cwd);
-}
-
-/**
- * Watch a session and display new messages
- */
-function watchSession(sessionPath: string, ctx: any) {
-  let lastProcessedLineCount = 0;
-
-  // Count initial lines
-  if (existsSync(sessionPath)) {
-    try {
-      const data = readFileSync(sessionPath, "utf8");
-      lastProcessedLineCount = data.split("\n").filter((l) => l.trim()).length;
-    } catch (e) {
-      // File might be empty or unreadable
-    }
-  }
-
-  const watcher = watch(sessionPath, { persistent: false }, (eventType) => {
-    if (eventType !== "change") return;
-
-    try {
-      const data = readFileSync(sessionPath, "utf8");
-      const lines = data.split("\n").filter((l) => l.trim());
-
-      const newLines = lines.slice(lastProcessedLineCount);
-
-      for (const line of newLines) {
-        try {
-          const entry = JSON.parse(line);
-          const formatted = formatMessage(entry);
-          if (formatted) {
-            ctx.ui.notify(formatted, "info");
-          }
-        } catch (e) {
-          // Skip malformed lines
-        }
-      }
-
-      lastProcessedLineCount = lines.length;
-    } catch (e) {
-      // Skip errors during read
-    }
-  });
-
-  // Return cleanup function
-  return () => {
-    watcher.close();
+function debounce<T extends (...args: any[]) => any>(fn: T, delay: number): (...args: Parameters<T>) => void {
+  let timeoutId: NodeJS.Timeout | null = null;
+  return (...args: Parameters<T>) => {
+    if (timeoutId) clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => fn(...args), delay);
   };
 }
 
 export default function (pi: ExtensionAPI) {
+  let isWatching = false;
+  let watcher: ReturnType<typeof watch> | null = null;
+  let originalSessionPath: string | null = null;
+  let lastMessageCount = 0;
+  let targetSessionPath: string | null = null;
+
+  // 注册退出watch的快捷键
+  pi.registerShortcut("ctrl+x", {
+    description: "Exit watch mode",
+    handler: async (ctx) => {
+      if (!isWatching || !watcher || !originalSessionPath) return;
+      
+      // 清理监听器
+      watcher.close();
+      watcher = null;
+      isWatching = false;
+      
+      // 切回原来的会话
+      await ctx.switchSession(originalSessionPath);
+      ctx.ui.notify("👓 Exited watch mode, returned to original session", "success");
+      originalSessionPath = null;
+      targetSessionPath = null;
+    },
+  });
+
   pi.registerCommand("watch", {
     description: "Watch another pi session in real-time",
     handler: async (args, ctx) => {
-      // Get current working directory
-      const currentCwd = process.cwd();
-      let sessions: SessionInfo[] = [];
       try {
-        sessions = await listSessions(currentCwd);
-      } catch (error) {
-        ctx.ui.notify(`Failed to load sessions: ${error}`, "error");
-        return;
-      }
+        if (isWatching) {
+          ctx.ui.notify("Already in watch mode, press Ctrl+X to exit first", "warning");
+          return;
+        }
 
-      if (!sessions || sessions.length === 0) {
-        ctx.ui.notify("No sessions found in current folder", "error");
-        return;
-      }
+        // 保存当前会话路径，退出时切回
+        originalSessionPath = ctx.sessionManager.getSessionFile();
+        
+        // 1. 加载当前工作路径的会话列表，和/resume默认显示逻辑一致
+        const currentCwd = process.cwd();
+        ctx.ui.notify("Loading sessions...", "info");
+        
+        // 获取所有会话，过滤出当前工作路径的会话
+        const allSessions = await SessionManager.listAll();
+        const sessions = allSessions.filter(s => s.cwd === currentCwd);
+        if (!sessions || sessions.length === 0) {
+          ctx.ui.notify("No sessions found in current folder", "error");
+          return;
+        }
 
-      // Filter out invalid sessions
-      sessions = sessions.filter((s) => s && s.path && typeof s === "object");
+        // 过滤无效会话
+        const validSessions = sessions.filter((s) => s && s.path && typeof s === "object");
+        if (validSessions.length === 0) {
+          ctx.ui.notify("No valid sessions found", "error");
+          return;
+        }
 
-      if (sessions.length === 0) {
-        ctx.ui.notify("No valid sessions found", "error");
-        return;
-      }
-
-      // Format sessions for selection as strings (matches /resume format)
-      const choices: string[] = [];
-      for (const s of sessions) {
-        try {
-          if (!s) continue;
-          
-          const displayName = s.name || "";
-          const firstMsg = s.firstMessage || "";
-          const finalName = displayName || firstMsg;
-
-          const normalizedMessage = finalName
+        // 2. 生成会话选择列表，和/resume格式完全一样
+        const choices = validSessions.map((s) => {
+          const displayName = s.name || s.firstMessage || "Unnamed session";
+          const normalizedMessage = displayName
             .replace(/[\x00-\x1f\x7f]/g, " ")
             .trim()
-            .slice(0, 200);
+            .slice(0, 150);
           const cwdShort = s.cwd ? shortenPath(s.cwd) : "";
           const age = s.modified ? formatSessionDate(s.modified) : "";
           const msgCount = s.messageCount || 0;
-          choices.push(`${normalizedMessage} (${cwdShort} ${msgCount} ${age})`);
-        } catch (e) {
-          console.error("Error processing session:", e, s);
+          return `${normalizedMessage} (${cwdShort} ${msgCount} ${age})`;
+        });
+
+        // 3. 显示选择框，和/resume完全一样
+        const selected = await ctx.ui.select(
+          "Select a session to watch:",
+          choices,
+        );
+
+        if (!selected) {
+          ctx.ui.notify("Cancelled", "info");
+          originalSessionPath = null;
+          return;
         }
+
+        const selectedIndex = choices.indexOf(selected);
+        if (selectedIndex < 0 || selectedIndex >= validSessions.length) {
+          ctx.ui.notify("Invalid selection", "error");
+          originalSessionPath = null;
+          return;
+        }
+
+        const targetSession = validSessions[selectedIndex];
+        if (!targetSession || !targetSession.path) {
+          ctx.ui.notify("Invalid session", "error");
+          originalSessionPath = null;
+          return;
+        }
+
+        targetSessionPath = targetSession.path;
+        lastMessageCount = targetSession.messageCount || 0;
+
+        // 4. 切换到目标会话
+        const result = await ctx.switchSession(targetSessionPath);
+        if (result.cancelled) {
+          ctx.ui.notify("Failed to load session", "error");
+          originalSessionPath = null;
+          targetSessionPath = null;
+          return;
+        }
+
+        // 5. 启动文件监听器，防抖300ms避免频繁刷新
+        const debouncedRefresh = debounce(async () => {
+          if (!targetSessionPath || !isWatching) return;
+          
+          try {
+            // 重新读取会话信息
+            const allSessions = await SessionManager.listAll();
+            const latestSession = allSessions.find(s => s.path === targetSessionPath);
+            if (!latestSession) {
+              ctx.ui.notify("Target session was deleted, exiting watch mode", "error");
+              watcher?.close();
+              isWatching = false;
+              return;
+            }
+
+            // 消息数量有变化才刷新
+            const newCount = latestSession.messageCount || 0;
+            if (newCount > lastMessageCount) {
+              const added = newCount - lastMessageCount;
+              // 重新切换到同一会话触发重载
+              await ctx.switchSession(targetSessionPath);
+              lastMessageCount = newCount;
+              ctx.ui.notify(`🔄 Session updated, +${added} new message${added > 1 ? 's' : ''}`, "success");
+            }
+          } catch (e) {
+            console.error("Refresh error:", e);
+          }
+        }, 300);
+
+        // 启动watch
+        watcher = watch(targetSessionPath, debouncedRefresh);
+        isWatching = true;
+
+        ctx.ui.notify(`👓 Now watching session: ${shortenPath(targetSession.cwd || targetSession.path)} | Press Ctrl+X to exit`, "success");
+        ctx.ui.setStatus("watch-mode", "👓 Watching session (Ctrl+X to exit)");
+      } catch (error) {
+        ctx.ui.notify(`Error: ${String(error)}`, "error");
+        console.error("Watch command error:", error);
+        // 出错清理状态
+        isWatching = false;
+        watcher?.close();
+        originalSessionPath = null;
+        targetSessionPath = null;
       }
-
-      if (choices.length === 0) {
-        ctx.ui.notify("No valid sessions to display", "error");
-        return;
-      }
-
-      const selected = await ctx.ui.select(
-        "Select a session to watch (Ctrl+C to stop):",
-        choices,
-      );
-
-      if (!selected) return;
-
-      const selectedIndex = choices.indexOf(selected);
-      if (
-        selectedIndex === -1 ||
-        selectedIndex < 0 ||
-        selectedIndex >= sessions.length
-      ) {
-        ctx.ui.notify("Failed to find selected session", "error");
-        return;
-      }
-      const session = sessions[selectedIndex];
-
-      if (!session) {
-        ctx.ui.notify("Selected session is undefined", "error");
-        return;
-      }
-
-      if (!session.path) {
-        ctx.ui.notify("Session has no path", "error");
-        return;
-      }
-
-      const sessionCwd = session && session.cwd ? session.cwd : session && session.path ? session.path : "unknown";
-      ctx.ui.notify(`Watching: ${sessionCwd}`, "info");
-      ctx.ui.notify("Press Ctrl+C in this terminal to stop watching", "info");
-
-      // Start watching
-      const cleanup = watchSession(session.path, ctx);
-
-      // Register cleanup on session shutdown
-      pi.on("session_shutdown", () => {
-        cleanup();
-      });
     },
+  });
+
+  // 会话关闭时自动清理监听器
+  pi.on("session_shutdown", () => {
+    if (watcher) {
+      watcher.close();
+      watcher = null;
+    }
+    isWatching = false;
   });
 }
