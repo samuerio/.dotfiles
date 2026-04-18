@@ -119,8 +119,8 @@ export default function (pi: ExtensionAPI) {
           return;
         }
 
-        // 2. 生成会话选择列表，和/resume格式完全一样
-        const choices = validSessions.map((s) => {
+        // 2. 生成会话选择列表，和/resume格式完全一样，只保留最近10条
+        const choices = validSessions.slice(0, 10).map((s) => {
           const displayName = s.name || s.firstMessage || "Unnamed session";
           const normalizedMessage = displayName
             .replace(/[\x00-\x1f\x7f]/g, " ")
@@ -135,7 +135,7 @@ export default function (pi: ExtensionAPI) {
         // 3. 显示选择框，和/resume完全一样
         const selected = await ctx.ui.select(
           "Select a session to watch:",
-          choices,
+          choices
         );
 
         if (!selected) {
