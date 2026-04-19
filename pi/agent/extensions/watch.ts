@@ -175,9 +175,9 @@ export default function (pi: ExtensionAPI) {
                             // 重新切换到同一会话触发重载
                             await ctx.switchSession(targetSessionPath);
                             lastMessageCount = newCount;
-                            ctx.ui.notify(
-                                `🔄 Session updated, +${added} new message${added > 1 ? "s" : ""}`,
-                                "success",
+                            ctx.ui.setStatus(
+                                "watch-mode",
+                                "👓 Watching session",
                             );
                         }
                     } catch (e) {
@@ -194,7 +194,6 @@ export default function (pi: ExtensionAPI) {
                     "success",
                 );
                 ctx.ui.setStatus("watch-mode", "👓 Watching session");
-                ctx.ui.setStatus("watch-mode");
             } catch (error) {
                 ctx.ui.notify(`Error: ${String(error)}`, "error");
                 console.error("Watch command error:", error);
@@ -207,7 +206,8 @@ export default function (pi: ExtensionAPI) {
     });
 
     // 会话关闭时自动清理监听器
-    pi.on("session_shutdown", () => {
+    pi.on("session_shutdown", async (_event, ctx) => {
+        ctx.ui.setStatus("watch-mode", undefined);
         if (watcher) {
             watcher.close();
             watcher = null;
