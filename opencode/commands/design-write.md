@@ -30,3 +30,14 @@ error handling, risks. Tables preferred.
 Write design in `docs/[slug].md`.
 
 Derive a concise kebab-case slug from the topic, e.g. `implement-auth`, `fix-issue-42`.
+
+## Post-Write: Register in AGENTS.md
+
+Append a row to the `## Design Docs` table in the **project-root** `AGENTS.md` (create the file/section/table if absent):
+
+| Design | Path | Description |
+|--------|------|-------------|
+| [slug](docs/slug.md) | `docs/slug.md` | ≤15-word summary |
+
+Never delete existing rows. Confirm with:
+✅ Registered docs/[slug].md in AGENTS.md § Design Docs
