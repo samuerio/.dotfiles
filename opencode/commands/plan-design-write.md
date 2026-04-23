@@ -1,8 +1,10 @@
 ---
-description: Generate design with Mermaid architecture and flow diagrams
+description: Generate design.md with Mermaid architecture and flow diagrams
 ---
 
-Create design markdown based on <target> <$ARGUMENTS> </target>
+<$ARGUMENTS>
+
+Create design.md based on the current plan.
 
 ## Step 0 – Clarify
 Ask about any ambiguities in responsibilities, data flow, or design intent that cannot be inferred from the plan. 
@@ -26,7 +28,4 @@ error handling, risks. Tables preferred.
 - Use directed edges; subgraphs only when they add clarity
 
 ## Output Path
-
-Write design in `docs/[slug].md`.
-
-Derive a concise kebab-case slug from the topic, e.g. `implement-auth`, `fix-issue-42`.
+If the plan exists as a file (e.g. `spec/[slug]/plan.md`), write `design.md` to the same directory.

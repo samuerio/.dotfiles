@@ -48,15 +48,43 @@
                     }
                 },
                 {
-                    "id": "kimi-k2.5",
-                    "name": "kimi-k2.5",
+                    "id": "glm-5.1",
+                    "name": "glm-5.1",
                     "reasoning": false,
                     "input": ["text"],
                     "contextWindow": 256000,
                     "maxTokens": 32000,
                     "cost": {
+                        "input": 1.05,
+                        "output": 3.5,
+                        "cacheRead": 0,
+                        "cacheWrite": 0
+                    }
+                },
+                {
+                    "id": "kimi-k2.5",
+                    "name": "kimi-k2.5",
+                    "reasoning": false,
+                    "input": ["text", "image"],
+                    "contextWindow": 256000,
+                    "maxTokens": 32000,
+                    "cost": {
                         "input": 0.38,
                         "output": 1.72,
+                        "cacheRead": 0,
+                        "cacheWrite": 0
+                    }
+                },
+                {
+                    "id": "kimi-k2.6",
+                    "name": "kimi-k2.6",
+                    "reasoning": false,
+                    "input": ["text", "image"],
+                    "contextWindow": 256000,
+                    "maxTokens": 32000,
+                    "cost": {
+                        "input": 0.8,
+                        "output": 3.5,
                         "cacheRead": 0,
                         "cacheWrite": 0
                     }
