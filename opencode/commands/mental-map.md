@@ -17,7 +17,10 @@ and NOT an investigation of implementation details.
 
 ## Process
 
-1. If `ARCHITECTURE.md` already exists, read it first and improve it rather than replacing it.
+1. If `ARCHITECTURE.md` already exists, read it first. Then explore the codebase to verify
+   each existing claim: remove entries for deleted modules, add entries for new architectural
+   modules, and update descriptions where responsibilities or boundaries have changed.
+   Preserve accurate content as-is — do not rewrite for style.
 2. Explore enough of the codebase to identify stable architecture. Start with entry points
    (main files, binaries, top-level exports), then follow dependency edges outward. Prefer
    reading module/package boundaries over individual file internals.
