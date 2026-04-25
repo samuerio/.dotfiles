@@ -6,7 +6,9 @@ linux_rime/pinyin_simp.userdb
 linux_rime/user.yaml
 .env
 
-.aider*
+.aider.chat.history.md
+.aider.input.history
+.aider.tags.cache.v4/
 .pi/todos
 **/node_modules/
 /.worktree/

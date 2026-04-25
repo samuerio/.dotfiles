@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# ytm - YouTube Music downloader with auto-rename to <歌曲>-<歌手>.opus
+# Usage: ytm <歌曲> <歌手> <youtube_url> [yt-dlp options...]
+#   or:  ytm <youtube_url> [yt-dlp options...]   (interactive, will prompt)
+
+set -euo pipefail
+
+DEST_DIR="${YTM_DEST_DIR:-/tmp/music}"
+
+if [[ $# -lt 1 ]]; then
+    echo "Usage: ytm <歌曲> <歌手> <youtube_url> [yt-dlp options...]"
+    echo "       ytm <youtube_url> [yt-dlp options...]"
+    exit 1
+fi
+
+# Detect if first arg is a URL
+if [[ "$1" =~ ^https?:// ]]; then
+    URL="$1"
+    shift
+    SONG=""
+    ARTIST=""
+else
+    SONG="$1"
+    ARTIST="$2"
+    URL="$3"
+    shift 3
+fi
+
+# Download
+OUTPUT_TEMPLATE="%(title)s [%(id)s].%(ext)s"
+VIDEO_ID=$(yt-dlp --get-id "$URL" 2>/dev/null)
+yt-dlp --audio-format opus --extract-audio -P "$DEST_DIR" -o "$OUTPUT_TEMPLATE" "$URL" "$@"
+
+# Find the actual output file by video ID (after audio conversion, extension may differ from --print output)
+DOWNLOADED=$(find "$DEST_DIR" -maxdepth 1 -name "*[$VIDEO_ID]*.opus" -print -quit 2>/dev/null)
+
+if [[ -z "$DOWNLOADED" || ! -f "$DOWNLOADED" ]]; then
+    echo "Error: download failed or file not found"
+    exit 1
+fi
+
+# If song/artist not provided, prompt
+if [[ -z "$SONG" ]]; then
+    read -rp "歌曲名: " SONG
+fi
+if [[ -z "$ARTIST" ]]; then
+    read -rp "歌手名: " ARTIST
+fi
+
+EXT="${DOWNLOADED##*.}"
+NEW_NAME="${SONG}-${ARTIST}.${EXT}"
+NEW_PATH="$DEST_DIR/$NEW_NAME"
+
+mv "$DOWNLOADED" "$NEW_PATH"
+echo "✓ $NEW_PATH"
