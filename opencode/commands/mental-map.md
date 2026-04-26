@@ -6,99 +6,64 @@ Generate or update `ARCHITECTURE.md` for the codebase in the current working dir
 
 ## What This Is
 
-This is a **codemap**: a short, selective map of the project's stable physical architecture.
-
-It should answer:
-- "Where is the thing that does X?"
-- "What does the thing I am looking at do?"
-
-It is NOT inline documentation, NOT a design document, NOT a generated directory listing,
-and NOT an investigation of implementation details.
+A **codemap**: a short, selective map of the project's stable physical architecture.
+Answers "Where is the thing that does X?" and "What does X do?"
+NOT inline documentation, NOT a design document, NOT a directory listing.
 
 ## Process
 
-1. If `ARCHITECTURE.md` already exists, read it first. Verify existing claims at the
-   module/package boundary level: remove entries for deleted modules, add new architectural
-   modules, and update descriptions where responsibilities or boundaries changed.
+1. If `ARCHITECTURE.md` already exists, read it first. Verify claims at the module/package
+   boundary level: remove deleted modules, add new ones, update changed descriptions.
    Preserve accurate content as-is; do not rewrite for style.
-2. Explore enough of the codebase to identify stable architecture. Start with entry points
-   such as binaries, main files, package exports, framework routes, public APIs, and build
-   configuration, then follow dependency edges outward.
-
-   Use the ast-grep skill to map dependency edges and export boundaries
-   before reading individual files.
-
-3. Ignore generated output, vendored dependencies, cache directories, coverage reports,
-   lockfiles, build artifacts, and editor configuration unless they define a stable
-   architectural boundary.
+2. Explore enough to identify stable architecture. Start with entry points (binaries, main
+   files, package exports, build config), then follow dependency edges outward.
+3. Ignore generated output, vendored deps, cache dirs, lockfiles, and build artifacts.
 4. Write or update `ARCHITECTURE.md` at the project root.
 
 ## Structure
 
-Follow this structure.
-
 ### Bird's Eye View
 
-Brief overview of the problem being solved. One paragraph is ideal. Two is the maximum.
+One paragraph (two max) on the problem being solved.
 
 ### Code Map
 
-For each coarse-grained module / package / crate / directory that matters:
-- What it is responsible for (NOT how it implements things internally)
-- What it depends on and in which direction the dependency should flow
-
-A directory deserves an entry only if it owns a stable responsibility, boundary, or
-dependency relationship. Include at most 8–12 module entries; each entry should be
-2–4 sentences.
-
-When describing relationships, state only what this module depends on,
-not who depends on it. Only include when the dependency direction is
-non-obvious or architecturally significant.
-
-Format each module entry as:
+8–12 module entries, 2–4 sentences each. Format:
 
 ### `module-name`
 
-Responsibility in prose. [If notable: "Depends on B for X."]
+Responsibility in prose. Depends on B for X (only when non-obvious or architecturally
+significant; omit entirely if none). Never write "depended on by" or "used by" — those
+belong in the caller's entry.
 
-**Architecture Invariant (optional):** Facts a new contributor would not discover by reading
+❌ "`kline_util` is used by `gen_ctx_kline`."
+✅ "`gen_ctx_kline` depends on `kline_util` for chart generation."
+
+**Architecture Invariant (optional):** What a new contributor wouldn't discover by reading
 files in order. Phrase as "X must never depend on Y" or "This layer has no file I/O."
 
 **API Boundary (optional):** What is intentionally hidden behind this boundary.
 
 ### Cross-Cutting Concerns
 
-Things that are everywhere and nowhere in particular: error handling strategy,
-configuration, observability, build/release tooling, and similar systemic concerns.
-Only include what actually matters for this codebase.
+Error handling, configuration, observability, build/release tooling. Only what actually matters.
 
 ## Post-Write: Register in AGENTS.md
 
-Ensure the project-root `AGENTS.md` has a `## Design Docs` table and includes this row:
+Add this row to the `## Design Docs` table in project-root `AGENTS.md` (create file/table if
+absent; never rewrite existing content or duplicate the row):
 
 | Design | Path | Description |
 |--------|------|-------------|
 | [ARCHITECTURE](ARCHITECTURE.md) | `ARCHITECTURE.md` | codebase mental map |
 
-If `AGENTS.md` does not exist, create it with only the `## Design Docs` section.
-If it exists, add only the missing table or row. Never rewrite the file, delete existing
-rows, or duplicate the row.
-
 ## Rules
 
-- Name important files, modules, and types, but do not link directly to code locations.
-  Encourage symbol search instead.
-- Describe each module from its own perspective only. Integration details belong in the
-  caller's entry, not the callee's.
-- Stay at the responsibility and boundary level. Avoid algorithm details, library choices,
-  CSV column lists, CLI flag catalogs, internal helpers, and volatile implementation details
-  unless they define a stable contract or architectural boundary.
-- Do not guess architectural intent. If an invariant, boundary, or dependency direction is
-  unclear, omit it or mark it as tentative.
-- Do not include Mermaid diagrams, sequence diagrams, exhaustive trees, trivial utilities,
-  or modules that cannot justify their own entry within the entry budget.
-
-## Language
-
-All explanatory prose must be in Simplified Chinese. Keep section headings, file paths,
-module names, package names, type names, commands, and code identifiers in English.
+- Stay at the responsibility and boundary level. No algorithm details, library choices, CLI
+  flag catalogs, or volatile implementation details unless they define a stable contract.
+- Dependency sentences must be omitted when a module has no notable dependencies.
+  Do not substitute with phrases like "no external dependencies" or "self-contained."
+- Do not guess intent. If an invariant or boundary is unclear, omit it or mark it tentative.
+- No Mermaid diagrams, sequence diagrams, or exhaustive directory trees.
+- All explanatory prose in Simplified Chinese. Headings, paths, module names, identifiers
+  in English.

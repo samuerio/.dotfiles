@@ -1,5 +1,5 @@
 ---
-description: Write a plan file for the current discussion
+description: Draft a plan file from the current discussion
 ---
 
 Write our discussion as a plan in `spec/[slug]/plan.md`.
