@@ -1,8 +1,8 @@
 ---
-description: Generate or improve ARCHITECTURE.md — a short codemap of stable project structure, responsibilities, boundaries, and invariants
+description: Generate or update ARCHITECTURE.md — a short codemap of stable project structure, responsibilities, boundaries, and invariants
 ---
 
-Generate or improve `ARCHITECTURE.md` for the codebase in the current working directory.
+Generate or update `ARCHITECTURE.md` for the codebase in the current working directory.
 
 ## What This Is
 
@@ -12,19 +12,27 @@ It should answer:
 - "Where is the thing that does X?"
 - "What does the thing I am looking at do?"
 
-It is NOT inline documentation, NOT a design document with diagrams, NOT a generated directory listing, 
+It is NOT inline documentation, NOT a design document, NOT a generated directory listing,
 and NOT an investigation of implementation details.
 
 ## Process
 
-1. If `ARCHITECTURE.md` already exists, read it first. Then explore the codebase to verify
-   each existing claim: remove entries for deleted modules, add entries for new architectural
-   modules, and update descriptions where responsibilities or boundaries have changed.
-   Preserve accurate content as-is — do not rewrite for style.
+1. If `ARCHITECTURE.md` already exists, read it first. Verify existing claims at the
+   module/package boundary level: remove entries for deleted modules, add new architectural
+   modules, and update descriptions where responsibilities or boundaries changed.
+   Preserve accurate content as-is; do not rewrite for style.
 2. Explore enough of the codebase to identify stable architecture. Start with entry points
-   (main files, binaries, top-level exports), then follow dependency edges outward. Prefer
-   reading module/package boundaries over individual file internals.
-3. Write or update `ARCHITECTURE.md` at the project root.
+   such as binaries, main files, package exports, framework routes, public APIs, and build
+   configuration, then follow dependency edges outward.
+
+   Before proceeding, check whether the ast-grep skill is available.
+   If yes, use it to map dependency edges, export boundaries, and
+   cross-cutting sites that text search cannot answer precisely.
+
+3. Ignore generated output, vendored dependencies, cache directories, coverage reports,
+   lockfiles, build artifacts, and editor configuration unless they define a stable
+   architectural boundary.
+4. Write or update `ARCHITECTURE.md` at the project root.
 
 ## Structure
 
@@ -41,12 +49,15 @@ For each coarse-grained module / package / crate / directory that matters:
 - What depends on it, what it depends on, and which direction dependencies should flow
 - How it relates to neighboring modules
 
-When describing relationships, state the direction explicitly:
-"A depends on B; B must not import A."
+A directory deserves an entry only if it owns a stable responsibility, boundary, or
+dependency relationship. Include at most 8–12 module entries; each entry should be
+2–4 sentences.
 
-Stay at the responsibility and boundary level. Avoid algorithm details, library choices, 
-CSV column lists, CLI flag catalogs, and internal helper names unless they define a stable 
-contract or architectural boundary.
+When describing relationships, state dependency direction explicitly when it is evident
+from imports, package boundaries, build configuration, or public entry points:
+"A depends on B; B must not import A."
+Omit dependency prose entirely for leaf modules with no notable internal dependents or
+dependencies; do not substitute placeholder text.
 
 Format each module entry as:
 
@@ -61,7 +72,7 @@ files in order. Phrase as "X must never depend on Y" or "This layer has no file 
 
 ### Cross-Cutting Concerns
 
-Things that are everywhere and nowhere in particular: error handling strategy, 
+Things that are everywhere and nowhere in particular: error handling strategy,
 configuration, observability, build/release tooling, and similar systemic concerns.
 Only include what actually matters for this codebase.
 
@@ -73,24 +84,25 @@ Ensure the project-root `AGENTS.md` has a `## Design Docs` table and includes th
 |--------|------|-------------|
 | [ARCHITECTURE](ARCHITECTURE.md) | `ARCHITECTURE.md` | codebase mental map |
 
-If AGENTS.md does not exist, create it with only the ## Design Docs section.
-If it exists, add only the missing table or row — never rewrite the file.
-Never delete existing rows, and do not duplicate the row if it already exists.
+If `AGENTS.md` does not exist, create it with only the `## Design Docs` section.
+If it exists, add only the missing table or row. Never rewrite the file, delete existing
+rows, or duplicate the row.
 
 ## Rules
 
-- Name important files, modules, and types, but do not link directly to code locations. Encourage symbol search instead.
-- Include only architecturally important modules. Skip trivial utilities and generated directory listings.
-- Describe each module's responsibilities, boundaries, and invariants from its own perspective.
-  Integration details belong in the caller's entry, not the callee's. Never explain implementation internals.
-- Prefer stable facts over frequently changing details. Do not try to keep the document synchronized with code.
-- Do not include Mermaid diagrams, sequence diagrams, or exhaustive trees.
-- Do not guess architectural intent. If an invariant or boundary is unclear, omit it or mark it as tentative.
-- Include at most 8–12 module entries; each entry should be 2–4 sentences. Omit any module that cannot justify its own entry within that budget.
-- Write in English regardless of the project's primary language.
-- Describe each module from its own perspective only. Integration details
-  (how another module calls it, what adapters wrap it) belong in the caller's
-  entry, not the callee's.
+- Name important files, modules, and types, but do not link directly to code locations.
+  Encourage symbol search instead.
+- Describe each module from its own perspective only. Integration details belong in the
+  caller's entry, not the callee's.
+- Stay at the responsibility and boundary level. Avoid algorithm details, library choices,
+  CSV column lists, CLI flag catalogs, internal helpers, and volatile implementation details
+  unless they define a stable contract or architectural boundary.
+- Do not guess architectural intent. If an invariant, boundary, or dependency direction is
+  unclear, omit it or mark it as tentative.
+- Do not include Mermaid diagrams, sequence diagrams, exhaustive trees, trivial utilities,
+  or modules that cannot justify their own entry within the entry budget.
 
 ## Language
-All prose in Simplified Chinese; file paths, section headings, Mermaid nodes, and code identifiers in English.
+
+All explanatory prose must be in Simplified Chinese. Keep section headings, file paths,
+module names, package names, type names, commands, and code identifiers in English.
