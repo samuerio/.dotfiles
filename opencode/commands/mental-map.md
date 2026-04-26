@@ -25,9 +25,8 @@ and NOT an investigation of implementation details.
    such as binaries, main files, package exports, framework routes, public APIs, and build
    configuration, then follow dependency edges outward.
 
-   Before proceeding, check whether the ast-grep skill is available.
-   If yes, use it to map dependency edges, export boundaries, and
-   cross-cutting sites that text search cannot answer precisely.
+   Use the ast-grep skill to map dependency edges and export boundaries
+   before reading individual files.
 
 3. Ignore generated output, vendored dependencies, cache directories, coverage reports,
    lockfiles, build artifacts, and editor configuration unless they define a stable
@@ -46,24 +45,21 @@ Brief overview of the problem being solved. One paragraph is ideal. Two is the m
 
 For each coarse-grained module / package / crate / directory that matters:
 - What it is responsible for (NOT how it implements things internally)
-- What depends on it, what it depends on, and which direction dependencies should flow
-- How it relates to neighboring modules
+- What it depends on and in which direction the dependency should flow
 
 A directory deserves an entry only if it owns a stable responsibility, boundary, or
 dependency relationship. Include at most 8–12 module entries; each entry should be
 2–4 sentences.
 
-When describing relationships, state dependency direction explicitly when it is evident
-from imports, package boundaries, build configuration, or public entry points:
-"A depends on B; B must not import A."
-Omit dependency prose entirely for leaf modules with no notable internal dependents or
-dependencies; do not substitute placeholder text.
+When describing relationships, state only what this module depends on,
+not who depends on it. Only include when the dependency direction is
+non-obvious or architecturally significant.
 
 Format each module entry as:
 
 ### `module-name`
 
-Responsibility and dependency direction in prose. "A depends on B; B must not import A."
+Responsibility in prose. [If notable: "Depends on B for X."]
 
 **Architecture Invariant (optional):** Facts a new contributor would not discover by reading
 files in order. Phrase as "X must never depend on Y" or "This layer has no file I/O."
