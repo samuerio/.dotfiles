@@ -46,3 +46,6 @@ Describe the *why* behind the rule, not implementation details or format specs.
 
 Write design in `research/[slug].md`.
 Derive a concise kebab-case slug from the topic.
+
+## Language
+All prose in Simplified Chinese; file paths, section headings, Mermaid nodes, and code identifiers in English.

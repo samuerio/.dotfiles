@@ -86,10 +86,11 @@ Never delete existing rows, and do not duplicate the row if it already exists.
 - Prefer stable facts over frequently changing details. Do not try to keep the document synchronized with code.
 - Do not include Mermaid diagrams, sequence diagrams, or exhaustive trees.
 - Do not guess architectural intent. If an invariant or boundary is unclear, omit it or mark it as tentative.
-- Keep each module entry concise; most entries need only 2–4 sentences.
+- Include at most 8–12 module entries; each entry should be 2–4 sentences. Omit any module that cannot justify its own entry within that budget.
 - Write in English regardless of the project's primary language.
-- Target 400–700 words total. A document that takes more than 5 minutes to read
-  has already failed its purpose.
 - Describe each module from its own perspective only. Integration details
   (how another module calls it, what adapters wrap it) belong in the caller's
   entry, not the callee's.
+
+## Language
+All prose in Simplified Chinese; file paths, section headings, Mermaid nodes, and code identifiers in English.
