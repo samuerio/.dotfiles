@@ -50,12 +50,20 @@ Error handling, configuration, observability, build/release tooling. Only what a
 
 ## Post-Write: Register in AGENTS.md
 
-Add this row to the `## Design Docs` table in project-root `AGENTS.md` (create file/table if
-absent; never rewrite existing content or duplicate the row):
+In the project-root `AGENTS.md`:
 
-| Design | Path | Description |
-|--------|------|-------------|
-| [ARCHITECTURE](ARCHITECTURE.md) | `ARCHITECTURE.md` | codebase mental map |
+1. If the file does not exist, create it.
+2. If `## Codebase Map` does not exist, prepend it before any existing content.
+3. Never duplicate or rewrite existing content.
+
+The section must read exactly:
+
+~~~markdown
+## Codebase Map
+
+Load `ARCHITECTURE.md` as project memory.
+It is the mental map of this codebase: module responsibilities, dependency boundaries, and architecture invariants.
+~~~
 
 ## Rules
 
@@ -67,3 +75,6 @@ absent; never rewrite existing content or duplicate the row):
 - No Mermaid diagrams, sequence diagrams, or exhaustive directory trees.
 - All explanatory prose in Simplified Chinese. Headings, paths, module names, identifiers
   in English.
+
+
+$ARGUMENTS
