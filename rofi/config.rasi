@@ -1,3 +1,9 @@
+* {
+    transparent:  #00000000;
+    bg-alt:       #00000000;
+    fg-alt:       #d8dee9;
+}
+
 configuration {
   modi: "window,drun,ssh,run,filebrowser";
   show-icons: true;
