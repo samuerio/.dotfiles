@@ -274,5 +274,6 @@
     ],
     "python.analysis.extraPaths": [".venv"],
     "terminal.integrated.fontFamily": "Fira Code",
-    "terminal.integrated.fontSize": 14
+    "terminal.integrated.fontSize": 14,
+    "files.eol": "\n"
 }
