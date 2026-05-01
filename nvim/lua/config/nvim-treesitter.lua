@@ -9,6 +9,21 @@ if vim.fn.executable('tree-sitter') == 1 then
         'lua',
         'rust',
         'toml',
+        'markdown',
+        'markdown_inline',
+        'bash',
+        'python',
+        'java',
+        'go',
+        'javascript',
+        'c',
+        'cpp',
+        'json',
+        'yaml',
+        'html',
+        'css',
+        'vim',
+        'vimdoc',
     })
 end
 
