@@ -277,4 +277,4 @@ export EDITOR="$VISUAL"
 export TERM=xterm-256color
 
 # OpenClaw Completion
-source "/home/zhe/.openclaw/completions/openclaw.zsh"
+#source "/home/zhe/.openclaw/completions/openclaw.zsh"
