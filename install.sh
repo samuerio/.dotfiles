@@ -71,8 +71,17 @@ install_tmux() {
     info "Tmux configuration installed."
 }
 
+install_nvim() {
+    info "Installing Neovim configuration..."
+
+    link_dotfile "nvim" "${HOME}/.config/nvim"
+
+    info "Neovim configuration installed."
+}
+
 main() {
     install_tmux
+    install_nvim
 }
 
 main "$@"
