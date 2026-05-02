@@ -1,1 +1,0 @@
-/home/zhe/github/.dotfiles/AGENTS.md
