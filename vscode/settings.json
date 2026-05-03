@@ -1,6 +1,5 @@
 {
     "workbench.colorTheme": "Default Light Modern",
-    "editor.fontSize": 18,
     "vim.incsearch": true,
     "vim.useSystemClipboard": true,
     "vim.useCtrlKeys": true,
@@ -262,7 +261,8 @@
     "editor.cursorSurroundingLines": 8,
     "editor.selectionHighlight": false,
     "editor.parameterHints.enabled": false,
-    "editor.fontFamily": "Monaco",
+    "editor.fontFamily": "'Fira Code'",
+    "editor.fontSize": 18,
     "java.jdt.ls.java.home": "/usr/lib/jvm/java-8-openjdk",
     "java.jdt.ls.vmargs": "-javaagent:/home/zhe/github/.dotfiles/lombok/lombok-1.18.32.jar",
     "java.jdt.ls.lombokSupport.enabled": false,
@@ -273,7 +273,9 @@
         }
     ],
     "python.analysis.extraPaths": [".venv"],
-    "terminal.integrated.fontFamily": "Fira Code",
+    "terminal.integrated.fontFamily": "'Fira Code'",
     "terminal.integrated.fontSize": 14,
-    "files.eol": "\n"
+    "files.eol": "\n",
+    "git.openRepositoryInParentFolders": "never",
+    "diffEditor.hideUnchangedRegions.enabled": true
 }

@@ -138,6 +138,19 @@ install_karabiner() {
     link_dotfile "karabiner/karabiner.json" "${HOME}/.config/karabiner/karabiner.json"
 }
 
+install_vscode() {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        section "vscode"
+        warn "Skipping vscode configuration (not macOS)."
+        return 0
+    fi
+
+    section "vscode"
+    local vscode_user="${HOME}/Library/Application Support/Code/User"
+    link_dotfile "vscode/settings.json" "${vscode_user}/settings.json"
+    link_dotfile "vscode/keybindings.json" "${vscode_user}/keybindings.json"
+}
+
 install_ranger() {
     section "ranger"
     link_dotfile "ranger" "${HOME}/.config/ranger"
@@ -318,6 +331,7 @@ main() {
     install_spacebar
     install_skhd
     install_karabiner
+    install_vscode
     install_ghostty
     install_uv
     install_alacritty
