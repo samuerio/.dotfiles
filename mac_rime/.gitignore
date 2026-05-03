@@ -1,0 +1,12 @@
+# 超大静态词库（已迁移到 Dropbox/Conf/mac_rime）
+cn_dicts/main.dict.yaml
+cn_dicts/ext.dict.yaml
+cn_dicts/zhwiki.dict.yaml
+en_dicts/en.dict.yaml
+zh-hans-t-essay-bgw.gram
+
+# 运行时生成的文件
+build/
+sync/
+*.userdb/
+user.yaml
