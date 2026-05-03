@@ -94,6 +94,39 @@ install_lazygit() {
     fi
 }
 
+install_yabai() {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        section "yabai"
+        warn "Skipping yabai configuration (not macOS)."
+        return 0
+    fi
+
+    section "yabai"
+    link_dotfile "yabai" "${HOME}/.config/yabai"
+}
+
+install_spacebar() {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        section "spacebar"
+        warn "Skipping spacebar configuration (not macOS)."
+        return 0
+    fi
+
+    section "spacebar"
+    link_dotfile "spacebar" "${HOME}/.config/spacebar"
+}
+
+install_skhd() {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        section "skhd"
+        warn "Skipping skhd configuration (not macOS)."
+        return 0
+    fi
+
+    section "skhd"
+    link_dotfile "skhd" "${HOME}/.config/skhd"
+}
+
 install_ranger() {
     section "ranger"
     link_dotfile "ranger" "${HOME}/.config/ranger"
@@ -270,6 +303,9 @@ main() {
     install_ranger
     install_zsh
     install_git
+    install_yabai
+    install_spacebar
+    install_skhd
     install_ghostty
     install_uv
     install_alacritty
