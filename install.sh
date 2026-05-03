@@ -127,6 +127,17 @@ install_skhd() {
     link_dotfile "skhd" "${HOME}/.config/skhd"
 }
 
+install_karabiner() {
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        section "karabiner"
+        warn "Skipping karabiner configuration (not macOS)."
+        return 0
+    fi
+
+    section "karabiner"
+    link_dotfile "karabiner/karabiner.json" "${HOME}/.config/karabiner/karabiner.json"
+}
+
 install_ranger() {
     section "ranger"
     link_dotfile "ranger" "${HOME}/.config/ranger"
@@ -306,6 +317,7 @@ main() {
     install_yabai
     install_spacebar
     install_skhd
+    install_karabiner
     install_ghostty
     install_uv
     install_alacritty
