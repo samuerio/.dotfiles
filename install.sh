@@ -79,9 +79,20 @@ install_nvim() {
     info "Neovim configuration installed."
 }
 
+install_ai_agents() {
+    info "Installing AI agent configurations..."
+
+    link_dotfile "pi" "${HOME}/.pi"
+    link_dotfile "opencode" "${HOME}/.config/opencode"
+    link_dotfile "agents" "${HOME}/.agents"
+
+    info "AI agent configurations installed."
+}
+
 main() {
     install_tmux
     install_nvim
+    install_ai_agents
 }
 
 main "$@"
