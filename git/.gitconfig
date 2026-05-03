@@ -38,9 +38,6 @@
 [user]
 	name = samuerio
 	email = 853713419@qq.com
-
-[url "ssh://git@github.com/"]
-	insteadOf = https://github.com/
 [pull]
 	rebase = true
 [filter "lfs"]
