@@ -121,7 +121,7 @@ alias ps="ps -ef | grep"
 alias lg='lazygit'
 alias uvpn= 'unset https_proxy http_proxy all_proxy'
 # 确保sudo的时候，保留原来的环境变量，保证sudo nvim能使用自定义配置
-alias sudo='sudo -E'
+# alias sudo='sudo -E'
 alias ra='ranger'
 alias op='OPENCODE_EXPERIMENTAL_LSP_TOOL=true OPENCODE_ENABLE_EXA=1 opencode'
 alias omo='OPENCODE_CONFIG=/home/zhe/.config/opencode/omo.json opencode'
