@@ -103,6 +103,7 @@ install_zsh() {
     section "zsh"
     link_dotfile "zsh/.zshrc" "${HOME}/.zshrc"
     link_dotfile "zsh/.p10k.zsh" "${HOME}/.p10k.zsh"
+    link_dotfile "zsh/my_patches.zsh" "${HOME}/.oh-my-zsh/custom/my_patches.zsh"
 }
 
 install_git() {
