@@ -87,7 +87,11 @@ install_ai_agents() {
 
 install_lazygit() {
     section "lazygit"
-    link_dotfile "lazygit" "${HOME}/.config/lazygit"
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        link_dotfile "lazygit/config.yml" "${HOME}/Library/Application Support/lazygit/config.yml"
+    else
+        link_dotfile "lazygit" "${HOME}/.config/lazygit"
+    fi
 }
 
 install_ranger() {
