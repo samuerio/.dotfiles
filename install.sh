@@ -106,6 +106,115 @@ install_git() {
     link_dotfile "git/.gitconfig" "${HOME}/.gitconfig"
 }
 
+install_ghostty() {
+    section "ghostty"
+    link_dotfile "ghostty" "${HOME}/.config/ghostty"
+}
+
+install_uv() {
+    section "uv"
+    link_dotfile "uv" "${HOME}/.config/uv"
+}
+
+install_alacritty() {
+    if [[ "$(uname -s)" != "Linux" ]]; then
+        section "alacritty"
+        warn "Skipping alacritty configuration (not Linux)."
+        return 0
+    fi
+
+    section "alacritty"
+    link_dotfile "alacritty" "${HOME}/.config/alacritty"
+}
+
+install_i3() {
+    if [[ "$(uname -s)" != "Linux" ]]; then
+        section "i3"
+        warn "Skipping i3 configuration (not Linux)."
+        return 0
+    fi
+
+    section "i3"
+    link_dotfile "i3" "${HOME}/.config/i3"
+}
+
+install_polybar() {
+    if [[ "$(uname -s)" != "Linux" ]]; then
+        section "polybar"
+        warn "Skipping polybar configuration (not Linux)."
+        return 0
+    fi
+
+    section "polybar"
+    link_dotfile "polybar" "${HOME}/.config/polybar"
+}
+
+install_redshift() {
+    if [[ "$(uname -s)" != "Linux" ]]; then
+        section "redshift"
+        warn "Skipping redshift configuration (not Linux)."
+        return 0
+    fi
+
+    section "redshift"
+    link_dotfile "redshift" "${HOME}/.config/redshift"
+}
+
+install_rofi() {
+    if [[ "$(uname -s)" != "Linux" ]]; then
+        section "rofi"
+        warn "Skipping rofi configuration (not Linux)."
+        return 0
+    fi
+
+    section "rofi"
+    link_dotfile "rofi" "${HOME}/.config/rofi"
+}
+
+install_zathura() {
+    if [[ "$(uname -s)" != "Linux" ]]; then
+        section "zathura"
+        warn "Skipping zathura configuration (not Linux)."
+        return 0
+    fi
+
+    section "zathura"
+    link_dotfile "zathura" "${HOME}/.config/zathura"
+}
+
+install_dunst() {
+    if [[ "$(uname -s)" != "Linux" ]]; then
+        section "dunst"
+        warn "Skipping dunst configuration (not Linux)."
+        return 0
+    fi
+
+    section "dunst"
+    link_dotfile "dunst" "${HOME}/.config/dunst"
+}
+
+install_feh() {
+    if [[ "$(uname -s)" != "Linux" ]]; then
+        section "feh"
+        warn "Skipping feh configuration (not Linux)."
+        return 0
+    fi
+
+    section "feh"
+    link_dotfile "feh" "${HOME}/.config/feh"
+}
+
+install_mimeapps() {
+    if [[ "$(uname -s)" != "Linux" ]]; then
+        section "mimeapps"
+        warn "Skipping mimeapps.list configuration (not Linux)."
+        return 0
+    fi
+
+    section "mimeapps"
+    link_dotfile "mimeapps.list" "${HOME}/.config/mimeapps.list"
+}
+
 install_x11() {
     if [[ "$(uname -s)" != "Linux" ]]; then
         section "x11"
@@ -156,6 +265,17 @@ main() {
     install_ranger
     install_zsh
     install_git
+    install_ghostty
+    install_uv
+    install_alacritty
+    install_i3
+    install_polybar
+    install_redshift
+    install_rofi
+    install_zathura
+    install_dunst
+    install_feh
+    install_mimeapps
     install_x11
 }
 
