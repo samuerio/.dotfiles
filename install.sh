@@ -18,6 +18,10 @@ err() {
     printf "\033[31m[ERR]\033[0m  %s\n" "$1"
 }
 
+section() {
+    printf "\n\033[1m=== %s ===\033[0m\n" "$1"
+}
+
 # Ensure parent directory exists
 ensure_dir() {
     local target="$1"
@@ -62,37 +66,97 @@ link_dotfile() {
 }
 
 install_tmux() {
-    info "Installing tmux configuration..."
-
+    section "tmux"
     link_dotfile ".tmux.conf" "${HOME}/.tmux.conf"
     link_dotfile ".tmux.conf.local" "${HOME}/.tmux.conf.local"
     link_dotfile "tmux" "${HOME}/.config/tmux"
-
-    info "Tmux configuration installed."
 }
 
 install_nvim() {
-    info "Installing Neovim configuration..."
-
+    section "nvim"
     link_dotfile "nvim" "${HOME}/.config/nvim"
-
-    info "Neovim configuration installed."
 }
 
 install_ai_agents() {
-    info "Installing AI agent configurations..."
-
+    section "ai-agents"
     link_dotfile "pi" "${HOME}/.pi"
     link_dotfile "opencode" "${HOME}/.config/opencode"
     link_dotfile "agents" "${HOME}/.agents"
+    link_dotfile ".aider.conf.yml" "${HOME}/.aider.conf.yml"
+}
 
-    info "AI agent configurations installed."
+install_lazygit() {
+    section "lazygit"
+    link_dotfile "lazygit" "${HOME}/.config/lazygit"
+}
+
+install_ranger() {
+    section "ranger"
+    link_dotfile "ranger" "${HOME}/.config/ranger"
+}
+
+install_zsh() {
+    section "zsh"
+    link_dotfile "zsh/.zshrc" "${HOME}/.zshrc"
+    link_dotfile "zsh/.p10k.zsh" "${HOME}/.p10k.zsh"
+}
+
+install_git() {
+    section "git"
+    link_dotfile "git/.gitconfig" "${HOME}/.gitconfig"
+}
+
+install_x11() {
+    if [[ "$(uname -s)" != "Linux" ]]; then
+        section "x11"
+        warn "Skipping x11 configuration (not Linux)."
+        return 0
+    fi
+
+    section "x11"
+    link_dotfile "x11/.xinitrc" "${HOME}/.xinitrc"
+    link_dotfile "x11/.Xresources" "${HOME}/.Xresources"
+
+    local sys_conf="/etc/X11/xorg.conf.d/40-libinput.conf"
+    local src="${DOTFILES_ROOT}/x11/40-libinput.conf"
+
+    if [[ -L "$sys_conf" && ! -e "$sys_conf" ]]; then
+        if [[ "$EUID" -eq 0 ]]; then
+            warn "Removing broken symlink: $sys_conf"
+            rm "$sys_conf"
+        else
+            warn "Broken symlink detected: $sys_conf"
+            warn "To fix it manually, run:"
+            warn "  sudo rm \"$sys_conf\""
+            warn "  sudo ln -s \"$src\" \"$sys_conf\""
+            return 0
+        fi
+    elif [[ -e "$sys_conf" || -L "$sys_conf" ]]; then
+        warn "Already exists (skipping): $sys_conf"
+        return 0
+    fi
+
+    if [[ "$EUID" -eq 0 ]]; then
+        ensure_dir "$sys_conf"
+        ln -s "$src" "$sys_conf"
+        info "Linked: $sys_conf -> $src"
+    else
+        warn "System config requires root privileges."
+        warn "To install 40-libinput.conf manually, run:"
+        warn "  sudo mkdir -p /etc/X11/xorg.conf.d"
+        warn "  sudo ln -s \"$src\" \"$sys_conf\""
+    fi
 }
 
 main() {
     install_tmux
     install_nvim
     install_ai_agents
+    install_lazygit
+    install_ranger
+    install_zsh
+    install_git
+    install_x11
 }
 
 main "$@"
