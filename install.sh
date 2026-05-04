@@ -382,6 +382,22 @@ install_systemd() {
     done
 }
 
+install_desktop() {
+    if [[ "$(uname -s)" != "Linux" ]]; then
+        section "desktop"
+        warn "Skipping desktop configuration (not Linux)."
+        return 0
+    fi
+
+    section "desktop"
+    for item in "${DOTFILES_ROOT}/desktop"/*; do
+        [[ -e "$item" ]] || continue
+        local name
+        name=$(basename "$item")
+        link_dotfile "desktop/${name}" "${HOME}/.local/share/applications/${name}"
+    done
+}
+
 install_x11() {
     if [[ "$(uname -s)" != "Linux" ]]; then
         section "x11"
@@ -451,6 +467,7 @@ main() {
     install_mimeapps
     install_systemd
     install_x11
+    install_desktop
 }
 
 main "$@"
