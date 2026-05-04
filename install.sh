@@ -287,6 +287,47 @@ install_git() {
     link_dotfile "git/.gitconfig" "${HOME}/.gitconfig"
 }
 
+install_ssh() {
+    section "ssh"
+
+    local ssh_dir="${HOME}/.ssh"
+    local dropbox_ssh="${HOME}/Dropbox/Conf/ssh"
+
+    if [[ ! -d "$dropbox_ssh" ]]; then
+        warn "Dropbox ssh config not found: $dropbox_ssh"
+        return 0
+    fi
+
+    mkdir -p "$ssh_dir"
+
+    local item name
+    for item in "${dropbox_ssh}"/*; do
+        [[ -e "$item" ]] || continue
+        name="$(basename "$item")"
+        link_external "$item" "${ssh_dir}/${name}"
+    done
+}
+
+install_maven() {
+    section "maven"
+
+    local m2_dir="${HOME}/.m2"
+    local dropbox_settings="${HOME}/Dropbox/Conf/maven/settings.xml"
+    local target_settings="${m2_dir}/settings.xml"
+
+    if [[ -e "$dropbox_settings" || -L "$dropbox_settings" ]]; then
+        mkdir -p "$m2_dir"
+        link_external "$dropbox_settings" "$target_settings"
+    else
+        warn "Dropbox maven settings not found: $dropbox_settings"
+    fi
+}
+
+install_cli_proxy_api() {
+    section "cli-proxy-api"
+    link_external "${HOME}/Dropbox/Conf/cli-proxy-api" "${HOME}/.cli-proxy-api"
+}
+
 install_ghostty() {
     section "ghostty"
     link_dotfile "ghostty" "${HOME}/.config/ghostty"
@@ -375,12 +416,15 @@ main() {
         install_ranger
         install_zsh
         install_git
+        install_ssh
         install_yabai
         install_spacebar
         install_skhd
         install_karabiner
         install_vscode
         install_rime
+        install_maven
+        install_cli_proxy_api
         install_ghostty
         install_uv
         install_alacritty
