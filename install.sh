@@ -5,6 +5,7 @@ set -euo pipefail
 # Usage: ./install.sh
 
 DOTFILES_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OS_NAME="$(uname -s)"
 
 info() {
     printf "\033[34m[INFO]\033[0m %s\n" "$1"
@@ -33,16 +34,31 @@ ensure_dir() {
     fi
 }
 
-# Create a symbolic link from source (relative to DOTFILES_ROOT) to target
-# Rules:
-#   - If target does not exist: create symlink
-#   - If target is a broken symlink: remove and recreate
-#   - Otherwise (file, dir, or valid symlink): skip
-link_dotfile() {
-    local src_rel="$1"
+skip_unless_os() {
+    local expected_os="$1"
+    local name="$2"
+    local label="$3"
+
+    if [[ "$OS_NAME" != "$expected_os" ]]; then
+        section "$name"
+        warn "Skipping $name configuration (not ${label})."
+        return 1
+    fi
+
+    return 0
+}
+
+skip_unless_darwin() {
+    skip_unless_os "Darwin" "$1" "macOS"
+}
+
+skip_unless_linux() {
+    skip_unless_os "Linux" "$1" "Linux"
+}
+
+link_path() {
+    local src="$1"
     local target="$2"
-    local src
-    src="${DOTFILES_ROOT}/${src_rel}"
 
     if [[ ! -e "$src" && ! -L "$src" ]]; then
         err "Source does not exist: $src"
@@ -52,17 +68,93 @@ link_dotfile() {
     ensure_dir "$target"
 
     if [[ -L "$target" && ! -e "$target" ]]; then
-        # Broken symlink: force overwrite
         warn "Removing broken symlink: $target"
         rm "$target"
     elif [[ -e "$target" || -L "$target" ]]; then
-        # Valid file, directory, or symlink: skip
         warn "Already exists (skipping): $target"
         return 0
     fi
 
     ln -s "$src" "$target"
     info "Linked: $target -> $src"
+}
+
+# Create a symbolic link from source (relative to DOTFILES_ROOT) to target
+link_dotfile() {
+    local src_rel="$1"
+    local target="$2"
+    link_path "${DOTFILES_ROOT}/${src_rel}" "$target"
+}
+
+# Create a symbolic link from an external absolute source to target
+link_external() {
+    local src="$1"
+    local target="$2"
+    link_path "$src" "$target"
+}
+
+link_dir_contents() {
+    local src_dir_name="$1"
+    local target_dir="$2"
+    local src_dir="${DOTFILES_ROOT}/${src_dir_name}"
+    local item name
+
+    for item in "${src_dir}"/*; do
+        [[ -e "$item" ]] || continue
+        name="$(basename "$item")"
+        [[ "$name" == ".gitignore" ]] && continue
+        link_dotfile "${src_dir_name}/${name}" "${target_dir}/${name}"
+    done
+}
+
+link_system_file() {
+    local src="$1"
+    local target="$2"
+    local description="$3"
+
+    if [[ ! -e "$src" && ! -L "$src" ]]; then
+        err "Source does not exist: $src"
+        return 1
+    fi
+
+    if [[ -L "$target" && ! -e "$target" ]]; then
+        if [[ "$EUID" -eq 0 ]]; then
+            warn "Removing broken symlink: $target"
+            rm "$target"
+        else
+            warn "Broken symlink detected: $target"
+            warn "To fix it manually, run:"
+            warn "  sudo rm \"$target\""
+            warn "  sudo ln -s \"$src\" \"$target\""
+            return 0
+        fi
+    elif [[ -e "$target" || -L "$target" ]]; then
+        warn "Already exists (skipping): $target"
+        return 0
+    fi
+
+    if [[ "$EUID" -eq 0 ]]; then
+        ensure_dir "$target"
+        ln -s "$src" "$target"
+        info "Linked: $target -> $src"
+    else
+        warn "$description requires root privileges."
+        warn "To install it manually, run:"
+        warn "  sudo mkdir -p \"$(dirname "$target")\""
+        warn "  sudo ln -s \"$src\" \"$target\""
+    fi
+}
+
+install_platform_dotfile() {
+    local name="$1"
+    local expected_os="$2"
+    local label="$3"
+    local src_rel="$4"
+    local target="$5"
+
+    skip_unless_os "$expected_os" "$name" "$label" || return 0
+    section "$name"
+    link_dotfile "$src_rel" "$target"
 }
 
 install_tmux() {
@@ -87,17 +179,8 @@ install_ai_agents() {
     local dropbox_settings="${HOME}/Dropbox/Conf/pi-coding-agent/settings.json"
     local agent_settings="${HOME}/.pi/agent/settings.json"
 
-    if [[ -e "$dropbox_settings" ]]; then
-        if [[ -L "$agent_settings" && ! -e "$agent_settings" ]]; then
-            warn "Removing broken symlink: $agent_settings"
-            rm "$agent_settings"
-        elif [[ -e "$agent_settings" || -L "$agent_settings" ]]; then
-            warn "Already exists (skipping): $agent_settings"
-        else
-            ensure_dir "$agent_settings"
-            ln -s "$dropbox_settings" "$agent_settings"
-            info "Linked: $agent_settings -> $dropbox_settings"
-        fi
+    if [[ -e "$dropbox_settings" || -L "$dropbox_settings" ]]; then
+        link_external "$dropbox_settings" "$agent_settings"
     else
         warn "Dropbox settings not found: $dropbox_settings"
     fi
@@ -105,7 +188,7 @@ install_ai_agents() {
 
 install_lazygit() {
     section "lazygit"
-    if [[ "$(uname -s)" == "Darwin" ]]; then
+    if [[ "$OS_NAME" == "Darwin" ]]; then
         link_dotfile "lazygit/config.yml" "${HOME}/Library/Application Support/lazygit/config.yml"
     else
         link_dotfile "lazygit" "${HOME}/.config/lazygit"
@@ -113,54 +196,26 @@ install_lazygit() {
 }
 
 install_yabai() {
-    if [[ "$(uname -s)" != "Darwin" ]]; then
-        section "yabai"
-        warn "Skipping yabai configuration (not macOS)."
-        return 0
-    fi
-
-    section "yabai"
-    link_dotfile "yabai" "${HOME}/.config/yabai"
+    install_platform_dotfile "yabai" "Darwin" "macOS" "yabai" "${HOME}/.config/yabai"
 }
 
 install_spacebar() {
-    if [[ "$(uname -s)" != "Darwin" ]]; then
-        section "spacebar"
-        warn "Skipping spacebar configuration (not macOS)."
-        return 0
-    fi
-
-    section "spacebar"
-    link_dotfile "spacebar" "${HOME}/.config/spacebar"
+    install_platform_dotfile "spacebar" "Darwin" "macOS" "spacebar" "${HOME}/.config/spacebar"
 }
 
 install_skhd() {
-    if [[ "$(uname -s)" != "Darwin" ]]; then
-        section "skhd"
-        warn "Skipping skhd configuration (not macOS)."
-        return 0
-    fi
-
-    section "skhd"
-    link_dotfile "skhd" "${HOME}/.config/skhd"
+    install_platform_dotfile "skhd" "Darwin" "macOS" "skhd" "${HOME}/.config/skhd"
 }
 
 install_karabiner() {
-    if [[ "$(uname -s)" != "Darwin" ]]; then
-        section "karabiner"
-        warn "Skipping karabiner configuration (not macOS)."
-        return 0
-    fi
-
-    section "karabiner"
-    link_dotfile "karabiner/karabiner.json" "${HOME}/.config/karabiner/karabiner.json"
+    install_platform_dotfile "karabiner" "Darwin" "macOS" "karabiner/karabiner.json" "${HOME}/.config/karabiner/karabiner.json"
 }
 
 install_vscode() {
     section "vscode"
 
     local vscode_user
-    if [[ "$(uname -s)" == "Darwin" ]]; then
+    if [[ "$OS_NAME" == "Darwin" ]]; then
         vscode_user="${HOME}/Library/Application Support/Code/User"
     else
         vscode_user="${HOME}/.config/Code - OSS/User"
@@ -173,56 +228,33 @@ install_vscode() {
 install_rime() {
     section "rime"
 
-    local os
-    os="$(uname -s)"
-
     local rime_dir
     local src_dir_name
     local dropbox_rime
 
-    if [[ "$os" == "Darwin" ]]; then
+    if [[ "$OS_NAME" == "Darwin" ]]; then
         rime_dir="${HOME}/Library/Rime"
         src_dir_name="mac_rime"
         dropbox_rime="${HOME}/Dropbox/Conf/mac_rime"
-    elif [[ "$os" == "Linux" ]]; then
+    elif [[ "$OS_NAME" == "Linux" ]]; then
         rime_dir="${HOME}/.local/share/fcitx5/rime"
         src_dir_name="linux_rime"
         dropbox_rime="${HOME}/Dropbox/Conf/linux_rime"
     else
-        warn "Skipping rime configuration (unsupported OS: ${os})."
+        warn "Skipping rime configuration (unsupported OS: ${OS_NAME})."
         return 0
     fi
 
-    local src_dir="${DOTFILES_ROOT}/${src_dir_name}"
-
     # Link dotfiles-managed configs
-    for item in "${src_dir}"/*; do
-        [[ -e "$item" ]] || continue
-        local name
-        name=$(basename "$item")
-        [[ "$name" == ".gitignore" ]] && continue
-        link_dotfile "${src_dir_name}/${name}" "${rime_dir}/${name}"
-    done
+    link_dir_contents "$src_dir_name" "$rime_dir"
 
     # Link Dropbox-hosted large dictionaries and model
     if [[ -d "$dropbox_rime" ]]; then
+        local item name
         for item in "${dropbox_rime}"/*; do
             [[ -e "$item" ]] || continue
-            local name
-            name=$(basename "$item")
-            local target="${rime_dir}/${name}"
-
-            if [[ -L "$target" && ! -e "$target" ]]; then
-                warn "Removing broken symlink: $target"
-                rm "$target"
-            elif [[ -e "$target" || -L "$target" ]]; then
-                warn "Already exists (skipping): $target"
-                continue
-            fi
-
-            ensure_dir "$target"
-            ln -s "$item" "$target"
-            info "Linked: $target -> $item"
+            name="$(basename "$item")"
+            link_external "$item" "${rime_dir}/${name}"
         done
     else
         warn "Dropbox ${src_dir_name} not found: ${dropbox_rime}"
@@ -243,17 +275,8 @@ install_zsh() {
     local dropbox_zshenv="${HOME}/Dropbox/Conf/zshenv"
     local target_zshenv="${HOME}/.zshenv"
 
-    if [[ -e "$dropbox_zshenv" ]]; then
-        if [[ -L "$target_zshenv" && ! -e "$target_zshenv" ]]; then
-            warn "Removing broken symlink: $target_zshenv"
-            rm "$target_zshenv"
-        elif [[ -e "$target_zshenv" || -L "$target_zshenv" ]]; then
-            warn "Already exists (skipping): $target_zshenv"
-        else
-            ensure_dir "$target_zshenv"
-            ln -s "$dropbox_zshenv" "$target_zshenv"
-            info "Linked: $target_zshenv -> $dropbox_zshenv"
-        fi
+    if [[ -e "$dropbox_zshenv" || -L "$dropbox_zshenv" ]]; then
+        link_external "$dropbox_zshenv" "$target_zshenv"
     else
         warn "Dropbox zshenv not found: $dropbox_zshenv"
     fi
@@ -275,235 +298,109 @@ install_uv() {
 }
 
 install_alacritty() {
-    if [[ "$(uname -s)" != "Linux" ]]; then
-        section "alacritty"
-        warn "Skipping alacritty configuration (not Linux)."
-        return 0
-    fi
-
-    section "alacritty"
-    link_dotfile "alacritty" "${HOME}/.config/alacritty"
+    install_platform_dotfile "alacritty" "Linux" "Linux" "alacritty" "${HOME}/.config/alacritty"
 }
 
 install_i3() {
-    if [[ "$(uname -s)" != "Linux" ]]; then
-        section "i3"
-        warn "Skipping i3 configuration (not Linux)."
-        return 0
-    fi
-
-    section "i3"
-    link_dotfile "i3" "${HOME}/.config/i3"
+    install_platform_dotfile "i3" "Linux" "Linux" "i3" "${HOME}/.config/i3"
 }
 
 install_polybar() {
-    if [[ "$(uname -s)" != "Linux" ]]; then
-        section "polybar"
-        warn "Skipping polybar configuration (not Linux)."
-        return 0
-    fi
-
-    section "polybar"
-    link_dotfile "polybar" "${HOME}/.config/polybar"
+    install_platform_dotfile "polybar" "Linux" "Linux" "polybar" "${HOME}/.config/polybar"
 }
 
 install_redshift() {
-    if [[ "$(uname -s)" != "Linux" ]]; then
-        section "redshift"
-        warn "Skipping redshift configuration (not Linux)."
-        return 0
-    fi
-
-    section "redshift"
-    link_dotfile "redshift" "${HOME}/.config/redshift"
+    install_platform_dotfile "redshift" "Linux" "Linux" "redshift" "${HOME}/.config/redshift"
 }
 
 install_rofi() {
-    if [[ "$(uname -s)" != "Linux" ]]; then
-        section "rofi"
-        warn "Skipping rofi configuration (not Linux)."
-        return 0
-    fi
-
-    section "rofi"
-    link_dotfile "rofi" "${HOME}/.config/rofi"
+    install_platform_dotfile "rofi" "Linux" "Linux" "rofi" "${HOME}/.config/rofi"
 }
 
 install_zathura() {
-    if [[ "$(uname -s)" != "Linux" ]]; then
-        section "zathura"
-        warn "Skipping zathura configuration (not Linux)."
-        return 0
-    fi
-
-    section "zathura"
-    link_dotfile "zathura" "${HOME}/.config/zathura"
+    install_platform_dotfile "zathura" "Linux" "Linux" "zathura" "${HOME}/.config/zathura"
 }
 
 install_dunst() {
-    if [[ "$(uname -s)" != "Linux" ]]; then
-        section "dunst"
-        warn "Skipping dunst configuration (not Linux)."
-        return 0
-    fi
-
-    section "dunst"
-    link_dotfile "dunst" "${HOME}/.config/dunst"
+    install_platform_dotfile "dunst" "Linux" "Linux" "dunst" "${HOME}/.config/dunst"
 }
 
 install_feh() {
-    if [[ "$(uname -s)" != "Linux" ]]; then
-        section "feh"
-        warn "Skipping feh configuration (not Linux)."
-        return 0
-    fi
-
-    section "feh"
-    link_dotfile "feh" "${HOME}/.config/feh"
+    install_platform_dotfile "feh" "Linux" "Linux" "feh" "${HOME}/.config/feh"
 }
 
 install_mimeapps() {
-    if [[ "$(uname -s)" != "Linux" ]]; then
-        section "mimeapps"
-        warn "Skipping mimeapps.list configuration (not Linux)."
-        return 0
-    fi
-
-    section "mimeapps"
-    link_dotfile "mimeapps.list" "${HOME}/.config/mimeapps.list"
+    install_platform_dotfile "mimeapps" "Linux" "Linux" "mimeapps.list" "${HOME}/.config/mimeapps.list"
 }
 
 install_systemd() {
-    if [[ "$(uname -s)" != "Linux" ]]; then
-        section "systemd"
-        warn "Skipping systemd configuration (not Linux)."
-        return 0
-    fi
-
+    skip_unless_linux "systemd" || return 0
     section "systemd"
+
     local src_dir="${DOTFILES_ROOT}/systemd"
     local sys_dir="/etc/systemd/system"
+    local item name
 
     for item in "${src_dir}"/*; do
         [[ -e "$item" ]] || continue
-        local name
-        name=$(basename "$item")
-        local sys_conf="${sys_dir}/${name}"
-
-        if [[ -L "$sys_conf" && ! -e "$sys_conf" ]]; then
-            if [[ "$EUID" -eq 0 ]]; then
-                warn "Removing broken symlink: $sys_conf"
-                rm "$sys_conf"
-            else
-                warn "Broken symlink detected: $sys_conf"
-                warn "To fix it manually, run:"
-                warn "  sudo rm \"$sys_conf\""
-                warn "  sudo ln -s \"$item\" \"$sys_conf\""
-                continue
-            fi
-        elif [[ -e "$sys_conf" || -L "$sys_conf" ]]; then
-            warn "Already exists (skipping): $sys_conf"
-            continue
-        fi
-
-        if [[ "$EUID" -eq 0 ]]; then
-            ensure_dir "$sys_conf"
-            ln -s "$item" "$sys_conf"
-            info "Linked: $sys_conf -> $item"
-        else
-            warn "Systemd config requires root privileges."
-            warn "To install ${name} manually, run:"
-            warn "  sudo ln -s \"$item\" \"$sys_conf\""
-        fi
+        name="$(basename "$item")"
+        link_system_file "$item" "${sys_dir}/${name}" "Systemd config"
     done
 }
 
 install_desktop() {
-    if [[ "$(uname -s)" != "Linux" ]]; then
-        section "desktop"
-        warn "Skipping desktop configuration (not Linux)."
-        return 0
-    fi
-
+    skip_unless_linux "desktop" || return 0
     section "desktop"
-    for item in "${DOTFILES_ROOT}/desktop"/*; do
-        [[ -e "$item" ]] || continue
-        local name
-        name=$(basename "$item")
-        link_dotfile "desktop/${name}" "${HOME}/.local/share/applications/${name}"
-    done
+    link_dir_contents "desktop" "${HOME}/.local/share/applications"
 }
 
 install_x11() {
-    if [[ "$(uname -s)" != "Linux" ]]; then
-        section "x11"
-        warn "Skipping x11 configuration (not Linux)."
-        return 0
-    fi
-
+    skip_unless_linux "x11" || return 0
     section "x11"
     link_dotfile "x11/.xinitrc" "${HOME}/.xinitrc"
     link_dotfile "x11/.Xresources" "${HOME}/.Xresources"
 
-    local sys_conf="/etc/X11/xorg.conf.d/40-libinput.conf"
-    local src="${DOTFILES_ROOT}/x11/40-libinput.conf"
-
-    if [[ -L "$sys_conf" && ! -e "$sys_conf" ]]; then
-        if [[ "$EUID" -eq 0 ]]; then
-            warn "Removing broken symlink: $sys_conf"
-            rm "$sys_conf"
-        else
-            warn "Broken symlink detected: $sys_conf"
-            warn "To fix it manually, run:"
-            warn "  sudo rm \"$sys_conf\""
-            warn "  sudo ln -s \"$src\" \"$sys_conf\""
-            return 0
-        fi
-    elif [[ -e "$sys_conf" || -L "$sys_conf" ]]; then
-        warn "Already exists (skipping): $sys_conf"
-        return 0
-    fi
-
-    if [[ "$EUID" -eq 0 ]]; then
-        ensure_dir "$sys_conf"
-        ln -s "$src" "$sys_conf"
-        info "Linked: $sys_conf -> $src"
-    else
-        warn "System config requires root privileges."
-        warn "To install 40-libinput.conf manually, run:"
-        warn "  sudo mkdir -p /etc/X11/xorg.conf.d"
-        warn "  sudo ln -s \"$src\" \"$sys_conf\""
-    fi
+    link_system_file \
+        "${DOTFILES_ROOT}/x11/40-libinput.conf" \
+        "/etc/X11/xorg.conf.d/40-libinput.conf" \
+        "System config"
 }
 
 main() {
-    install_tmux
-    install_nvim
-    install_ai_agents
-    install_lazygit
-    install_ranger
-    install_zsh
-    install_git
-    install_yabai
-    install_spacebar
-    install_skhd
-    install_karabiner
-    install_vscode
-    install_rime
-    install_ghostty
-    install_uv
-    install_alacritty
-    install_i3
-    install_polybar
-    install_redshift
-    install_rofi
-    install_zathura
-    install_dunst
-    install_feh
-    install_mimeapps
-    install_systemd
-    install_x11
-    install_desktop
+    local installers=(
+        install_tmux
+        install_nvim
+        install_ai_agents
+        install_lazygit
+        install_ranger
+        install_zsh
+        install_git
+        install_yabai
+        install_spacebar
+        install_skhd
+        install_karabiner
+        install_vscode
+        install_rime
+        install_ghostty
+        install_uv
+        install_alacritty
+        install_i3
+        install_polybar
+        install_redshift
+        install_rofi
+        install_zathura
+        install_dunst
+        install_feh
+        install_mimeapps
+        install_systemd
+        install_x11
+        install_desktop
+    )
+    local installer
+
+    for installer in "${installers[@]}"; do
+        "$installer"
+    done
 }
 
 main "$@"
