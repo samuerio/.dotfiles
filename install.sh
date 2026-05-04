@@ -152,16 +152,30 @@ install_vscode() {
     link_dotfile "vscode/keybindings.json" "${vscode_user}/keybindings.json"
 }
 
-install_mac_rime() {
-    if [[ "$(uname -s)" != "Darwin" ]]; then
-        section "mac_rime"
-        warn "Skipping mac_rime configuration (not macOS)."
+install_rime() {
+    section "rime"
+
+    local os
+    os="$(uname -s)"
+
+    local rime_dir
+    local src_dir_name
+    local dropbox_rime
+
+    if [[ "$os" == "Darwin" ]]; then
+        rime_dir="${HOME}/Library/Rime"
+        src_dir_name="mac_rime"
+        dropbox_rime="${HOME}/Dropbox/Conf/mac_rime"
+    elif [[ "$os" == "Linux" ]]; then
+        rime_dir="${HOME}/.local/share/fcitx5/rime"
+        src_dir_name="linux_rime"
+        dropbox_rime="${HOME}/Dropbox/Conf/linux_rime"
+    else
+        warn "Skipping rime configuration (unsupported OS: ${os})."
         return 0
     fi
 
-    section "mac_rime"
-    local rime_dir="${HOME}/Library/Rime"
-    local src_dir="${DOTFILES_ROOT}/mac_rime"
+    local src_dir="${DOTFILES_ROOT}/${src_dir_name}"
 
     # Link dotfiles-managed configs
     for item in "${src_dir}"/*; do
@@ -169,11 +183,10 @@ install_mac_rime() {
         local name
         name=$(basename "$item")
         [[ "$name" == ".gitignore" ]] && continue
-        link_dotfile "mac_rime/${name}" "${rime_dir}/${name}"
+        link_dotfile "${src_dir_name}/${name}" "${rime_dir}/${name}"
     done
 
     # Link Dropbox-hosted large dictionaries and model
-    local dropbox_rime="${HOME}/Dropbox/Conf/mac_rime"
     if [[ -d "$dropbox_rime" ]]; then
         for item in "${dropbox_rime}"/*; do
             [[ -e "$item" ]] || continue
@@ -194,53 +207,7 @@ install_mac_rime() {
             info "Linked: $target -> $item"
         done
     else
-        warn "Dropbox mac_rime not found: ${dropbox_rime}"
-    fi
-}
-
-install_linux_rime() {
-    if [[ "$(uname -s)" != "Linux" ]]; then
-        section "linux_rime"
-        warn "Skipping linux_rime configuration (not Linux)."
-        return 0
-    fi
-
-    section "linux_rime"
-    local rime_dir="${HOME}/.local/share/fcitx5/rime"
-    local src_dir="${DOTFILES_ROOT}/linux_rime"
-
-    # Link dotfiles-managed configs
-    for item in "${src_dir}"/*; do
-        [[ -e "$item" ]] || continue
-        local name
-        name=$(basename "$item")
-        [[ "$name" == ".gitignore" ]] && continue
-        link_dotfile "linux_rime/${name}" "${rime_dir}/${name}"
-    done
-
-    # Link Dropbox-hosted large dictionaries and model
-    local dropbox_rime="${HOME}/Dropbox/Conf/linux_rime"
-    if [[ -d "$dropbox_rime" ]]; then
-        for item in "${dropbox_rime}"/*; do
-            [[ -e "$item" ]] || continue
-            local name
-            name=$(basename "$item")
-            local target="${rime_dir}/${name}"
-
-            if [[ -L "$target" && ! -e "$target" ]]; then
-                warn "Removing broken symlink: $target"
-                rm "$target"
-            elif [[ -e "$target" || -L "$target" ]]; then
-                warn "Already exists (skipping): $target"
-                continue
-            fi
-
-            ensure_dir "$target"
-            ln -s "$item" "$target"
-            info "Linked: $target -> $item"
-        done
-    else
-        warn "Dropbox linux_rime not found: ${dropbox_rime}"
+        warn "Dropbox ${src_dir_name} not found: ${dropbox_rime}"
     fi
 }
 
@@ -470,8 +437,7 @@ main() {
     install_skhd
     install_karabiner
     install_vscode
-    install_mac_rime
-    install_linux_rime
+    install_rime
     install_ghostty
     install_uv
     install_alacritty
