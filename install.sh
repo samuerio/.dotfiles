@@ -83,6 +83,24 @@ install_ai_agents() {
     link_dotfile "opencode" "${HOME}/.config/opencode"
     link_dotfile "agents" "${HOME}/.agents"
     link_dotfile ".aider.conf.yml" "${HOME}/.aider.conf.yml"
+
+    local dropbox_settings="${HOME}/Dropbox/Conf/pi-coding-agent/settings.json"
+    local agent_settings="${HOME}/.pi/agent/settings.json"
+
+    if [[ -e "$dropbox_settings" ]]; then
+        if [[ -L "$agent_settings" && ! -e "$agent_settings" ]]; then
+            warn "Removing broken symlink: $agent_settings"
+            rm "$agent_settings"
+        elif [[ -e "$agent_settings" || -L "$agent_settings" ]]; then
+            warn "Already exists (skipping): $agent_settings"
+        else
+            ensure_dir "$agent_settings"
+            ln -s "$dropbox_settings" "$agent_settings"
+            info "Linked: $agent_settings -> $dropbox_settings"
+        fi
+    else
+        warn "Dropbox settings not found: $dropbox_settings"
+    fi
 }
 
 install_lazygit() {
@@ -221,6 +239,24 @@ install_zsh() {
     link_dotfile "zsh/.zshrc" "${HOME}/.zshrc"
     link_dotfile "zsh/.p10k.zsh" "${HOME}/.p10k.zsh"
     link_dotfile "zsh/my_patches.zsh" "${HOME}/.oh-my-zsh/custom/my_patches.zsh"
+
+    local dropbox_zshenv="${HOME}/Dropbox/Conf/zshenv"
+    local target_zshenv="${HOME}/.zshenv"
+
+    if [[ -e "$dropbox_zshenv" ]]; then
+        if [[ -L "$target_zshenv" && ! -e "$target_zshenv" ]]; then
+            warn "Removing broken symlink: $target_zshenv"
+            rm "$target_zshenv"
+        elif [[ -e "$target_zshenv" || -L "$target_zshenv" ]]; then
+            warn "Already exists (skipping): $target_zshenv"
+        else
+            ensure_dir "$target_zshenv"
+            ln -s "$dropbox_zshenv" "$target_zshenv"
+            info "Linked: $target_zshenv -> $dropbox_zshenv"
+        fi
+    else
+        warn "Dropbox zshenv not found: $dropbox_zshenv"
+    fi
 }
 
 install_git() {
