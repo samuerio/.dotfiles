@@ -139,14 +139,15 @@ install_karabiner() {
 }
 
 install_vscode() {
-    if [[ "$(uname -s)" != "Darwin" ]]; then
-        section "vscode"
-        warn "Skipping vscode configuration (not macOS)."
-        return 0
+    section "vscode"
+
+    local vscode_user
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        vscode_user="${HOME}/Library/Application Support/Code/User"
+    else
+        vscode_user="${HOME}/.config/Code - OSS/User"
     fi
 
-    section "vscode"
-    local vscode_user="${HOME}/Library/Application Support/Code/User"
     link_dotfile "vscode/settings.json" "${vscode_user}/settings.json"
     link_dotfile "vscode/keybindings.json" "${vscode_user}/keybindings.json"
 }
@@ -323,6 +324,51 @@ install_mimeapps() {
     link_dotfile "mimeapps.list" "${HOME}/.config/mimeapps.list"
 }
 
+install_systemd() {
+    if [[ "$(uname -s)" != "Linux" ]]; then
+        section "systemd"
+        warn "Skipping systemd configuration (not Linux)."
+        return 0
+    fi
+
+    section "systemd"
+    local src_dir="${DOTFILES_ROOT}/systemd"
+    local sys_dir="/etc/systemd/system"
+
+    for item in "${src_dir}"/*; do
+        [[ -e "$item" ]] || continue
+        local name
+        name=$(basename "$item")
+        local sys_conf="${sys_dir}/${name}"
+
+        if [[ -L "$sys_conf" && ! -e "$sys_conf" ]]; then
+            if [[ "$EUID" -eq 0 ]]; then
+                warn "Removing broken symlink: $sys_conf"
+                rm "$sys_conf"
+            else
+                warn "Broken symlink detected: $sys_conf"
+                warn "To fix it manually, run:"
+                warn "  sudo rm \"$sys_conf\""
+                warn "  sudo ln -s \"$item\" \"$sys_conf\""
+                continue
+            fi
+        elif [[ -e "$sys_conf" || -L "$sys_conf" ]]; then
+            warn "Already exists (skipping): $sys_conf"
+            continue
+        fi
+
+        if [[ "$EUID" -eq 0 ]]; then
+            ensure_dir "$sys_conf"
+            ln -s "$item" "$sys_conf"
+            info "Linked: $sys_conf -> $item"
+        else
+            warn "Systemd config requires root privileges."
+            warn "To install ${name} manually, run:"
+            warn "  sudo ln -s \"$item\" \"$sys_conf\""
+        fi
+    done
+}
+
 install_x11() {
     if [[ "$(uname -s)" != "Linux" ]]; then
         section "x11"
@@ -390,6 +436,7 @@ main() {
     install_dunst
     install_feh
     install_mimeapps
+    install_systemd
     install_x11
 }
 
