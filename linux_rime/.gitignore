@@ -1,0 +1,10 @@
+# 词库目录（已迁移到 Dropbox/Conf/linux_rime）
+cn_dicts/
+en_dicts/
+zh-hans-t-essay-bgw.gram
+
+# 运行时生成的文件
+build/
+sync/
+*.userdb/
+user.yaml

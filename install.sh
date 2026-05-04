@@ -198,6 +198,52 @@ install_mac_rime() {
     fi
 }
 
+install_linux_rime() {
+    if [[ "$(uname -s)" != "Linux" ]]; then
+        section "linux_rime"
+        warn "Skipping linux_rime configuration (not Linux)."
+        return 0
+    fi
+
+    section "linux_rime"
+    local rime_dir="${HOME}/.local/share/fcitx5/rime"
+    local src_dir="${DOTFILES_ROOT}/linux_rime"
+
+    # Link dotfiles-managed configs
+    for item in "${src_dir}"/*; do
+        [[ -e "$item" ]] || continue
+        local name
+        name=$(basename "$item")
+        [[ "$name" == ".gitignore" ]] && continue
+        link_dotfile "linux_rime/${name}" "${rime_dir}/${name}"
+    done
+
+    # Link Dropbox-hosted large dictionaries and model
+    local dropbox_rime="${HOME}/Dropbox/Conf/linux_rime"
+    if [[ -d "$dropbox_rime" ]]; then
+        for item in "${dropbox_rime}"/*; do
+            [[ -e "$item" ]] || continue
+            local name
+            name=$(basename "$item")
+            local target="${rime_dir}/${name}"
+
+            if [[ -L "$target" && ! -e "$target" ]]; then
+                warn "Removing broken symlink: $target"
+                rm "$target"
+            elif [[ -e "$target" || -L "$target" ]]; then
+                warn "Already exists (skipping): $target"
+                continue
+            fi
+
+            ensure_dir "$target"
+            ln -s "$item" "$target"
+            info "Linked: $target -> $item"
+        done
+    else
+        warn "Dropbox linux_rime not found: ${dropbox_rime}"
+    fi
+}
+
 install_ranger() {
     section "ranger"
     link_dotfile "ranger" "${HOME}/.config/ranger"
@@ -425,6 +471,7 @@ main() {
     install_karabiner
     install_vscode
     install_mac_rime
+    install_linux_rime
     install_ghostty
     install_uv
     install_alacritty
