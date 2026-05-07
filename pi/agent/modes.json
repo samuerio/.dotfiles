@@ -19,8 +19,8 @@
     },
     "deep": {
       "provider": "openai-codex",
-      "modelId": "gpt-5.3-codex",
-      "thinkingLevel": "medium"
+      "modelId": "gpt-5.5",
+      "thinkingLevel": "xhigh"
     },
     "inner": {
       "provider": "openrouter",

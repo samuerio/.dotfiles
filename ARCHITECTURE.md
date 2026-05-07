@@ -10,8 +10,8 @@
 ### `nvim/`
 
 Neovim 主配置，仓库中最复杂的子系统。`init.lua` 为入口文件，`plugins.vim` 以 vim-plug 管理插件清单，
-`lua/config/` 存放各插件独立配置，`lua/basic.lua` 承载 LSP 与补全设置。依赖 `coc.nvim`/`nvim-cmp`
-实现 IDE 级编辑能力，集成 `telescope`/`fzf` 搜索与 `opencode.nvim` AI 工作流。
+`lua/config/` 存放各插件独立配置，`lua/basic.lua` 承载原生 LSP 与 nvim-cmp 补全设置，`coc.nvim` 提供另一套
+IDE 级编辑能力，集成 `telescope`/`fzf` 搜索与 `opencode.nvim` AI 工作流。
 
 ### `pi/agent/extensions/`
 
