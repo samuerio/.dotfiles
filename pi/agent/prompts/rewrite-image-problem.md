@@ -1,6 +1,5 @@
 ---
 description: Rewrite image problems to text-only format for pure reasoning models
-agent: general
 ---
 
 Rewrite this image-containing problem into fully text-only version:

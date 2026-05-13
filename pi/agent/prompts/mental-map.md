@@ -53,7 +53,7 @@ Error handling, configuration, observability, build/release tooling. Only what a
 In the project-root `AGENTS.md`:
 
 1. If the file does not exist, create it.
-2. If `## Codebase Map` does not exist, prepend it before any existing content.
+2. If `## Mental Map` does not exist, prepend it before any existing content.
 3. Never duplicate or rewrite existing content.
 
 The section must read exactly:
