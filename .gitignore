@@ -12,3 +12,5 @@ linux_rime/user.yaml
 .pi/todos
 **/node_modules/
 /.worktree/
+spec/
+research/
