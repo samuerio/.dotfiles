@@ -4,5 +4,4 @@ description: show data shape
 
 $ARGUMENTS
 
-Please show the input/output shape, along with concise example data matching each shape.
-Response in Chinese.
+Show the input/output shape. Response in Chinese.

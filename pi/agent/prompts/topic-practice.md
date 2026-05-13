@@ -1,8 +1,8 @@
 ---
-description: introducing the practice of a topic
+description: introducing the engineering practice of a topic
 ---
 
 $ARGUMENTS
 
-What are the engineering practices involved? Can you provide some examples?
+How can this be implemented in engineering?
 Response in Chinese.
