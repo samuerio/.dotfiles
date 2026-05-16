@@ -134,7 +134,7 @@ alias bk='ssh -p 2222 zhe@10.12.3.5'
 if [[ $(uname) == "Darwin" ]]; then
     # 针对 macOS 的命令
     alias vpn='export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897 all_proxy=socks5://127.0.0.1:7897'
-    alias nd='cd ~/source/github/.dotfiles && nvim ./'
+    alias nd='cd ~/workspace/.dotfiles && nvim ./'
 
     alias nn='cd ~/Dropbox/EXP/Notes && nvim ./'
     alias ns='cd ~/Dropbox/EXP/Scripts && nvim ./'
@@ -142,12 +142,22 @@ if [[ $(uname) == "Darwin" ]]; then
     alias nr='cd ~/Dropbox/GTD/Daily_Report && nvim ./'
     alias no='cd ~/Dropbox/GTD/OKR && nvim ./'
 
-    #待整理-----
-    [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
+    #zsh
+    [ -f /opt/local/share/fzf/shell/key-bindings.zsh ] && source /opt/local/share/fzf/shell/key-bindings.zsh
+    [ -f /opt/local/share/fzf/shell/completion.zsh ] && source /opt/local/share/fzf/shell/completion.zsh
 
-    source ~/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+    #zsh-syntax-highlighting
+    [ -f ~/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ] && \
+        source ~/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+    [ -f /opt/local/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ] && \
+        source /opt/local/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
 
+    #autojump
     [ -f /opt/homebrew/etc/profile.d/autojump.sh ] && . /opt/homebrew/etc/profile.d/autojump.sh
+    export FPATH="$FPATH:/opt/local/share/zsh/site-functions/"
+    if [ -f /opt/local/etc/profile.d/autojump.sh ]; then
+        . /opt/local/etc/profile.d/autojump.sh
+    fi
 
     # Set CLICOLOR if you want Ansi Colors in iTerm2
     export CLICOLOR=1
@@ -160,36 +170,18 @@ if [[ $(uname) == "Darwin" ]]; then
     # export GOPATH=/Users/zhenghe/repo/go
     # export PATH=$GOPATH/bin:$PATH
 
-
     #If you need to have openjdk@17 first in your PATH, run:
     #echo 'export PATH="/opt/homebrew/opt/openjdk@17/bin:$PATH"' >> ~/.zshrc
     #export JAVA_HOME=/Library/Java/JavaVirtualMachines/adoptopenjdk-8.jdk/Contents/Home
     export JAVA_HOME=/opt/homebrew/opt/openjdk@17
     export PATH=$JAVA_HOME/bin:$PATH
 
-    # lotus
-    export LIBRARY_PATH=/opt/homebrew/lib
-    export FFI_BUILD_FROM_SOURCE=1
-
-    export PYENV_ROOT="$HOME/.pyenv"
-    export PATH="$PYENV_ROOT/bin:$PATH"
-    if command -v pyenv 1>/dev/null 2>&1; then
-      eval "$(pyenv init --path)"
-      eval "$(pyenv init -)"
-    fi
-
-    setopt no_nomatch
-
-    export PATH="$PATH:/Users/zhenghe/.foundry/bin"
-    export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
-    export PATH="/opt/homebrew/opt/openssl@1.1/bin:$PATH"
-
 elif [[ $(uname) == "Linux" ]]; then
     # 针对 Linux 的命令
     # Puppeteer/Mermaid CLI configuration
     export PUPPETEER_EXECUTABLE_PATH="/usr/bin/google-chrome-stable"
     alias vpn='export https_proxy=http://127.0.0.1:7890 http_proxy=http://127.0.0.1:7890 all_proxy=socks5://127.0.0.1:7890'
-    alias nd='cd ~/github/.dotfiles && nvim ./'
+    alias nd='cd ~/workspace/.dotfiles && nvim ./'
 
     # alias kvpn='sudo openvpn --daemon --config ~/.config/openvpn/kaopuyun.ovpn'
     alias zvpn='sudo openvpn  --daemon --config ~/.config/openvpn/zrinfo.ovpn --data-ciphers AES-128-CBC --auth-user-pass ~/.config/openvpn/auth.txt'
@@ -219,11 +211,6 @@ elif [[ $(uname) == "Linux" ]]; then
 
     #可以使用该命令将git diff赋值给AI，得到commit message，也可以直接使用aider /commit生成commit message并提交
     alias gdc='git diff --cached | xclip -selection clipboard'
-    alias c2p-diff='code2prompt ./ --diff --template ~/github/.dotfiles/prompt-template/code2prompt/write-git-commit.hbs'
-    alias c2p-readme='code2prompt ./ --diff --template ~/github/.dotfiles/prompt-template/code2prompt/write-github-readme.hbs'
-    alias c2p-doc='code2prompt ./ --diff --template ~/github/.dotfiles/prompt-template/code2prompt/document-the-code.hbs'
-    alias c2p-clean='code2prompt ./ --diff --template ~/github/.dotfiles/prompt-template/code2prompt/clean-up-code.hbs'
-
 
     #微信这样的应用能识别到输入法
     export GTK_IM_MODULE=fcitx
@@ -258,7 +245,7 @@ elif [[ $(uname) == "Linux" ]]; then
 else
 fi
 
-alias init-todo-workspace="bash ~/github/.dotfiles/tmux/scripts/init_todo_workspace.sh"
+alias init-todo-workspace="bash ~/workspace/.dotfiles/tmux/scripts/init_todo_workspace.sh"
 
 # To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
