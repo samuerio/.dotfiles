@@ -34,3 +34,5 @@ application/xml=cursor-text.desktop
 application/toml=cursor-text.desktop
 text/x-toml=cursor-text.desktop
 x-scheme-handler/tabby=tabby.desktop
+x-scheme-handler/clash=clash-verge.desktop;
+x-scheme-handler/clash-verge=clash-verge.desktop;
