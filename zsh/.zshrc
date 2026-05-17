@@ -193,9 +193,6 @@ elif [[ $(uname) == "Linux" ]]; then
 
     [[ -f /usr/share/autojump/autojump.zsh ]] && source /usr/share/autojump/autojump.zsh
 
-    export PATH=$HOME/.local/bin:$PATH
-    export PATH=$PATH:~/.npm-global/bin
-
     # alias nn='cd /mnt/c/Users/36001/Dropbox/EXP/Notes && nvim ./'
     # alias nt='cd /mnt/c/Users/36001/Dropbox/GTD/Todo && nvim ./'
     # alias nr='cd /mnt/c/Users/36001/Dropbox/GTD/Daily_Report && nvim ./'
@@ -250,6 +247,8 @@ alias init-todo-workspace="bash ~/workspace/.dotfiles/tmux/scripts/init_todo_wor
 # To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
 
+export PATH=$HOME/.local/bin:$PATH
+export PATH=$PATH:~/.npm-global/bin
 export PATH=$HOME/.cargo/bin:$PATH
 export PATH=$HOME/.yarn/bin:$PATH
 
