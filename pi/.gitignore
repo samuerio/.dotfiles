@@ -3,6 +3,7 @@ agent/sessions/
 agent/auth.json
 agent/bin/
 agent/settings.json
+agent/telegram.json
 
 # Logs
 *.log
@@ -16,3 +17,5 @@ agent/settings.json
 *.swp
 *.swo
 *~
+
+git

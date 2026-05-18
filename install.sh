@@ -184,6 +184,15 @@ install_ai_agents() {
     else
         warn "Dropbox settings not found: $dropbox_settings"
     fi
+
+    local dropbox_telegram="${HOME}/Dropbox/Conf/pi-coding-agent/telegram.json"
+    local agent_telegram="${HOME}/.pi/agent/telegram.json"
+
+    if [[ -e "$dropbox_telegram" || -L "$dropbox_telegram" ]]; then
+        link_external "$dropbox_telegram" "$agent_telegram"
+    else
+        warn "Dropbox telegram settings not found: $dropbox_telegram"
+    fi
 }
 
 install_lazygit() {
@@ -389,6 +398,12 @@ install_systemd() {
     done
 }
 
+install_environment_d() {
+    skip_unless_linux "environment.d" || return 0
+    section "environment.d"
+    link_dir_contents "environment.d" "${HOME}/.config/environment.d"
+}
+
 install_desktop() {
     skip_unless_linux "desktop" || return 0
     section "desktop"
@@ -437,6 +452,7 @@ main() {
         install_feh
         install_mimeapps
         install_systemd
+        install_environment_d
         install_x11
         install_desktop
     )
