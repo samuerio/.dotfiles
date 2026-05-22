@@ -291,6 +291,32 @@ install_zsh() {
     fi
 }
 
+install_npm() {
+    section "npm"
+
+    if ! command -v npm &>/dev/null; then
+        warn "npm not found, skipping npm global prefix setup."
+        return 0
+    fi
+
+    local npm_global_dir="${HOME}/.npm-global"
+
+    if [[ ! -d "$npm_global_dir" ]]; then
+        mkdir -p "$npm_global_dir"
+        info "Created directory: $npm_global_dir"
+    fi
+
+    local current_prefix
+    current_prefix="$(npm config get prefix)"
+
+    if [[ "$current_prefix" != "$npm_global_dir" ]]; then
+        npm config set prefix "$npm_global_dir"
+        info "Set npm prefix to $npm_global_dir"
+    else
+        info "npm prefix already set to $npm_global_dir"
+    fi
+}
+
 install_git() {
     section "git"
     link_dotfile "git/.gitconfig" "${HOME}/.gitconfig"
@@ -430,6 +456,7 @@ main() {
         install_lazygit
         install_ranger
         install_zsh
+        install_npm
         install_git
         install_ssh
         install_yabai
