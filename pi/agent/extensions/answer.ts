@@ -12,14 +12,11 @@
 
 import {
     complete,
-    type Model,
-    type Api,
     type UserMessage,
 } from "@mariozechner/pi-ai";
 import type {
     ExtensionAPI,
     ExtensionContext,
-    ModelRegistry,
 } from "@mariozechner/pi-coding-agent";
 import { BorderedLoader } from "@mariozechner/pi-coding-agent";
 import {
@@ -75,46 +72,6 @@ Example output:
     }
   ]
 }`;
-
-const CODEX_MODEL_ID = "gpt-5.1-codex-mini";
-const HAIKU_MODEL_ID = "claude-haiku-4-5";
-const SEED_CODE_MODEL_ID = "doubao-seed-2.0-code";
-
-/**
- * Prefer Codex mini for extraction when available, otherwise fallback to haiku or the current model.
- */
-async function selectExtractionModel(
-    currentModel: Model<Api>,
-    modelRegistry: ModelRegistry,
-): Promise<Model<Api>> {
-    const seedcodeModel = modelRegistry.find("volcengine", SEED_CODE_MODEL_ID);
-    if (seedcodeModel) {
-        const auth = await modelRegistry.getApiKeyAndHeaders(seedcodeModel);
-        if (auth.ok) {
-            return seedcodeModel;
-        }
-    }
-
-    const codexModel = modelRegistry.find("openai-codex", CODEX_MODEL_ID);
-    if (codexModel) {
-        const auth = await modelRegistry.getApiKeyAndHeaders(codexModel);
-        if (auth.ok) {
-            return codexModel;
-        }
-    }
-
-    const haikuModel = modelRegistry.find("anthropic", HAIKU_MODEL_ID);
-    if (!haikuModel) {
-        return currentModel;
-    }
-
-    const auth = await modelRegistry.getApiKeyAndHeaders(haikuModel);
-    if (!auth.ok) {
-        return currentModel;
-    }
-
-    return haikuModel;
-}
 
 /**
  * Parse the JSON response from the LLM
@@ -498,26 +455,20 @@ export default function (pi: ExtensionAPI) {
             return;
         }
 
-        // Select the best model for extraction (prefer Codex mini, then haiku)
-        const extractionModel = await selectExtractionModel(
-            ctx.model,
-            ctx.modelRegistry,
-        );
-
         // Run extraction with loader UI
         const extractionResult = await ctx.ui.custom<ExtractionResult | null>(
             (tui, theme, _kb, done) => {
                 const loader = new BorderedLoader(
                     tui,
                     theme,
-                    `Extracting questions using ${extractionModel.id}...`,
+                    `Extracting questions...`,
                 );
                 loader.onAbort = () => done(null);
 
                 const doExtract = async () => {
                     const auth =
                         await ctx.modelRegistry.getApiKeyAndHeaders(
-                            extractionModel,
+                            ctx.model!,
                         );
                     if (!auth.ok) {
                         throw new Error(auth.error);
@@ -529,7 +480,7 @@ export default function (pi: ExtensionAPI) {
                     };
 
                     const response = await complete(
-                        extractionModel,
+                        ctx.model!,
                         {
                             systemPrompt: SYSTEM_PROMPT,
                             messages: [userMessage],
