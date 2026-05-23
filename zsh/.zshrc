@@ -133,6 +133,7 @@ alias bk='ssh -p 2222 zhe@10.12.3.5'
 
 if [[ $(uname) == "Darwin" ]]; then
     # 针对 macOS 的命令
+    alias stayawake='caffeinate -is'
     alias vpn='export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897 all_proxy=socks5://127.0.0.1:7897'
     alias nd='cd ~/workspace/.dotfiles && nvim ./'
 

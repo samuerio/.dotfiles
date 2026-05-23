@@ -4,6 +4,7 @@ agent/auth.json
 agent/bin/
 agent/settings.json
 agent/telegram.json
+git
 
 # Logs
 *.log
