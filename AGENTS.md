@@ -3,5 +3,5 @@
 A **mental map**: a short, selective map of the project's stable physical architecture.
 Answers "Where is the thing that does X?" and "What does X do?"
 
-Load `./ARCHITECTURE.md` as project memory.
+Load `./ARCHITECTURE.md` as project memory before any task.
 It is the mental map of this codebase: module responsibilities, dependency boundaries, and architecture invariants.
