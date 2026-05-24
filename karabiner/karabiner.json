@@ -42,7 +42,7 @@
                         ]
                     },
                     {
-                        "description": "Map alt + tab to alt + b(配合yabai+skhd进行最近工作区跳转)",
+                        "description": "Map alt + tab to alt + shift + b(配合yabai+skhd进行最近工作区跳转)",
                         "manipulators": [
                             {
                                 "from": {
@@ -60,7 +60,8 @@
                                     {
                                         "key_code": "b",
                                         "modifiers": [
-                                            "right_option"
+                                            "right_option",
+                                            "shift"
                                         ]
                                     }
                                 ],

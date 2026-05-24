@@ -63,8 +63,8 @@ alt + shift - 9 : yabai -m window --space 9
 #alt + shift - 0 : yabai -m window --space 10
 
 # go back to previous workspace (kind of like back_and_forth in i3)
-# alt - b对应的是alt+tab快捷键
-alt - b : yabai -m space --focus recent
+# karabiner 配置了 alt + tab to alt + shift + b
+alt + shift - b : yabai -m space --focus recent
 
 # move focused window to previous workspace
 # alt + shift - b : yabai -m window --space recent; \
