@@ -221,9 +221,6 @@ elif [[ $(uname) == "Linux" ]]; then
     # export GDK_DPI_SCALE=0.5
     # export QT_AUTO_SCREEN_SCALE_FACTOR=1
     #
-    export NVM_DIR="$HOME/.nvm"
-    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
-    [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
 
     #sudo pacman -S pyenv
     #pyenv versions
@@ -234,11 +231,6 @@ elif [[ $(uname) == "Linux" ]]; then
 
     export AIDER_CACHE_PROMPTS=true
     export CACHE_KEEPALIVE_PINGS=6
-
-    source /usr/share/nvm/init-nvm.sh
-    export NVM_DIR="$HOME/.nvm"
-    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
-    [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
 
 else
 fi
