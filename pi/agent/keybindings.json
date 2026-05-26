@@ -1,9 +1,26 @@
 {
-    "tui.editor.cursorUp": ["up", "ctrl+p"],
-    "tui.editor.cursorDown": ["down", "ctrl+n"],
-    "tui.select.up": ["up", "ctrl+p"],
-    "tui.select.down": ["down", "ctrl+n"],
-    "tui.editor.deleteCharBackward": ["ctrl+h", "backspace"],
-    "app.model.cycleForward": [],
-    "app.model.cycleBackward": []
+  "tui.editor.cursorUp": [
+    "up",
+    "ctrl+p"
+  ],
+  "tui.editor.cursorDown": [
+    "down",
+    "ctrl+n"
+  ],
+  "tui.editor.deleteCharBackward": [
+    "ctrl+h",
+    "backspace"
+  ],
+  "tui.select.up": [
+    "up",
+    "ctrl+p"
+  ],
+  "tui.select.down": [
+    "down",
+    "ctrl+n"
+  ],
+  "app.model.cycleForward": [],
+  "app.model.cycleBackward": [],
+  "app.session.toggleNamedFilter": [],
+  "app.session.togglePath": []
 }
