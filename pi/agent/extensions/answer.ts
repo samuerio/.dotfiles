@@ -13,12 +13,12 @@
 import {
     complete,
     type UserMessage,
-} from "@mariozechner/pi-ai";
+} from "@earendil-works/pi-ai";
 import type {
     ExtensionAPI,
     ExtensionContext,
-} from "@mariozechner/pi-coding-agent";
-import { BorderedLoader } from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
+import { BorderedLoader } from "@earendil-works/pi-coding-agent";
 import {
     type Component,
     Editor,
@@ -29,7 +29,7 @@ import {
     type TUI,
     visibleWidth,
     wrapTextWithAnsi,
-} from "@mariozechner/pi-tui";
+} from "@earendil-works/pi-tui";
 
 // Structured output format for question extraction
 interface ExtractedQuestion {
