@@ -1,6 +1,6 @@
 ---
 name: markdown
-description: Convert anything to Markdown.
+description: Convert anything to Markdown. Supports web pages, PDFs, Word docs, GitHub URLs, ZIP archives, YouTube transcripts, and Twitter/X threads. Optionally translates the result.
 ---
 
 # markdown
@@ -76,7 +76,6 @@ ELSE:
 ```bash
 cat $MARKDOWN_FILE | \
 pi -p "Translate to <TARGET_LANG> and write to /tmp/markdown.md; RULE: 1.Preserve full meaning and original order; do not summarize, condense, omit details, or invent facts. 2.Keep common technical terms in English when appropriate; use natural <TARGET_LANG> phrasing." \
-   --model volcengine/doubao-seed-2.0-code
 ```
 
 ## Final Step
