@@ -1,6 +1,6 @@
 ---
 name: architecture
-description: Use this skill when the user says "research [system/topic]" to document an existing codebase, or "draft a design" to design from a plan. Produces a structured Markdown document with Mermaid diagrams.
+description: Use this skill to produce a structured architecture document with Mermaid diagrams and prose in Simplified Chinese. Triggers in two scenarios: (1) Research — user wants to document or analyze an existing codebase or system; (2) Draft — user wants to design a system architecture from a written plan, spec, or requirements. Output is a Markdown file saved to disk.
 ---
 
 # Architecture
