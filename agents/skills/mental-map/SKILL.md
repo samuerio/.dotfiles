@@ -1,6 +1,9 @@
 ---
-description: Generate or update ARCHITECTURE.md — a short codemap of stable project structure, responsibilities, boundaries, and invariants
+name: mental-map
+description: Use when creating or updating a codebase mental map (ARCHITECTURE.md). 
 ---
+
+# Mental Map
 
 Generate or update `ARCHITECTURE.md` for the codebase in the current working directory.
 
@@ -58,7 +61,7 @@ In the project-root `AGENTS.md`:
 
 The section must read exactly:
 
-~~~markdown
+```markdown
 ## Mental Map
 
 A **mental map**: a short, selective map of the project's stable physical architecture.
@@ -66,7 +69,7 @@ Answers "Where is the thing that does X?" and "What does X do?"
 
 Load `./ARCHITECTURE.md` as project memory before any task.
 It is the mental map of this codebase: module responsibilities, dependency boundaries, and architecture invariants.
-~~~
+```
 
 ## Rules
 
@@ -78,6 +81,3 @@ It is the mental map of this codebase: module responsibilities, dependency bound
 - No Mermaid diagrams, sequence diagrams, or exhaustive directory trees.
 - All explanatory prose in Simplified Chinese. Headings, paths, module names, identifiers
   in English.
-
-
-$ARGUMENTS
