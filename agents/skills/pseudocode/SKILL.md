@@ -1,300 +1,160 @@
 ---
 name: pseudocode
-description: pseudocode
+description: "convert specifications, feature requirements, product flows, business rules, workflows, APIs, or algorithms into clear language-agnostic pseudocode. use when the user asks for pseudocode, implementation logic, step-by-step system behavior, feature logic, workflow logic, validation rules, or developer-ready logic before coding."
 ---
 
-# SPARC Pseudocode Agent
+# Pseudocode
 
-You are an algorithm design specialist focused on the Pseudocode phase of the SPARC methodology. Your role is to translate specifications into clear, efficient algorithmic logic.
+Use this skill to translate specifications, feature requirements, workflows, business rules, and algorithms into clear, language-agnostic pseudocode.
 
-## SPARC Pseudocode Phase
+## Core Behavior
 
-The Pseudocode phase bridges specifications and implementation by:
-1. Designing algorithmic solutions
-2. Selecting optimal data structures
-3. Analyzing complexity
-4. Identifying design patterns
-5. Creating implementation roadmap
+When using this skill:
 
-## Pseudocode Standards
+1. Identify the problem, inputs, outputs, constraints, and edge cases.
+2. Choose an appropriate logic structure, such as workflow steps, validation rules, state transitions, helper routines, data structures, or algorithmic patterns when relevant.
+3. Break complex logic into named subroutines.
+4. Use readable pseudocode, not language-specific syntax.
+5. Include error handling and edge cases.
+6. Include complexity analysis when the pseudocode contains non‑trivial data processing, search, iteration, graph logic, caching, or algorithmic decisions.
 
-### 1. Structure and Syntax
+If essential requirements are missing, ask a concise clarifying question. If the ambiguity is minor, state reasonable assumptions and proceed.
 
-```
-ALGORITHM: AuthenticateUser
-INPUT: email (string), password (string)
-OUTPUT: user (User object) or error
+## Output Format
 
+Use this general template for business logic, workflows, validation rules, state machines, and API behavior:
+
+```text
+PSEUDOCODE: Name
+PURPOSE: brief explanation
+INPUT: inputName (type), ...
+OUTPUT: result or side effect
+
+ASSUMPTIONS:
+    - assumption 1
+
+MAIN FLOW:
 BEGIN
-    // Validate inputs
-    IF email is empty OR password is empty THEN
-        RETURN error("Invalid credentials")
-    END IF
-    
-    // Retrieve user from database
-    user ← Database.findUserByEmail(email)
-    
-    IF user is null THEN
-        RETURN error("User not found")
-    END IF
-    
-    // Verify password
-    isValid ← PasswordHasher.verify(password, user.passwordHash)
-    
-    IF NOT isValid THEN
-        // Log failed attempt
-        SecurityLog.logFailedLogin(email)
-        RETURN error("Invalid credentials")
-    END IF
-    
-    // Create session
-    session ← CreateUserSession(user)
-    
-    RETURN {user: user, session: session}
+    step-by-step logic
 END
+
+ERROR HANDLING:
+    - case → behavior
+
+EDGE CASES:
+    - case → behavior
 ```
 
-### 2. Data Structure Selection
+For algorithm‑heavy tasks (search, sort, caching, graph traversal, etc.), also include DATA STRUCTURES and Complexity sections inside the same structure. Example:
 
-```
+```text
+PSEUDOCODE: Name
+INPUT: ...
+OUTPUT: ...
+
+ASSUMPTIONS: ...
 DATA STRUCTURES:
-
-UserCache:
-    Type: LRU Cache with TTL
-    Size: 10,000 entries
-    TTL: 5 minutes
-    Purpose: Reduce database queries for active users
-    
-    Operations:
-        - get(userId): O(1)
-        - set(userId, userData): O(1)
-        - evict(): O(1)
-
-PermissionTree:
-    Type: Trie (Prefix Tree)
-    Purpose: Efficient permission checking
-    
-    Structure:
-        root
-        ├── users
-        │   ├── read
-        │   ├── write
-        │   └── delete
-        └── admin
-            ├── system
-            └── users
-    
-    Operations:
-        - hasPermission(path): O(m) where m = path length
-        - addPermission(path): O(m)
-        - removePermission(path): O(m)
+    ...
+MAIN FLOW:
+BEGIN
+    ...
+END
+Complexity:
+    Time:  O(...)
+    Space: O(...)
 ```
 
-### 3. Algorithm Patterns
+For complex systems, you may further split into:
 
+```text
+OVERVIEW
+MAIN FLOW
+HELPER ROUTINES
+ERROR HANDLING
+EDGE CASES
+COMPLEXITY (optional)
 ```
-PATTERN: Rate Limiting (Token Bucket)
 
-ALGORITHM: CheckRateLimit
-INPUT: userId (string), action (string)
-OUTPUT: allowed (boolean)
+Adapt the template to the task. Omit sections that are not relevant, and add domain‑specific sections when they improve clarity.
 
-CONSTANTS:
-    BUCKET_SIZE = 100
-    REFILL_RATE = 10 per second
+For specific logic types, add sections when useful:
+
+- State machines: STATES, EVENTS, TRANSITIONS
+- API behavior: REQUEST, RESPONSE, VALIDATION, SIDE EFFECTS
+- Workflows: ACTORS, TRIGGERS, STEPS, APPROVALS
+- Business rules: RULES, EXCEPTIONS, PRIORITY ORDER
+- Validation logic: FIELDS, RULES, ERROR MESSAGES
+
+## Pseudocode Style
+
+Use:
+
+```text
+IF / ELSE / END IF
+FOR EACH / END FOR
+WHILE / END WHILE
+RETURN
+CALL FunctionName(...)
+value ← expression
+```
+
+Avoid:
+
+- Language-specific syntax such as Python, JavaScript, Java, or SQL unless the user explicitly asks.
+- Overly abstract descriptions that cannot be implemented.
+- Hidden assumptions without naming them.
+
+## Logic Design Guidance
+
+When useful, apply common logic, workflow, data structure, or algorithmic patterns such as:
+
+- Hash map lookup for fast membership or grouping
+- Queue or priority queue for scheduling, BFS, or ordering
+- Stack for parsing, backtracking, or DFS
+- Set for deduplication
+- Trie for prefix search
+- Sliding window for contiguous sequence problems
+- Binary search for monotonic decision problems
+- Dynamic programming for overlapping subproblems
+- Graph traversal for dependency or relationship problems
+- Token bucket or leaky bucket for rate limiting
+- Strategy pattern when behavior must be interchangeable
+
+Explain why a chosen structure or pattern fits the specification.
+
+## Example
+
+The following is an algorithm‑oriented example. For business logic or workflows, use the general template from the Output Format section.
+
+```text
+PSEUDOCODE: AuthenticateUser
+INPUT: email (string), password (string)
+OUTPUT: session (Session) or error
 
 BEGIN
-    bucket ← RateLimitBuckets.get(userId + action)
-    
-    IF bucket is null THEN
-        bucket ← CreateNewBucket(BUCKET_SIZE)
-        RateLimitBuckets.set(userId + action, bucket)
+    IF email is empty OR password is empty THEN
+        RETURN error("missing credentials")
     END IF
-    
-    // Refill tokens based on time elapsed
-    currentTime ← GetCurrentTime()
-    elapsed ← currentTime - bucket.lastRefill
-    tokensToAdd ← elapsed * REFILL_RATE
-    
-    bucket.tokens ← MIN(bucket.tokens + tokensToAdd, BUCKET_SIZE)
-    bucket.lastRefill ← currentTime
-    
-    // Check if request allowed
-    IF bucket.tokens >= 1 THEN
-        bucket.tokens ← bucket.tokens - 1
-        RETURN true
-    ELSE
-        RETURN false
+
+    user ← UserStore.findByEmail(email)
+
+    IF user is null THEN
+        SecurityLog.recordFailedLogin(email)
+        RETURN error("invalid credentials")
     END IF
-END
-```
 
-### 4. Complex Algorithm Design
+    IF NOT PasswordHasher.verify(password, user.passwordHash) THEN
+        SecurityLog.recordFailedLogin(email)
+        RETURN error("invalid credentials")
+    END IF
 
-```
-ALGORITHM: OptimizedSearch
-INPUT: query (string), filters (object), limit (integer)
-OUTPUT: results (array of items)
+    session ← CreateSession(user.id)
+    SecurityLog.recordSuccessfulLogin(user.id)
 
-SUBROUTINES:
-    BuildSearchIndex()
-    ScoreResult(item, query)
-    ApplyFilters(items, filters)
-
-BEGIN
-    // Phase 1: Query preprocessing
-    normalizedQuery ← NormalizeText(query)
-    queryTokens ← Tokenize(normalizedQuery)
-    
-    // Phase 2: Index lookup
-    candidates ← SET()
-    FOR EACH token IN queryTokens DO
-        matches ← SearchIndex.get(token)
-        candidates ← candidates UNION matches
-    END FOR
-    
-    // Phase 3: Scoring and ranking
-    scoredResults ← []
-    FOR EACH item IN candidates DO
-        IF PassesPrefilter(item, filters) THEN
-            score ← ScoreResult(item, queryTokens)
-            scoredResults.append({item: item, score: score})
-        END IF
-    END FOR
-    
-    // Phase 4: Sort and filter
-    scoredResults.sortByDescending(score)
-    finalResults ← ApplyFilters(scoredResults, filters)
-    
-    // Phase 5: Pagination
-    RETURN finalResults.slice(0, limit)
+    RETURN session
 END
 
-SUBROUTINE: ScoreResult
-INPUT: item, queryTokens
-OUTPUT: score (float)
-
-BEGIN
-    score ← 0
-    
-    // Title match (highest weight)
-    titleMatches ← CountTokenMatches(item.title, queryTokens)
-    score ← score + (titleMatches * 10)
-    
-    // Description match (medium weight)
-    descMatches ← CountTokenMatches(item.description, queryTokens)
-    score ← score + (descMatches * 5)
-    
-    // Tag match (lower weight)
-    tagMatches ← CountTokenMatches(item.tags, queryTokens)
-    score ← score + (tagMatches * 2)
-    
-    // Boost by recency
-    daysSinceUpdate ← (CurrentDate - item.updatedAt).days
-    recencyBoost ← 1 / (1 + daysSinceUpdate * 0.1)
-    score ← score * recencyBoost
-    
-    RETURN score
-END
+Complexity:
+    Time:  O(log n), assuming indexed user lookup
+    Space: O(1)
 ```
-
-### 5. Complexity Analysis
-
-```
-ANALYSIS: User Authentication Flow
-
-Time Complexity:
-    - Email validation: O(1)
-    - Database lookup: O(log n) with index
-    - Password verification: O(1) - fixed bcrypt rounds
-    - Session creation: O(1)
-    - Total: O(log n)
-
-Space Complexity:
-    - Input storage: O(1)
-    - User object: O(1)
-    - Session data: O(1)
-    - Total: O(1)
-
-ANALYSIS: Search Algorithm
-
-Time Complexity:
-    - Query preprocessing: O(m) where m = query length
-    - Index lookup: O(k * log n) where k = token count
-    - Scoring: O(p) where p = candidate count
-    - Sorting: O(p log p)
-    - Filtering: O(p)
-    - Total: O(p log p) dominated by sorting
-
-Space Complexity:
-    - Token storage: O(k)
-    - Candidate set: O(p)
-    - Scored results: O(p)
-    - Total: O(p)
-
-Optimization Notes:
-    - Use inverted index for O(1) token lookup
-    - Implement early termination for large result sets
-    - Consider approximate algorithms for >10k results
-```
-
-## Design Patterns in Pseudocode
-
-### 1. Strategy Pattern
-```
-INTERFACE: AuthenticationStrategy
-    authenticate(credentials): User or Error
-
-CLASS: EmailPasswordStrategy IMPLEMENTS AuthenticationStrategy
-    authenticate(credentials):
-        // Email$password logic
-        
-CLASS: OAuthStrategy IMPLEMENTS AuthenticationStrategy
-    authenticate(credentials):
-        // OAuth logic
-        
-CLASS: AuthenticationContext
-    strategy: AuthenticationStrategy
-    
-    executeAuthentication(credentials):
-        RETURN strategy.authenticate(credentials)
-```
-
-### 2. Observer Pattern
-```
-CLASS: EventEmitter
-    listeners: Map<eventName, List<callback>>
-    
-    on(eventName, callback):
-        IF NOT listeners.has(eventName) THEN
-            listeners.set(eventName, [])
-        END IF
-        listeners.get(eventName).append(callback)
-    
-    emit(eventName, data):
-        IF listeners.has(eventName) THEN
-            FOR EACH callback IN listeners.get(eventName) DO
-                callback(data)
-            END FOR
-        END IF
-```
-
-## Pseudocode Best Practices
-
-1. **Language Agnostic**: Don't use language-specific syntax
-2. **Clear Logic**: Focus on algorithm flow, not implementation details
-3. **Handle Edge Cases**: Include error handling in pseudocode
-4. **Document Complexity**: Always analyze time$space complexity
-5. **Use Meaningful Names**: Variable names should explain purpose
-6. **Modular Design**: Break complex algorithms into subroutines
-
-## Deliverables
-
-1. **Algorithm Documentation**: Complete pseudocode for all major functions
-2. **Data Structure Definitions**: Clear specifications for all data structures
-3. **Complexity Analysis**: Time and space complexity for each algorithm
-4. **Pattern Identification**: Design patterns to be used
-5. **Optimization Notes**: Potential performance improvements
-
-Remember: Good pseudocode is the blueprint for efficient implementation. It should be clear enough that any developer can implement it in any language.
-
