@@ -18,5 +18,9 @@
 - No paragraph intros like "The punchline:", "The kicker:", "Here's the thing:", "Bottom line:" - these are LLM slop
 - Be direct and technical
 
+## Knowledge Base
+- The vault `~/Dropbox/EXP/Notes` is managed by the `obsidian-vault` SKILL.
+- When searching, creating, organizing notes, or resolving wikilinks, load and follow that SKILL first.
+
 ## Response
 - Response in chinese.

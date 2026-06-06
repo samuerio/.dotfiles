@@ -5,12 +5,6 @@ description: Search, create, and manage notes in the Obsidian vault with wikilin
 
 # Obsidian Vault
 
-## Vault location
-
-`/home/zhe/Dropbox/EXP/`
-
-Notes are under `Notes/` subdirectory.
-
 ## Naming conventions
 
 - **Index notes**: aggregate related topics (e.g., `Ralph Wiggum Index.md`, `Skills Index.md`, `RAG Index.md`)
@@ -29,10 +23,10 @@ Notes are under `Notes/` subdirectory.
 
 ```bash
 # Search by filename
-find "/home/zhe/Dropbox/EXP/" -name "*.md" | grep -i "keyword"
+find "$VAULT" -name "*.md" | grep -i "keyword"
 
 # Search by content
-grep -rl "keyword" "/home/zhe/Dropbox/EXP/" --include="*.md"
+grep -rl "keyword" "$VAULT" --include="*.md"
 ```
 
 ### Create a new note
@@ -47,11 +41,11 @@ grep -rl "keyword" "/home/zhe/Dropbox/EXP/" --include="*.md"
 Search for `[[Note Title]]` across the vault to find backlinks:
 
 ```bash
-grep -rl "\\[\\[Note Title\\]\\]" "/home/zhe/Dropbox/EXP/"
+grep -rl "\\[\\[Note Title\\]\\]" "$VAULT"
 ```
 
 ### Find index notes
 
 ```bash
-find "/home/zhe/Dropbox/EXP/" -name "*Index*"
+find "$VAULT" -name "*Index*"
 ```

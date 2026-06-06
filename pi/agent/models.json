@@ -1,5 +1,26 @@
 {
     "providers": {
+        "aliyun": {
+            "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "api": "openai-completions",
+            "apiKey": "ALIYUN_API_KEY",
+            "models": [
+                {
+                    "id": "qwen3.7-max-2026-05-17",
+                    "name": "qwen3.7-max-2026-05-17",
+                    "reasoning": false,
+                    "input": ["text", "image"],
+                    "contextWindow": 256000,
+                    "maxTokens": 32000,
+                    "cost": {
+                        "input": 1.25,
+                        "output": 3.75,
+                        "cacheRead": 0.25,
+                        "cacheWrite": 1.563
+                    }
+                }
+            ]
+        },
         "volcengine": {
             "baseUrl": "https://ark.cn-beijing.volces.com/api/coding/v3",
             "api": "openai-completions",
@@ -153,17 +174,17 @@
             "apiKey": "OPEN_ROUTER_API_KEY",
             "models": [
                 {
-                    "id": "qwen/qwen3.5-122b-a10b",
-                    "name": "qwen/qwen3.5-122b-a10b",
+                    "id": "qwen/qwen3.7-max",
+                    "name": "qwen/qwen3.7-max",
                     "reasoning": true,
                     "input": ["text", "image"],
                     "contextWindow": 256000,
                     "maxTokens": 32000,
                     "cost": {
-                        "input": 0.26,
-                        "output": 2.08,
-                        "cacheRead": 0,
-                        "cacheWrite": 0
+                        "input": 1.25,
+                        "output": 3.75,
+                        "cacheRead": 0.25,
+                        "cacheWrite": 1.563
                     }
                 },
                 {
