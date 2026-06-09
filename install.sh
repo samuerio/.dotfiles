@@ -176,6 +176,8 @@ install_ai_agents() {
     link_dotfile "agents" "${HOME}/.agents"
     link_dotfile ".aider.conf.yml" "${HOME}/.aider.conf.yml"
 
+    link_dotfile "pi/agent/AGENTS.md" "${HOME}/.qoder/AGENTS.md"
+
     local dropbox_settings="${HOME}/Dropbox/Conf/pi-coding-agent/settings.json"
     local agent_settings="${HOME}/.pi/agent/settings.json"
 

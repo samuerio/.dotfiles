@@ -9,12 +9,15 @@ Use this skill when the user invokes `/explain <topic>`, uses `<topic> /explain`
 
 ## Input handling
 
-- Expected forms: `/explain <topic>` or `<topic> /explain`.
-- Optional mode hints are only supported after `/explain`, for example `/explain 13y transformer`, `/explain ascii implement raft`, or `/explain database index shape`.
-- In `<topic> /explain` form, treat the text before `/explain` as the topic. Do not parse mode hints from it.
-- If the topic is missing or too vague, ask one concise clarification question.
-- Infer the most appropriate mode from the input. Default to **what** if no strong signal.
-- If multiple modes are requested or strongly implied, combine them in one answer.
+Supported forms:
+- `/explain <mode> [topic]` — mode is required and comes first; topic is optional.
+- `<topic> /explain <mode>` — topic comes before the command; mode follows it.
+
+Parsing rules:
+- **mode**: Required in both forms. One or more mode keywords (see Modes below). If no valid mode keyword is found, ask the user which mode they want.
+- **topic**: Optional. If absent, infer it from recent conversation context. If context is also unclear, ask one concise clarification question — do not proceed with a guess.
+- In the `<topic> /explain <mode>` form, everything before `/explain` is the topic; do not parse mode hints from that part.
+- If multiple modes are given, combine them naturally in one answer rather than answering each mode separately.
 
 ## Modes
 

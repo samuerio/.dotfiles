@@ -18,8 +18,8 @@
       "thinkingLevel": "xhigh"
     },
     "deep": {
-      "provider": "openrouter",
-      "modelId": "qwen/qwen3.7-max",
+      "provider": "openai-codex",
+      "modelId": "gpt-5.5",
       "thinkingLevel": "medium"
     }
   }
