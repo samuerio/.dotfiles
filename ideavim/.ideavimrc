@@ -85,6 +85,10 @@ nnoremap 'i gi
 nnoremap <C-n> :nohlsearch<CR>
 nmap 'l <Action>(JumpToLastChange)
 
+"copy path
+nmap cP <Action>(CopyAbsolutePath)
+"IDEA没有拷贝相对路径的ACTION
+
 "leader
 nmap <leader>o <Action>(FileStructurePopup)
 nmap <leader>F <Action>(ReformatCode)
