@@ -8,13 +8,13 @@
       "thinkingLevel": "medium"
     },
     "rush": {
-      "provider": "deepseek",
+      "provider": "volcengine",
       "modelId": "deepseek-v4-flash",
       "thinkingLevel": "xhigh"
     },
     "smart": {
-      "provider": "deepseek",
-      "modelId": "deepseek-v4-pro",
+      "provider": "volcengine",
+      "modelId": "kimi-k2.6",
       "thinkingLevel": "xhigh"
     },
     "deep": {
