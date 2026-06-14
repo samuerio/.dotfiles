@@ -28,9 +28,9 @@ user=$KB_USER password=$KB_PWD host=$KB_HOST port=$KB_PORT dbname=$KB_DBNAME
 Preferred helper:
 
 ```sh
-agents/skills/ksql-cli/scripts/ksql-run.sh "\\d+t"
-agents/skills/ksql-cli/scripts/ksql-run.sh "\\d+ schema.table_name"
-agents/skills/ksql-cli/scripts/ksql-run.sh "SELECT * FROM schema.table_name LIMIT 10;"
+scripts/ksql-run.sh "\\d+t"
+scripts/ksql-run.sh "\\d+ schema.table_name"
+scripts/ksql-run.sh "SELECT * FROM schema.table_name LIMIT 10;"
 ```
 
 Direct command form:
@@ -48,25 +48,25 @@ ksql "$DATABASE_PARAM" -P pager=off -Aq -c "\\d+t"
 ### Inspect all schemas or tables
 
 ```sh
-agents/skills/ksql-cli/scripts/ksql-run.sh "\\d+t"
+scripts/ksql-run.sh "\\d+t"
 ```
 
 ### Inspect one table schema
 
 ```sh
-agents/skills/ksql-cli/scripts/ksql-run.sh "\\d+ <table>"
+scripts/ksql-run.sh "\\d+ <table>"
 ```
 
 Use a schema-qualified table name when available:
 
 ```sh
-agents/skills/ksql-cli/scripts/ksql-run.sh "\\d+ public.my_table"
+scripts/ksql-run.sh "\\d+ public.my_table"
 ```
 
 ### Execute SQL
 
 ```sh
-agents/skills/ksql-cli/scripts/ksql-run.sh "SELECT * FROM <table> LIMIT 100;"
+scripts/ksql-run.sh "SELECT * FROM <table> LIMIT 100;"
 ```
 
 For exploratory `SELECT` queries, add `LIMIT 100` by default unless the user requests a different limit, the query is an aggregate/count query, or adding `LIMIT` would change the intended result.
@@ -74,7 +74,7 @@ For exploratory `SELECT` queries, add `LIMIT 100` by default unless the user req
 For updates or destructive operations, confirm intent with the user unless they explicitly asked to execute the exact mutation.
 
 ```sh
-agents/skills/ksql-cli/scripts/ksql-run.sh "UPDATE <table> SET <column> = <value> WHERE <condition>;"
+scripts/ksql-run.sh "UPDATE <table> SET <column> = <value> WHERE <condition>;"
 ```
 
 ## Safety checklist

@@ -17,13 +17,13 @@ e2e sync   # 后端变更后重新同步
 
 | 命令 | 说明 |
 |------|------|
-| `e2e list [--tag X] [--method GET]` | 列出可用接口 |
+| `e2e list [filter] [--tag X] [--method GET] [--path /api/x]` | 列出可用接口，支持 keyword/tag/method/path 过滤 |
 | `e2e describe <operationId>` | 查看接口详情 |
 | `e2e call <operationId> [--path '{}'] [--query '{}'] [--body '{}']` | 调用接口 |
 | `e2e run <flow.yml>` | 执行 YAML 流程 |
 | `e2e doctor` | 检查配置和连通性 |
 
-所有输出为 `{ "ok": true, "data": ... }` 或 `{ "ok": false, "error": ... }`。
+所有输出为 `{ "ok": true, "data": ... }` 或 `{ "ok": false, "error": ... }`
 
 ## Flow YAML
 
