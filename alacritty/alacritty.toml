@@ -17,6 +17,9 @@
 
 [window]
   dimensions = {columns = 110 , lines = 25}
+  padding = { x = 0, y = 0 }
+  dynamic_padding = false
+  resize_increments = true
 
 [keyboard]
 bindings = [

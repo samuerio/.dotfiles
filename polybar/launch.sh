@@ -2,6 +2,7 @@
 
 # Terminate already running bar instances
 killall -q polybar
+sleep 0.5
 # If all your bars have ipc enabled, you can also use
 # polybar-msg cmd quit
 
