@@ -236,6 +236,9 @@ bindsym $mod+shift+c exec xset s on && xset +dpms && notify-send "disable caffin
 #libinput toggle tapping
 bindsym $mod+t exec  sh ~/.config/i3/toggle_tapping.sh && notify-send "toggle tapping"
 
+# polybar tray toggle
+bindsym $mod+Shift+t exec --no-startup-id ~/.config/polybar/scripts/toggle-polybar-tray
+
 # Suspend
 bindsym $mod+Shift+period exec systemctl suspend
 
