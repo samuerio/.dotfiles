@@ -14,7 +14,7 @@
     },
     "smart": {
       "provider": "volcengine",
-      "modelId": "kimi-k2.6",
+      "modelId": "glm-5.1",
       "thinkingLevel": "xhigh"
     },
     "deep": {
