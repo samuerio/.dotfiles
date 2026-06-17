@@ -5,13 +5,13 @@ description: Reads image contents by delegating vision analysis to pi coding age
 
 # read-image
 
-Use `scripts/read-image.sh` to inspect one or more images via `pi` CLI with OpenRouter `qwen/qwen3.6-flash`.
+Run the following command directly to inspect one or more images via `pi` CLI:
 
 ```sh
-scripts/read-image.sh <image-path> [image-path...] [prompt...]
+pi --no-session -p "/rewrite-image <image-path> [image-path...]"
 ```
 
 ## Notes
 
-- Images: pass one or more paths as consecutive arguments before the prompt (script has a default prompt).
-- On error: report it as-is and ask the user to fix the path, model name, or provider configuration.
+- Images: pass one or more paths as arguments after `/rewrite-image`.
+- On error: report it as-is.
