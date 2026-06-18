@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: $0 open <branch> | list | clean [--force]" >&2
+  echo "usage: $0 open <branch> | list | clean <branch> [--force]" >&2
 }
 
 command="${1:-}"
@@ -33,12 +33,14 @@ case "$command" in
     branch="$1"
     ;;
   clean)
-    if [ "$#" -gt 1 ]; then
+    if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
+      echo "error: branch is required for 'clean'" >&2
       usage
       exit 2
     fi
 
-    force="${1:-}"
+    branch="$1"
+    force="${2:-}"
     if [ -n "$force" ] && [ "$force" != "--force" ]; then
       echo "error: only optional flag is --force" >&2
       usage
@@ -57,73 +59,18 @@ if [ -z "$repo_root" ]; then
   exit 2
 fi
 
-if [ "$command" = "open" ] && ! command -v tmux >/dev/null 2>&1; then
-  echo "error: tmux is required for 'open'" >&2
+git_common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+if [ -z "$git_common_dir" ]; then
+  echo "error: unable to resolve git common dir" >&2
   exit 2
 fi
 
-if [ "$command" = "clean" ]; then
-  git_common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
-  if [ -z "$git_common_dir" ]; then
-    echo "error: unable to resolve git common dir" >&2
-    exit 2
-  fi
-
-  repo_main="$(dirname "$git_common_dir")"
-  agent_root="$repo_main/.worktree"
-  workspace_path="$repo_root"
-
-  case "$repo_root/" in
-    "$agent_root"/*)
-      ;;
-    *)
-      echo "error: not an agent workspace" >&2
-      exit 1
-      ;;
-  esac
-
-  if [ "$force" = "--force" ]; then
-    git -C "$repo_main" worktree remove --force -- "$workspace_path"
-  else
-    git -C "$repo_main" worktree remove -- "$workspace_path"
-  fi
-
-  echo "success: worktree removed"
-  printf 'workspace_path=%s\n' "$workspace_path"
-
-  leftovers=()
-  if [ -d "$workspace_path" ]; then
-    shopt -s dotglob nullglob
-    leftovers=( "$workspace_path"/* )
-    shopt -u dotglob nullglob
-  fi
-
-  leftover_count="${#leftovers[@]}"
-  printf 'workspace_leftover_count=%s\n' "$leftover_count"
-
-  if [ "$leftover_count" -gt 0 ]; then
-    max_items=200
-    print_count="$leftover_count"
-    if [ "$leftover_count" -gt "$max_items" ]; then
-      print_count="$max_items"
-    fi
-
-    i=0
-    while [ "$i" -lt "$print_count" ]; do
-      path="${leftovers[$i]}"
-      rel_path="${path#$workspace_path/}"
-      printf 'workspace_leftover=%s\n' "$rel_path"
-      i=$((i + 1))
-    done
-
-    if [ "$leftover_count" -gt "$max_items" ]; then
-      printf 'workspace_leftover_truncated=%s\n' "$((leftover_count - max_items))"
-    fi
-
-    echo "action_required=ask_user_cleanup_leftovers"
-  fi
-
-  exit 0
+repo_main="$(dirname "$git_common_dir")"
+if [ "$repo_root" != "$repo_main" ]; then
+  echo "error: workspace.sh must be run from the main worktree" >&2
+  printf 'main worktree: %s\n' "$repo_main" >&2
+  printf 'current:       %s\n' "$repo_root" >&2
+  exit 2
 fi
 
 AGENT_BRANCHES=()
@@ -137,7 +84,7 @@ append_agent_workspace() {
   [ -n "$path" ] || return 0
 
   case "$path" in
-    "$repo_root/.worktree/"*) ;;
+    "$repo_main/.worktree/"*) ;;
     *) return 0 ;;
   esac
 
@@ -175,7 +122,7 @@ collect_agent_workspaces() {
       path=""
       branch_ref=""
     fi
-  done < <(git -C "$repo_root" worktree list --porcelain)
+  done < <(git -C "$repo_main" worktree list --porcelain)
 
   append_agent_workspace "$path" "$branch_ref"
 }
@@ -183,13 +130,20 @@ collect_agent_workspaces() {
 print_agent_workspace_list() {
   local i=0
   local output_index=1
+  local dirty="no"
 
   echo "mode=list"
   printf 'workspace_count=%s\n' "${#AGENT_BRANCHES[@]}"
 
   for i in "${!AGENT_BRANCHES[@]}"; do
+    dirty="no"
+    if [ -n "$(git -C "${AGENT_PATHS[$i]}" status --porcelain 2>/dev/null || true)" ]; then
+      dirty="yes"
+    fi
+
     printf 'workspace_%s_branch=%s\n' "$output_index" "${AGENT_BRANCHES[$i]}"
     printf 'workspace_%s_path=%s\n' "$output_index" "${AGENT_PATHS[$i]}"
+    printf 'workspace_%s_dirty=%s\n' "$output_index" "$dirty"
     output_index=$((output_index + 1))
   done
 }
@@ -216,8 +170,7 @@ if [ "$command" = "list" ]; then
 fi
 
 branch_tail="${branch##*/}"
-worktree_path="$repo_root/.worktree/$branch_tail"
-window_name="$branch_tail"
+worktree_path="$repo_main/.worktree/$branch_tail"
 
 existing_branch="$(branch_for_workspace_path "$worktree_path" || true)"
 if [ -n "$existing_branch" ] && [ "$existing_branch" != "$branch" ]; then
@@ -226,11 +179,56 @@ if [ -n "$existing_branch" ] && [ "$existing_branch" != "$branch" ]; then
   exit 1
 fi
 
-gitignore="$repo_root/.gitignore"
+if [ "$command" = "clean" ]; then
+  if [ "$force" = "--force" ]; then
+    git -C "$repo_main" worktree remove --force -- "$worktree_path"
+  else
+    git -C "$repo_main" worktree remove -- "$worktree_path"
+  fi
+
+  echo "success: worktree removed"
+  printf 'workspace_path=%s\n' "$worktree_path"
+
+  leftovers=()
+  if [ -d "$worktree_path" ]; then
+    shopt -s dotglob nullglob
+    leftovers=( "$worktree_path"/* )
+    shopt -u dotglob nullglob
+  fi
+
+  leftover_count="${#leftovers[@]}"
+  printf 'workspace_leftover_count=%s\n' "$leftover_count"
+
+  if [ "$leftover_count" -gt 0 ]; then
+    max_items=200
+    print_count="$leftover_count"
+    if [ "$leftover_count" -gt "$max_items" ]; then
+      print_count="$max_items"
+    fi
+
+    i=0
+    while [ "$i" -lt "$print_count" ]; do
+      path="${leftovers[$i]}"
+      rel_path="${path#$worktree_path/}"
+      printf 'workspace_leftover=%s\n' "$rel_path"
+      i=$((i + 1))
+    done
+
+    if [ "$leftover_count" -gt "$max_items" ]; then
+      printf 'workspace_leftover_truncated=%s\n' "$((leftover_count - max_items))"
+    fi
+
+    echo "action_required=ask_user_cleanup_leftovers"
+  fi
+
+  exit 0
+fi
+
+gitignore="$repo_main/.gitignore"
 if ! grep -q '^/\.worktree/$' "$gitignore" 2>/dev/null; then
   echo '/.worktree/' >> "$gitignore"
-  git -C "$repo_root" add "$gitignore"
-  git -C "$repo_root" commit -m "chore(gitignore): add .worktree directory to ignores" "$gitignore"
+  git -C "$repo_main" add "$gitignore"
+  git -C "$repo_main" commit -m "chore(gitignore): add .worktree directory to ignores" "$gitignore" >&2
 fi
 
 mkdir -p "$(dirname "$worktree_path")"
@@ -243,46 +241,23 @@ elif [ -d "$worktree_path/.git" ] || [ -f "$worktree_path/.git" ]; then
   exit 1
 fi
 
-if [ "$needs_new_worktree" = "yes" ] && [ -n "$(git -C "$repo_root" status --porcelain)" ]; then
+if [ "$needs_new_worktree" = "yes" ] && [ -n "$(git -C "$repo_main" status --porcelain)" ]; then
   echo "error: current workspace has uncommitted changes" >&2
   echo "please commit or stash your changes before creating a new agent workspace" >&2
   exit 1
 fi
 
 created="no"
-if git -C "$repo_root" show-ref --verify --quiet "refs/heads/$branch"; then
+if git -C "$repo_main" show-ref --verify --quiet "refs/heads/$branch"; then
   if [ "$needs_new_worktree" = "yes" ]; then
-    git -C "$repo_root" worktree add "$worktree_path" "$branch"
+    git -C "$repo_main" worktree add "$worktree_path" "$branch" >&2
     created="yes"
   fi
 else
-  git -C "$repo_root" worktree add -b "$branch" "$worktree_path"
+  git -C "$repo_main" worktree add -b "$branch" "$worktree_path" >&2
   created="yes"
 fi
-
-target_session="agent-workspace"
-
-if tmux has-session -t "$target_session" 2>/dev/null; then
-  window_id="$(tmux new-window -P -F '#{window_id}' -t "$target_session" -n "$window_name" -c "$worktree_path")"
-else
-  window_id="$(tmux new-session -d -P -F '#{window_id}' -s "$target_session" -n "$window_name" -c "$worktree_path")"
-fi
-target_window="$window_id"
-left_pane="$(tmux display-message -p -t "$target_window" '#{pane_id}')"
-right_pane="$(tmux split-window -h -P -F '#{pane_id}' -t "$target_window" -c "$worktree_path")"
-tmux select-layout -t "$target_window" even-horizontal >/dev/null
-tmux send-keys -t "$left_pane" 'nvim' C-m
-tmux send-keys -t "$right_pane" 'pi' C-m
 
 printf 'branch=%s\n' "$branch"
 printf 'worktree_path=%s\n' "$worktree_path"
 printf 'worktree_created=%s\n' "$created"
-
-if [ -n "${TMUX:-}" ]; then
-  tmux switch-client -t "$target_session"
-  tmux select-window -t "$target_session:$target_window"
-fi
-
-if [ "$target_session" = "agent-workspace" ] && [ -z "${TMUX:-}" ]; then
-  echo "attach=tmux attach -t $target_session:$target_window"
-fi

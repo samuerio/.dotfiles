@@ -1,21 +1,94 @@
 ---
 name: workspace
-description: "Create, list, or clean a branch-scoped git worktree + tmux workspace."
+description: "Manage git worktree + tmux workspaces. Triggered by /ws, /ws open, /ws list, /ws close, /ws run, /ws status."
 ---
 
-Create, inspect, or remove an isolated branch workspace with `git worktree` and `tmux`.
+Manage branch-scoped workspaces with `git worktree` plus tmux.
 
-## Usage
+`workspace.sh` owns the git worktree lifecycle. tmux operations must follow the tmux SKILL. `<branch>` always means the complete branch name and must be matched exactly.
+
+## workspace.sh Usage
 
 ```bash
-bash workspace.sh open "<branch>"
+bash workspace.sh open <branch>
 bash workspace.sh list
-bash workspace.sh clean [--force]
+bash workspace.sh clean <branch> [--force]
 ```
 
 ## Rules
 
-- `clean` only works when run inside an agent worktree under `<repo>/.worktree/*`
-- `open` may update `.gitignore`, create commits, and create tmux session `agent-workspace`
-- `clean` removes the current worktree via `git worktree remove`
-- For `clean`, do not infer, suggest, or use `--force` without an explicit user request. If non-force `clean` fails, report the error/output and stop. Do not retry or run extra cleanup (`rm -rf`, `git worktree prune`, etc.) without a user request.
+- Run all `workspace.sh` commands from the main worktree. Do not implicitly `cd` to the main worktree and retry.
+- `open` may update `.gitignore` and create commits.
+- `clean <branch>` removes the branch workspace via `git worktree remove`.
+- For `clean`, do not infer or use `--force` without explicit user request. If non-force `clean` fails, report the error and stop. Do not retry or run extra cleanup (`rm -rf`, `git worktree prune`, etc.) without user request.
+- Do not expose implementation-derived workspace directory names to the user. Use full `<branch>` in the user interface.
+
+## /ws trigger
+
+`/ws` is the only entry point. Subcommands operate on a specific `<branch>` (full branch name, strict match, no fuzzy lookup).
+
+tmux conventions (per the tmux SKILL):
+
+- `SOCKET=${TMPDIR:-/tmp}/claude-tmux-sockets/claude.sock`
+- session name equals `<branch>`
+- target pane: discover via `tmux -S "$SOCKET" list-panes -t <branch> -F '#{session_name}:#{window_index}.#{pane_index}'`, pick the first pane
+
+### /ws (no args)
+
+Run `/ws list`.
+
+### /ws open <branch>
+
+1. Run `bash workspace.sh open <branch>`. Read `branch`, `worktree_path`, and `worktree_created` from stdout.
+2. Ensure a tmux session named `<branch>` with cwd `<worktree_path>`:
+   - If `tmux -S "$SOCKET" has-session -t "<branch>"` succeeds, switch or attach.
+   - Otherwise, run `tmux -S "$SOCKET" new-session -d -s "<branch>" -c "<worktree_path>"`.
+3. Do not create duplicate sessions.
+4. When a session is started, print the monitor command from the tmux SKILL.
+
+### /ws list
+
+1. Run `bash workspace.sh list`. Parse `workspace_N_branch`, `workspace_N_path`, and `workspace_N_dirty`.
+2. Run `tmux -S "$SOCKET" list-sessions -F '#{session_name}'`. Treat missing socket or no sessions as an empty list.
+3. Merge by `branch == session name` into the active / idle / orphan state machine.
+4. Present the merged view to the user, including dirty status.
+
+### /ws close <branch>
+
+1. Pre-check: read `dirty` for `<branch>` from `bash workspace.sh list`. If the workspace is missing, report an error and stop. If `dirty=yes`, ask the user to confirm before proceeding. Abort on no or unclear answer.
+2. Run `bash workspace.sh clean <branch>` without `--force`. On git failure, surface the error and stop. Do not pass `--force` without explicit user confirmation.
+3. Only after the script succeeds: if session `<branch>` exists, run `tmux -S "$SOCKET" kill-session -t "<branch>"`. Skip if it does not exist.
+4. If `kill-session` fails after a successful clean, the session becomes orphan. Surface this to the user and do not auto-resolve.
+
+### /ws run <branch> <task>
+
+1. Strict mode (require active): verify the branch appears in `workspace.sh list` and session `<branch>` exists. If either is missing, error: `workspace <branch> is not active; run /ws open <branch> first.` Do not auto-open.
+2. Discover the target pane via `list-panes` and pick the first pane.
+3. Translate `<task>` (natural language) into a concrete shell command.
+4. Send via tmux SKILL conventions: `send-keys -t <pane> -l -- "<cmd>"`, then `send-keys -t <pane> Enter`.
+5. Wait for completion by polling a prompt or known marker per tmux SKILL, then run `capture-pane -p -J -t <pane> -S -200` and report the output.
+
+### /ws status <branch>
+
+1. Strict mode (require active): verify the branch appears in `workspace.sh list` and session `<branch>` exists. Error if either is missing.
+2. Discover the target pane via `list-panes` and pick the first pane.
+3. Run `capture-pane -p -J -t <pane> -S -200`. Do not send any keys. Report the captured text.
+
+Strictness summary:
+
+- `/ws run` and `/ws status` require active (worktree plus session).
+- `/ws close` requires the worktree to exist (active or idle). It kills the session if present and skips otherwise.
+- orphan (worktree missing plus session present) is never auto-handled by any subcommand. The active / idle / orphan view surfaces it for manual cleanup.
+
+## Active / idle / orphan
+
+Join `workspace.sh list` output with `tmux list-sessions` output. Key is `branch == session name`.
+
+- `active`: worktree exists plus session exists.
+- `idle`: worktree exists plus session missing.
+- `orphan`: worktree missing plus session exists. Suggest manual cleanup. This SKILL does not auto-resolve.
+
+`dirty` is orthogonal:
+
+- `idle + dirty` means uncommitted work in an unused workspace. Require explicit user confirmation before `/ws close`.
+- Other combinations are inferred from context.
