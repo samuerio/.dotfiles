@@ -14,7 +14,7 @@
     },
     "smart": {
       "provider": "volcengine",
-      "modelId": "glm-5.1",
+      "modelId": "glm-5.2",
       "thinkingLevel": "xhigh"
     },
     "deep": {

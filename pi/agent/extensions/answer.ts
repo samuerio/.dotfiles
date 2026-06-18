@@ -59,6 +59,7 @@ Rules:
 - Be concise with question text
 - Include context only when it provides essential information for answering
 - If no questions are found, return {"questions": []}
+- Preserve the original language of each question exactly as it appeared in the source text
 
 Example output:
 {
