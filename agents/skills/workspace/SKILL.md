@@ -10,14 +10,14 @@ Manage branch-scoped workspaces with `git worktree` plus tmux.
 ## workspace.sh Usage
 
 ```bash
-bash workspace.sh open <branch>
-bash workspace.sh list
-bash workspace.sh clean <branch> [--force]
+bash {baseDir}/workspace.sh open <branch>
+bash {baseDir}/workspace.sh list
+bash {baseDir}/workspace.sh clean <branch> [--force]
 ```
 
 ## Rules
 
-- Run all `workspace.sh` commands from the main worktree. Do not implicitly `cd` to the main worktree and retry.
+- Run all `{baseDir}/workspace.sh` commands from the main worktree. Do not implicitly `cd` to the main worktree and retry.
 - `open` may update `.gitignore` and create commits.
 - `clean <branch>` removes the branch workspace via `git worktree remove`.
 - For `clean`, do not infer or use `--force` without explicit user request. If non-force `clean` fails, report the error and stop. Do not retry or run extra cleanup (`rm -rf`, `git worktree prune`, etc.) without user request.
@@ -39,30 +39,30 @@ Run `/ws list`.
 
 ### /ws open <branch>
 
-1. Run `bash workspace.sh open <branch>`. Read `branch`, `worktree_path`, and `worktree_created` from stdout.
+1. Run `bash {baseDir}/workspace.sh open <branch>`. Read `branch`, `worktree_path`, and `worktree_created` from stdout.
 2. Ensure a tmux session named `<branch>` with cwd `<worktree_path>`:
    - If `tmux -S "$SOCKET" has-session -t "<branch>"` succeeds, switch or attach.
    - Otherwise, run `tmux -S "$SOCKET" new-session -d -s "<branch>" -c "<worktree_path>"`.
 3. Do not create duplicate sessions.
 4. When a session is started, print the monitor command from the tmux SKILL.
 
-### /ws list
+### /ws list (alias: /ws ls)
 
-1. Run `bash workspace.sh list`. Parse `workspace_N_branch`, `workspace_N_path`, and `workspace_N_dirty`.
+1. Run `bash {baseDir}/workspace.sh list`. Parse `workspace_N_branch`, `workspace_N_path`, and `workspace_N_dirty`.
 2. Run `tmux -S "$SOCKET" list-sessions -F '#{session_name}'`. Treat missing socket or no sessions as an empty list.
 3. Merge by `branch == session name` into the active / idle / orphan state machine.
 4. Present the merged view to the user, including dirty status.
 
 ### /ws close <branch>
 
-1. Pre-check: read `dirty` for `<branch>` from `bash workspace.sh list`. If the workspace is missing, report an error and stop. If `dirty=yes`, ask the user to confirm before proceeding. Abort on no or unclear answer.
-2. Run `bash workspace.sh clean <branch>` without `--force`. On git failure, surface the error and stop. Do not pass `--force` without explicit user confirmation.
+1. Pre-check: read `dirty` for `<branch>` from `bash {baseDir}/workspace.sh list`. If the workspace is missing, report an error and stop. If `dirty=yes`, ask the user to confirm before proceeding. Abort on no or unclear answer.
+2. Run `bash {baseDir}/workspace.sh clean <branch>` without `--force`. On git failure, surface the error and stop. Do not pass `--force` without explicit user confirmation.
 3. Only after the script succeeds: if session `<branch>` exists, run `tmux -S "$SOCKET" kill-session -t "<branch>"`. Skip if it does not exist.
 4. If `kill-session` fails after a successful clean, the session becomes orphan. Surface this to the user and do not auto-resolve.
 
 ### /ws run <branch> <task>
 
-1. Strict mode (require active): verify the branch appears in `workspace.sh list` and session `<branch>` exists. If either is missing, error: `workspace <branch> is not active; run /ws open <branch> first.` Do not auto-open.
+1. Strict mode (require active): verify the branch appears in `{baseDir}/workspace.sh list` and session `<branch>` exists. If either is missing, error: `workspace <branch> is not active; run /ws open <branch> first.` Do not auto-open.
 2. Discover the target pane via `list-panes` and pick the first pane.
 3. Translate `<task>` (natural language) into a concrete shell command.
 4. Send via tmux SKILL conventions: `send-keys -t <pane> -l -- "<cmd>"`, then `send-keys -t <pane> Enter`.
@@ -70,7 +70,7 @@ Run `/ws list`.
 
 ### /ws status <branch>
 
-1. Strict mode (require active): verify the branch appears in `workspace.sh list` and session `<branch>` exists. Error if either is missing.
+1. Strict mode (require active): verify the branch appears in `{baseDir}/workspace.sh list` and session `<branch>` exists. Error if either is missing.
 2. Discover the target pane via `list-panes` and pick the first pane.
 3. Run `capture-pane -p -J -t <pane> -S -200`. Do not send any keys. Report the captured text.
 
@@ -82,7 +82,7 @@ Strictness summary:
 
 ## Active / idle / orphan
 
-Join `workspace.sh list` output with `tmux list-sessions` output. Key is `branch == session name`.
+Join `{baseDir}/workspace.sh list` output with `tmux list-sessions` output. Key is `branch == session name`.
 
 - `active`: worktree exists plus session exists.
 - `idle`: worktree exists plus session missing.
