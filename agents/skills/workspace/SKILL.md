@@ -1,11 +1,18 @@
 ---
 name: workspace
-description: "Manage git worktree + tmux workspaces. Triggered by /ws, /ws open, /ws list, /ws close, /ws run, /ws status."
+description: "Manage agent-workspaces (git worktree + tmux session). Triggered by /ws, /ws open, /ws list, /ws close, /ws run, /ws status."
 ---
 
-Manage branch-scoped workspaces with `git worktree` plus tmux.
+## Concept
 
-`worktree.sh` owns the git worktree lifecycle. tmux operations must follow the tmux SKILL. `<branch>` always means the complete branch name and must be matched exactly.
+An **agent-workspace** is the unit of isolated execution for an agent task. It is composed of two coupled components:
+
+- a **`git worktree`**: a writable, branch-scoped filesystem where the agent edits code without disturbing the main checkout.
+- a **`tmux` session**: an observable, persistent execution environment where the agent runs commands and the user can attach to watch.
+
+The two components share the same `<branch>` as their identity and must be managed together. This skill owns their joint lifecycle.
+
+`worktree.sh` owns the git worktree side. tmux operations must follow the tmux SKILL. `<branch>` always means the complete branch name and must be matched exactly.
 
 ## worktree.sh Usage
 
@@ -15,15 +22,15 @@ bash {baseDir}/worktree.sh list [-q <query>]
 bash {baseDir}/worktree.sh clean <branch> [--force]
 ```
 
-## Rules
+Rules:
 
 - Run all `{baseDir}/worktree.sh` commands from the main worktree. Do not implicitly `cd` to the main worktree and retry.
 - `open` may update `.gitignore` and create commits.
-- `clean <branch>` removes the branch workspace via `git worktree remove`.
+- `clean <branch>` removes only the worktree half of the agent-workspace via `git worktree remove`.
 - For `clean`, do not infer or use `--force` without explicit user request. If non-force `clean` fails, report the error and stop. Do not retry or run extra cleanup (`rm -rf`, `git worktree prune`, etc.) without user request.
-- Do not expose implementation-derived workspace directory names to the user. Use full `<branch>` in the user interface.
+- Do not expose implementation-derived agent-workspace directory names (e.g. paths from `worktree.sh` output) to the user. Use full `<branch>` in the user interface.
 
-## Branch resolution and workspace state
+## Branch resolution and agent-workspace state
 
 After every successful `/ws open <branch>`, export `WS_BRANCH=<branch>` into the current shell by sending:
 
@@ -39,7 +46,7 @@ For branch-scoped commands (`close`, `task`, `run`, `status`), if `<branch>` is 
 no branch specified and WS_BRANCH is not set; run /ws open <branch> first.
 ```
 
-To resolve workspace state for `<branch>`:
+To resolve agent-workspace state for `<branch>`:
 
 1. Worktree:
    ```bash
@@ -87,11 +94,11 @@ Print usage: list available subcommands (`open`, `list`, `close`, `task`, `run`,
 1. Run `bash {baseDir}/worktree.sh list`.
 2. List sessions on the socket using tmux SKILL **Finding sessions** with `--json`. Treat a missing socket or no sessions as an empty list.
 3. Join worktrees and sessions by exact `branch == session_name`.
-4. Present each workspace as `active`, `idle`, or `orphan`, including dirty status.
+4. Present each agent-workspace as `active`, `idle`, or `orphan`, including dirty status.
 
 ### /ws close [<branch>]
 
-1. Resolve workspace state for `<branch>`.
+1. Resolve agent-workspace state for `<branch>`.
 2. If state is `missing`, report an error and stop. If state is `orphan`, suggest manual cleanup and stop.
 3. If `dirty=yes`, ask the user to confirm before proceeding. Abort on no or unclear answer.
 4. Run `bash {baseDir}/worktree.sh clean <branch>` without `--force`. On git failure, surface the error and stop.
@@ -100,7 +107,7 @@ Print usage: list available subcommands (`open`, `list`, `close`, `task`, `run`,
 
 ### /ws task [<branch>] <task> (alias: /ws t)
 
-1. Resolve workspace state for `<branch>` and require `active`. Do not auto-open.
+1. Resolve agent-workspace state for `<branch>` and require `active`. Do not auto-open.
 2. Discover the target pane via `list-panes` and pick the first pane.
 3. Capture the current pane state (tmux SKILL **Watching output**, capture mode).
 4. If `<task>` is still ambiguous or underspecified after observing the pane (e.g. missing a target file, unclear scope, or multiple reasonable interpretations), explore the codebase under the branch's worktree path first to resolve ambiguity. Only ask the user to clarify if the question cannot be answered by exploring the codebase. Do not guess.
@@ -108,7 +115,7 @@ Print usage: list available subcommands (`open`, `list`, `close`, `task`, `run`,
 
 ### /ws run [<branch>] [-p|--poll] [-s|--silent] <cmd> (alias: /ws r)
 
-1. Resolve workspace state for `<branch>` and require `active`. Do not auto-open.
+1. Resolve agent-workspace state for `<branch>` and require `active`. Do not auto-open.
 2. `-p`/`--poll` and `-s`/`--silent` are mutually exclusive; error if both are given.
 3. Discover the target pane via `list-panes` and pick the first pane.
 4. Send `<cmd>` via the tmux SKILL **Sending input safely**.
@@ -116,6 +123,6 @@ Print usage: list available subcommands (`open`, `list`, `close`, `task`, `run`,
 
 ### /ws status [<branch>] (alias: /ws st)
 
-1. Resolve workspace state for `<branch>` and require `active`. Error if not.
+1. Resolve agent-workspace state for `<branch>` and require `active`. Error if not.
 2. Discover the target pane via `list-panes` and pick the first pane.
 3. Capture pane output (tmux SKILL **Watching output**, capture mode; `-S -200`). Do not send any keys. Report the captured text.
