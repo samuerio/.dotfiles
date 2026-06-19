@@ -81,10 +81,6 @@ tmux conventions (per the tmux SKILL):
 
 **Active guard**: name-scoped commands other than `open` and `list` require state `active`; error if not; never auto-open.
 
-### /ws (no args)
-
-Print usage: list available subcommands (`open`, `list`, `close`, `task`, `run`, `status`).
-
 ### /ws open <name> (alias: /ws op)  ← also sets AGENT_WS_NAME
 
 1. Run `bash {baseDir}/worktree.sh open <name>`. Read `branch`, `worktree_path`, and `worktree_created` from stdout.
