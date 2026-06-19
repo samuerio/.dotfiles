@@ -411,19 +411,47 @@ install_mimeapps() {
     install_platform_dotfile "mimeapps" "Linux" "Linux" "mimeapps.list" "${HOME}/.config/mimeapps.list"
 }
 
-install_systemd() {
-    skip_unless_linux "systemd" || return 0
-    section "systemd"
+install_systemd_user() {
+    skip_unless_linux "systemd-user" || return 0
+    section "systemd-user"
+    link_dir_contents "systemd/user" "${HOME}/.config/systemd/user"
+}
 
-    local src_dir="${DOTFILES_ROOT}/systemd"
-    local sys_dir="/etc/systemd/system"
-    local item name
+install_local_bin() {
+    skip_unless_linux "local-bin" || return 0
+    section "local-bin"
+    link_dir_contents "systemd/bin" "${HOME}/.local/bin"
+}
 
-    for item in "${src_dir}"/*; do
-        [[ -e "$item" ]] || continue
-        name="$(basename "$item")"
-        link_system_file "$item" "${sys_dir}/${name}" "Systemd config"
-    done
+user_systemd_available() {
+    [[ "$OS_NAME" == "Linux" ]] || return 1
+    [[ -n "${XDG_RUNTIME_DIR:-}" ]] || return 1
+    [[ -S "${XDG_RUNTIME_DIR}/systemd/private" ]] || return 1
+    command -v systemctl >/dev/null 2>&1 || return 1
+}
+
+install_battery_notify_enable() {
+    skip_unless_linux "battery-notify-enable" || return 0
+    section "battery-notify-enable"
+
+    local unit="battery-notify.service"
+
+    if ! user_systemd_available; then
+        warn "user systemd bus not available, skip enabling ${unit}"
+        warn "After login to graphical session, run:"
+        warn "  systemctl --user daemon-reload"
+        warn "  systemctl --user enable --now ${unit}"
+        return 0
+    fi
+
+    if systemctl --user daemon-reload && \
+       systemctl --user enable --now "$unit"; then
+        info "Enabled and started: ${unit}"
+    else
+        warn "Failed to enable ${unit}, run manually:"
+        warn "  systemctl --user daemon-reload"
+        warn "  systemctl --user enable --now ${unit}"
+    fi
 }
 
 install_environment_d() {
@@ -480,7 +508,9 @@ main() {
         install_dunst
         install_feh
         install_mimeapps
-        install_systemd
+        install_systemd_user
+        install_local_bin
+        install_battery_notify_enable
         install_environment_d
         install_x11
         install_desktop
