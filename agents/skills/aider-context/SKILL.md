@@ -44,14 +44,24 @@ Behavior by exit code:
 
 ### Step 2. Drop existing context
 
-Before gathering, clear aider's current file set. Aider's slash-commands are synchronous and near-instant; do **not** poll for the prompt (that races with the previous idle prompt). Just send, brief sleep, capture:
+Before gathering, clear aider's current file set **and** chat history. Aider's slash-commands are synchronous and near-instant; do **not** poll for the prompt (that races with the previous idle prompt). Just send, brief sleep, capture.
+
+Run `/clear` **first** to wipe chat history, then `/drop` to remove all files:
 
 ```bash
+# 1. Clear chat history
+tmux send-keys -t "$AIDER_PANE" -l -- '/clear'
+tmux send-keys -t "$AIDER_PANE" Enter
+sleep 0.3
+
+# 2. Drop all files from the chat
 tmux send-keys -t "$AIDER_PANE" -l -- '/drop'
 tmux send-keys -t "$AIDER_PANE" Enter
 sleep 0.3
 tmux capture-pane -p -J -t "$AIDER_PANE" -S -20    # confirm "Dropping all files"
 ```
+
+Order matters: `/clear` must come before `/drop` so the history referencing those files is wiped before the file set itself changes.
 
 ### Step 3. Aggressively gather context files
 
