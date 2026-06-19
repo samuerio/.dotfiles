@@ -62,8 +62,12 @@ This must ALWAYS be printed right after a session was started and once again at 
 ## Watching output
 
 - Capture recent history (joined lines to avoid wrapping artifacts): `tmux -S "$SOCKET" capture-pane -p -J -t target -S -200`.
-- For continuous monitoring, poll with the helper script (below) instead of `tmux wait-for` (which does not watch pane output).
-- When giving instructions to a user, **explicitly print a copy/paste monitor command** alongside the action don't assume they remembered the command.
+- For continuous monitoring or waiting for a prompt/completion marker, poll with the helper script (below) instead of `tmux wait-for` (which does not watch pane output). Example: wait for a Python prompt before sending code:
+  ```bash
+  bash scripts/wait-for-text.sh -S "$SOCKET" -t "$SESSION":0.0 -p '^>>>' -T 15 -l 4000
+  ```
+- For long-running commands, poll for completion text (`"Type quit to exit"`, `"Program exited"`, etc.) before proceeding.
+- When giving instructions to a user, **explicitly print a copy/paste monitor command** alongside the action — don't assume they remembered the command.
 
 ## Spawning Processes
 
@@ -71,14 +75,6 @@ Some special rules for processes:
 
 - when asked to debug, use lldb by default
 - when starting a python interactive shell, always set the `PYTHON_BASIC_REPL=1` environment variable. This is very important as the non-basic console interferes with your send-keys.
-
-## Synchronizing / waiting for prompts
-
-- Use timed polling to avoid races with interactive tools. Example: wait for a Python prompt before sending code:
-  ```bash
-  bash scripts/wait-for-text.sh -S "$SOCKET" -t "$SESSION":0.0 -p '^>>>' -T 15 -l 4000
-  ```
-- For long-running commands, poll for completion text (`"Type quit to exit"`, `"Program exited"`, etc.) before proceeding.
 
 ## Interactive tool recipes
 
