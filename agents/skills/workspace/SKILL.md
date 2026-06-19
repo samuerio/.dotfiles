@@ -43,7 +43,7 @@ tmux conventions (per the tmux SKILL):
 
 Print usage: list available subcommands (`open`, `list`, `close`, `task`, `run`, `status`).
 
-### /ws open <branch>  ← also sets WS_BRANCH
+### /ws open <branch> (alias: /ws op)  ← also sets WS_BRANCH
 
 1. Run `bash {baseDir}/workspace.sh open <branch>`. Read `branch`, `worktree_path`, and `worktree_created` from stdout.
 2. Ensure a tmux session named `<branch>` with cwd `<worktree_path>`:
@@ -66,7 +66,7 @@ Print usage: list available subcommands (`open`, `list`, `close`, `task`, `run`,
 3. Only after the script succeeds: if session `<branch>` exists, run `tmux -S "$SOCKET" kill-session -t "<branch>"`. Skip if it does not exist.
 4. If `kill-session` fails after a successful clean, the session becomes orphan. Surface this to the user and do not auto-resolve.
 
-### /ws task [<branch>] <task>
+### /ws task [<branch>] <task> (alias: /ws t)
 
 1. Strict mode (require active): verify the branch appears in `{baseDir}/workspace.sh list` and session `<branch>` exists. If either is missing, error: `workspace <branch> is not active; run /ws open <branch> first.` Do not auto-open.
 2. Discover the target pane via `list-panes` and pick the first pane.
@@ -74,7 +74,7 @@ Print usage: list available subcommands (`open`, `list`, `close`, `task`, `run`,
 4. If `<task>` is still ambiguous or underspecified after observing the pane (e.g. missing a target file, unclear scope, or multiple reasonable interpretations), explore the codebase under the branch's worktree path first to resolve ambiguity. Only ask the user to clarify if the question cannot be answered by exploring the codebase. Do not guess.
 5. Follow the tmux SKILL: **Sending input safely** to dispatch commands. Unless the user explicitly asks not to wait, use **Watching output** (capture mode) to report results. For long-running commands, use **Watching output** (poll mode) to wait for completion first.
 
-### /ws run [<branch>] [-p|--poll] [-s|--silent] <cmd>
+### /ws run [<branch>] [-p|--poll] [-s|--silent] <cmd> (alias: /ws r)
 
 1. Strict mode (require active): verify the branch appears in `{baseDir}/workspace.sh list` and session `<branch>` exists. If either is missing, error: `workspace <branch> is not active; run /ws open <branch> first.` Do not auto-open.
 2. `-p`/`--poll` and `-s`/`--silent` are mutually exclusive; error if both are given.
@@ -82,7 +82,7 @@ Print usage: list available subcommands (`open`, `list`, `close`, `task`, `run`,
 4. Send `<cmd>` via the tmux SKILL **Sending input safely**.
 5. Unless `--silent` is given, use **Watching output** (capture mode) to report results. If `--poll` is given, use **Watching output** (poll mode) to wait for completion first, then capture.
 
-### /ws status [<branch>]
+### /ws status [<branch>] (alias: /ws st)
 
 1. Strict mode (require active): verify the branch appears in `{baseDir}/workspace.sh list` and session `<branch>` exists. Error if either is missing.
 2. Discover the target pane via `list-panes` and pick the first pane.
