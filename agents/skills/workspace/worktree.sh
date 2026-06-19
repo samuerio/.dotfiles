@@ -2,12 +2,13 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: $0 open <branch> | list | clean <branch> [--force]" >&2
+  echo "usage: $0 open <branch> | list [-q <query>] | clean <branch> [--force]" >&2
 }
 
 command="${1:-}"
 branch=""
 force=""
+query=""
 
 if [ -z "$command" ]; then
   usage
@@ -18,7 +19,9 @@ shift
 
 case "$command" in
   list)
-    if [ "$#" -ne 0 ]; then
+    if [ "$#" -eq 2 ] && [ "$1" = "-q" ]; then
+      query="$2"
+    elif [ "$#" -ne 0 ]; then
       usage
       exit 2
     fi
@@ -131,11 +134,22 @@ print_worktree_list() {
   local i=0
   local output_index=1
   local dirty="no"
-
-  echo "mode=list"
-  printf 'worktree_count=%s\n' "${#WORKTREE_BRANCHES[@]}"
+  local count=0
 
   for i in "${!WORKTREE_BRANCHES[@]}"; do
+    if [ -z "${query:-}" ] || [[ "${WORKTREE_BRANCHES[$i]}" == *"$query"* ]]; then
+      count=$((count + 1))
+    fi
+  done
+
+  echo "mode=list"
+  printf 'worktree_count=%s\n' "$count"
+
+  for i in "${!WORKTREE_BRANCHES[@]}"; do
+    if [ -n "${query:-}" ] && [[ "${WORKTREE_BRANCHES[$i]}" != *"$query"* ]]; then
+      continue
+    fi
+
     dirty="no"
     if [ -n "$(git -C "${WORKTREE_PATHS[$i]}" status --porcelain 2>/dev/null || true)" ]; then
       dirty="yes"

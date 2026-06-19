@@ -11,7 +11,7 @@ Manage branch-scoped workspaces with `git worktree` plus tmux.
 
 ```bash
 bash {baseDir}/worktree.sh open <branch>
-bash {baseDir}/worktree.sh list
+bash {baseDir}/worktree.sh list [-q <query>]
 bash {baseDir}/worktree.sh clean <branch> [--force]
 ```
 
@@ -22,6 +22,16 @@ bash {baseDir}/worktree.sh clean <branch> [--force]
 - `clean <branch>` removes the branch workspace via `git worktree remove`.
 - For `clean`, do not infer or use `--force` without explicit user request. If non-force `clean` fails, report the error and stop. Do not retry or run extra cleanup (`rm -rf`, `git worktree prune`, etc.) without user request.
 - Do not expose implementation-derived workspace directory names to the user. Use full `<branch>` in the user interface.
+
+## Checking worktree existence
+
+To verify a worktree for `<branch>` exists, run:
+
+```bash
+bash {baseDir}/worktree.sh list -q "<branch>"
+```
+
+Exit code 0 with `worktree_count=1` means the worktree exists. Treat non-zero exit or `worktree_count=0` as "worktree not found".
 
 ## Checking session existence
 
@@ -71,14 +81,14 @@ Print usage: list available subcommands (`open`, `list`, `close`, `task`, `run`,
 
 ### /ws close [<branch>]
 
-1. Pre-check: read `dirty` for `<branch>` from `bash {baseDir}/worktree.sh list`. If the workspace is missing, report an error and stop. If `dirty=yes`, ask the user to confirm before proceeding. Abort on no or unclear answer.
+1. Pre-check: verify worktree exists (see **Checking worktree existence**); if missing, report an error and stop. Read `worktree_N_dirty` from the same output; if `dirty=yes`, ask the user to confirm before proceeding. Abort on no or unclear answer.
 2. Run `bash {baseDir}/worktree.sh clean <branch>` without `--force`. On git failure, surface the error and stop. Do not pass `--force` without explicit user confirmation.
 3. Only after the script succeeds: check session existence (see **Checking session existence**); if found, run `tmux -S "$SOCKET" kill-session -t "<branch>"`; skip if not found.
 4. If `kill-session` fails after a successful clean, the session becomes orphan. Surface this to the user and do not auto-resolve.
 
 ### /ws task [<branch>] <task> (alias: /ws t)
 
-1. Strict mode (require active): verify the branch appears in `{baseDir}/worktree.sh list` and session `<branch>` exists (see **Checking session existence**). If either is missing, error: `workspace <branch> is not active; run /ws open <branch> first.` Do not auto-open.
+1. Strict mode (require active): verify worktree exists (see **Checking worktree existence**) and session `<branch>` exists (see **Checking session existence**). If either is missing, error: `workspace <branch> is not active; run /ws open <branch> first.` Do not auto-open.
 2. Discover the target pane via `list-panes` and pick the first pane.
 3. Capture the current pane state (tmux SKILL **Watching output**, capture mode).
 4. If `<task>` is still ambiguous or underspecified after observing the pane (e.g. missing a target file, unclear scope, or multiple reasonable interpretations), explore the codebase under the branch's worktree path first to resolve ambiguity. Only ask the user to clarify if the question cannot be answered by exploring the codebase. Do not guess.
@@ -86,7 +96,7 @@ Print usage: list available subcommands (`open`, `list`, `close`, `task`, `run`,
 
 ### /ws run [<branch>] [-p|--poll] [-s|--silent] <cmd> (alias: /ws r)
 
-1. Strict mode (require active): verify the branch appears in `{baseDir}/worktree.sh list` and session `<branch>` exists (see **Checking session existence**). If either is missing, error: `workspace <branch> is not active; run /ws open <branch> first.` Do not auto-open.
+1. Strict mode (require active): verify worktree exists (see **Checking worktree existence**) and session `<branch>` exists (see **Checking session existence**). If either is missing, error: `workspace <branch> is not active; run /ws open <branch> first.` Do not auto-open.
 2. `-p`/`--poll` and `-s`/`--silent` are mutually exclusive; error if both are given.
 3. Discover the target pane via `list-panes` and pick the first pane.
 4. Send `<cmd>` via the tmux SKILL **Sending input safely**.
@@ -94,7 +104,7 @@ Print usage: list available subcommands (`open`, `list`, `close`, `task`, `run`,
 
 ### /ws status [<branch>] (alias: /ws st)
 
-1. Strict mode (require active): verify the branch appears in `{baseDir}/worktree.sh list` and session `<branch>` exists (see **Checking session existence**). Error if either is missing.
+1. Strict mode (require active): verify worktree exists (see **Checking worktree existence**) and session `<branch>` exists (see **Checking session existence**). Error if either is missing.
 2. Discover the target pane via `list-panes` and pick the first pane.
 3. Capture pane output (tmux SKILL **Watching output**, capture mode; `-S -200`). Do not send any keys. Report the captured text.
 
@@ -106,7 +116,7 @@ Strictness summary:
 
 ## Active / idle / orphan
 
-Join `{baseDir}/worktree.sh list` output with `tmux list-sessions` output. Key is `branch == session name`.
+Join worktree list (see **Checking worktree existence**) with session list (see **Checking session existence**). Key is `branch == session name`.
 
 - `active`: worktree exists plus session exists.
 - `idle`: worktree exists plus session missing.
