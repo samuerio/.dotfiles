@@ -71,13 +71,13 @@ Print usage: list available subcommands (`open`, `list`, `close`, `task`, `run`,
 1. Strict mode (require active): verify the branch appears in `{baseDir}/workspace.sh list` and session `<branch>` exists. If either is missing, error: `workspace <branch> is not active; run /ws open <branch> first.` Do not auto-open.
 2. Discover the target pane via `list-panes` and pick the first pane.
 3. Follow the tmux SKILL **Watching output** to observe the current pane state.
-4. If `<task>` is still ambiguous or underspecified after observing the pane (e.g. missing a target file, unclear scope, or multiple reasonable interpretations), ask the user to clarify before proceeding. Do not guess.
+4. If `<task>` is still ambiguous or underspecified after observing the pane (e.g. missing a target file, unclear scope, or multiple reasonable interpretations), explore the codebase under the branch's worktree path first to resolve ambiguity. Only ask the user to clarify if the question cannot be answered by exploring the codebase. Do not guess.
 5. Follow the tmux SKILL: **Sending input safely** to dispatch commands. Unless the user explicitly asks not to wait, use **Watching output** (capture mode) to report results. For long-running commands, use **Watching output** (poll mode) to wait for completion first.
 
-### /ws run [<branch>] [--poll] [--silent] <cmd>
+### /ws run [<branch>] [-p|--poll] [-s|--silent] <cmd>
 
 1. Strict mode (require active): verify the branch appears in `{baseDir}/workspace.sh list` and session `<branch>` exists. If either is missing, error: `workspace <branch> is not active; run /ws open <branch> first.` Do not auto-open.
-2. `--poll` and `--silent` are mutually exclusive; error if both are given.
+2. `-p`/`--poll` and `-s`/`--silent` are mutually exclusive; error if both are given.
 3. Discover the target pane via `list-panes` and pick the first pane.
 4. Send `<cmd>` via the tmux SKILL **Sending input safely**.
 5. Unless `--silent` is given, use **Watching output** (capture mode) to report results. If `--poll` is given, use **Watching output** (poll mode) to wait for completion first, then capture.
