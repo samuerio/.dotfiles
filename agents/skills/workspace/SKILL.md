@@ -24,11 +24,10 @@ bash {baseDir}/worktree.sh clean <branch> [--force]
 
 Rules:
 
-- Run all `{baseDir}/worktree.sh` commands from the main worktree. Do not implicitly `cd` to the main worktree and retry.
-- `open` may update `.gitignore` and create commits.
-- `clean <branch>` removes only the worktree half of the agent-workspace via `git worktree remove`.
-- For `clean`, do not infer or use `--force` without explicit user request. If non-force `clean` fails, report the error and stop. Do not retry or run extra cleanup (`rm -rf`, `git worktree prune`, etc.) without user request.
-- Do not expose implementation-derived agent-workspace directory names (e.g. paths from `worktree.sh` output) to the user. Use full `<branch>` in the user interface.
+- Always run `{baseDir}/worktree.sh` from the main worktree; never `cd` there implicitly and retry.
+- `open` may update `.gitignore` and create commits. `clean <branch>` only removes the worktree via `git worktree remove`.
+- For `clean`: never infer `--force`; on failure, surface the error and stop — no retries, no extra cleanup (`rm -rf`, `git worktree prune`, etc.) unless the user asks.
+- Never expose worktree paths from script output; always refer to workspaces by full `<branch>` name.
 
 ## Branch resolution and agent-workspace state
 
