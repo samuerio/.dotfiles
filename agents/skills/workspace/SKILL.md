@@ -23,35 +23,45 @@ bash {baseDir}/worktree.sh clean <branch> [--force]
 - For `clean`, do not infer or use `--force` without explicit user request. If non-force `clean` fails, report the error and stop. Do not retry or run extra cleanup (`rm -rf`, `git worktree prune`, etc.) without user request.
 - Do not expose implementation-derived workspace directory names to the user. Use full `<branch>` in the user interface.
 
-## Checking worktree existence
+## Branch resolution and workspace state
 
-To verify a worktree for `<branch>` exists, run:
-
-```bash
-bash {baseDir}/worktree.sh list -q "<branch>"
-```
-
-Exit code 0 with `worktree_count=1` means the worktree exists. Treat non-zero exit or `worktree_count=0` as "worktree not found".
-
-## Checking session existence
-
-To verify a tmux session named `<branch>` exists, use the tmux SKILL **Finding sessions**:
+After every successful `/ws open <branch>`, export `WS_BRANCH=<branch>` into the current shell by sending:
 
 ```bash
-bash {baseDir}/../tmux/scripts/find-sessions.sh -S "$SOCKET" -q "<branch>"
+export WS_BRANCH=<branch>
 ```
 
-Exit code 0 with non-empty output means the session exists. Treat a missing socket, non-zero exit, or empty output as "session not found".
+Also remember `<branch>` as the session-level default for this conversation.
 
-## WS_BRANCH default
+For branch-scoped commands (`close`, `task`, `run`, `status`), if `<branch>` is omitted, use the session-level `WS_BRANCH`. If unset, error:
 
-After every successful `/ws open <branch>`, export `WS_BRANCH=<branch>` into the current shell (via `export WS_BRANCH=<branch>` sent to the active pane, **and** remember it as the session-level default for this conversation).
+```text
+no branch specified and WS_BRANCH is not set; run /ws open <branch> first.
+```
 
-For `/ws list` and `/ws task` and `/ws run` and `/ws status` and `/ws close`: if `<branch>` is omitted by the user, fall back to `$WS_BRANCH`. If `$WS_BRANCH` is also unset, error: `no branch specified and WS_BRANCH is not set; run /ws open <branch> first.`
+To resolve workspace state for `<branch>`:
+
+1. Worktree:
+   ```bash
+   bash {baseDir}/worktree.sh list -q "<branch>"
+   ```
+   `-q` is substring matching, so treat the worktree as found only when one returned `worktree_N_branch` exactly equals `<branch>`. Use the matching `worktree_N_path` and `worktree_N_dirty`.
+
+2. Session:
+   ```bash
+   bash {baseDir}/../tmux/scripts/find-sessions.sh -S "$SOCKET" -q "<branch>" --json
+   ```
+   `-q` is substring matching, so treat the session as found only when one returned `session_name` exactly equals `<branch>`. Treat a missing socket, non-zero exit, or no exact match as missing.
+
+3. State:
+   - `active`: worktree exists + session exists.
+   - `idle`: worktree exists + session missing.
+   - `orphan`: worktree missing + session exists. Suggest manual cleanup; do not auto-resolve.
+   - `missing`: neither exists.
 
 ## /ws trigger
 
-`/ws` is the only entry point. Subcommands operate on a specific `<branch>` (full branch name, strict match, no fuzzy lookup).
+`/ws` is the only entry point. Branch-scoped subcommands operate on a specific `<branch>`: full branch name, exact match, no fuzzy lookup.
 
 tmux conventions (per the tmux SKILL):
 
@@ -74,21 +84,23 @@ Print usage: list available subcommands (`open`, `list`, `close`, `task`, `run`,
 
 ### /ws list (alias: /ws ls)
 
-1. Run `bash {baseDir}/worktree.sh list`. Parse `worktree_N_branch`, `worktree_N_path`, and `worktree_N_dirty`.
-2. List sessions on the socket (tmux SKILL **Finding sessions**). Treat missing socket or no sessions as an empty list.
-3. Merge by `branch == session name` into the active / idle / orphan state machine.
-4. Present the merged view to the user, including dirty status.
+1. Run `bash {baseDir}/worktree.sh list`.
+2. List sessions on the socket using tmux SKILL **Finding sessions** with `--json`. Treat a missing socket or no sessions as an empty list.
+3. Join worktrees and sessions by exact `branch == session_name`.
+4. Present each workspace as `active`, `idle`, or `orphan`, including dirty status.
 
 ### /ws close [<branch>]
 
-1. Verify the worktree exists (see **Active / idle / orphan**); if missing, report an error and stop. If `dirty=yes`, ask the user to confirm before proceeding. Abort on no or unclear answer.
-2. Run `bash {baseDir}/worktree.sh clean <branch>` without `--force`. On git failure, surface the error and stop. Do not pass `--force` without explicit user confirmation.
-3. Only after the script succeeds: check session existence (see **Checking session existence**); if found, run `tmux -S "$SOCKET" kill-session -t "<branch>"`; skip if not found.
-4. If `kill-session` fails after a successful clean, the session becomes orphan. Surface this to the user and do not auto-resolve.
+1. Resolve workspace state for `<branch>`.
+2. If state is `missing`, report an error and stop. If state is `orphan`, suggest manual cleanup and stop.
+3. If `dirty=yes`, ask the user to confirm before proceeding. Abort on no or unclear answer.
+4. Run `bash {baseDir}/worktree.sh clean <branch>` without `--force`. On git failure, surface the error and stop.
+5. Only after the script succeeds: if a session exists, run `tmux -S "$SOCKET" kill-session -t "<branch>"`; otherwise skip.
+6. If `kill-session` fails after a successful clean, the session becomes orphan. Surface this to the user and do not auto-resolve.
 
 ### /ws task [<branch>] <task> (alias: /ws t)
 
-1. Verify this workspace is active (see **Active / idle / orphan**). Do not auto-open.
+1. Resolve workspace state for `<branch>` and require `active`. Do not auto-open.
 2. Discover the target pane via `list-panes` and pick the first pane.
 3. Capture the current pane state (tmux SKILL **Watching output**, capture mode).
 4. If `<task>` is still ambiguous or underspecified after observing the pane (e.g. missing a target file, unclear scope, or multiple reasonable interpretations), explore the codebase under the branch's worktree path first to resolve ambiguity. Only ask the user to clarify if the question cannot be answered by exploring the codebase. Do not guess.
@@ -96,7 +108,7 @@ Print usage: list available subcommands (`open`, `list`, `close`, `task`, `run`,
 
 ### /ws run [<branch>] [-p|--poll] [-s|--silent] <cmd> (alias: /ws r)
 
-1. Verify this workspace is active (see **Active / idle / orphan**). Do not auto-open.
+1. Resolve workspace state for `<branch>` and require `active`. Do not auto-open.
 2. `-p`/`--poll` and `-s`/`--silent` are mutually exclusive; error if both are given.
 3. Discover the target pane via `list-panes` and pick the first pane.
 4. Send `<cmd>` via the tmux SKILL **Sending input safely**.
@@ -104,14 +116,6 @@ Print usage: list available subcommands (`open`, `list`, `close`, `task`, `run`,
 
 ### /ws status [<branch>] (alias: /ws st)
 
-1. Verify this workspace is active (see **Active / idle / orphan**). Error if not.
+1. Resolve workspace state for `<branch>` and require `active`. Error if not.
 2. Discover the target pane via `list-panes` and pick the first pane.
 3. Capture pane output (tmux SKILL **Watching output**, capture mode; `-S -200`). Do not send any keys. Report the captured text.
-
-## Active / idle / orphan
-
-A workspace has one of three states, determined by joining the worktree list (see **Checking worktree existence**) with the session list (see **Checking session existence**) on `branch == session name`:
-
-- `active`: worktree exists + session exists.
-- `idle`: worktree exists + session missing.
-- `orphan`: worktree missing + session exists. Suggest manual cleanup. This SKILL does not auto-resolve.
