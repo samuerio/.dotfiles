@@ -27,7 +27,7 @@ bash {baseDir}/workspace.sh clean <branch> [--force]
 
 After every successful `/ws open <branch>`, export `WS_BRANCH=<branch>` into the current shell (via `export WS_BRANCH=<branch>` sent to the active pane, **and** remember it as the session-level default for this conversation).
 
-For `/ws list` and `/ws run` and `/ws status` and `/ws close`: if `<branch>` is omitted by the user, fall back to `$WS_BRANCH`. If `$WS_BRANCH` is also unset, error: `no branch specified and WS_BRANCH is not set; run /ws open <branch> first.`
+For `/ws list` and `/ws task` and `/ws status` and `/ws close`: if `<branch>` is omitted by the user, fall back to `$WS_BRANCH`. If `$WS_BRANCH` is also unset, error: `no branch specified and WS_BRANCH is not set; run /ws open <branch> first.`
 
 ## /ws trigger
 
@@ -41,7 +41,7 @@ tmux conventions (per the tmux SKILL):
 
 ### /ws (no args)
 
-Run `/ws list`.
+Print usage: list available subcommands (`open`, `list`, `close`, `task`, `status`).
 
 ### /ws open <branch>  ← also sets WS_BRANCH
 
@@ -66,13 +66,13 @@ Run `/ws list`.
 3. Only after the script succeeds: if session `<branch>` exists, run `tmux -S "$SOCKET" kill-session -t "<branch>"`. Skip if it does not exist.
 4. If `kill-session` fails after a successful clean, the session becomes orphan. Surface this to the user and do not auto-resolve.
 
-### /ws run [<branch>] <task>
+### /ws task [<branch>] <task>
 
 1. Strict mode (require active): verify the branch appears in `{baseDir}/workspace.sh list` and session `<branch>` exists. If either is missing, error: `workspace <branch> is not active; run /ws open <branch> first.` Do not auto-open.
 2. Discover the target pane via `list-panes` and pick the first pane.
-3. Translate `<task>` (natural language) into a concrete shell command.
-4. Send via tmux SKILL conventions: `send-keys -t <pane> -l -- "<cmd>"`, then `send-keys -t <pane> Enter`.
-5. Wait for completion by polling a prompt or known marker per tmux SKILL, then run `capture-pane -p -J -t <pane> -S -200` and report the output.
+3. Follow the tmux SKILL **Watching output** to observe the current pane state.
+4. If `<task>` is still ambiguous or underspecified after observing the pane (e.g. missing a target file, unclear scope, or multiple reasonable interpretations), ask the user to clarify before proceeding. Do not guess.
+5. Follow the tmux SKILL: **Sending input safely** to dispatch commands, **Synchronizing / waiting for prompts** to wait for completion, then **Watching output** again to capture and report results.
 
 ### /ws status [<branch>]
 
@@ -82,7 +82,7 @@ Run `/ws list`.
 
 Strictness summary:
 
-- `/ws run` and `/ws status` require active (worktree plus session).
+- `/ws task` and `/ws status` require active (worktree plus session).
 - `/ws close` requires the worktree to exist (active or idle). It kills the session if present and skips otherwise.
 - orphan (worktree missing plus session present) is never auto-handled by any subcommand. The active / idle / orphan view surfaces it for manual cleanup.
 
