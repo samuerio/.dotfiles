@@ -77,6 +77,10 @@ tmux conventions (per the tmux SKILL):
 - Session name equals `<name>`.
 - Target pane: discover via `list-panes` per the tmux SKILL **Targeting panes and naming**; pick the first pane.
 
+**Pane target**: for all name-scoped commands, discover the target pane via `list-panes` and pick the first pane; never hardcode `:0.0`.
+
+**Active guard**: name-scoped commands other than `open` and `list` require state `active`; error if not; never auto-open.
+
 ### /ws (no args)
 
 Print usage: list available subcommands (`open`, `list`, `close`, `task`, `run`, `status`).
@@ -108,22 +112,28 @@ Print usage: list available subcommands (`open`, `list`, `close`, `task`, `run`,
 
 ### /ws task [<name>] <task> (alias: /ws t)
 
-1. Resolve agent-workspace state for `<name>` and require `active`. Do not auto-open.
-2. Discover the target pane via `list-panes` and pick the first pane.
-3. Capture the current pane state (tmux SKILL **Watching output**, capture mode).
-4. If `<task>` is still ambiguous or underspecified after observing the pane (e.g. missing a target file, unclear scope, or multiple reasonable interpretations), explore the codebase under the agent-workspace's worktree path first to resolve ambiguity. Only ask the user to clarify if the question cannot be answered by exploring the codebase. Do not guess.
-5. Follow the tmux SKILL: **Sending input safely** to dispatch commands. Unless the user explicitly asks not to wait, use **Watching output** (capture mode) to report results. For long-running commands, use **Watching output** (poll mode) to wait for completion first.
+1. Apply active guard. Apply pane target convention.
+2. Capture the current pane state (tmux SKILL **Watching output**, capture mode).
+3. If `<task>` is still ambiguous or underspecified after observing the pane (e.g. missing a target file, unclear scope, or multiple reasonable interpretations), explore the codebase under the agent-workspace's worktree path first to resolve ambiguity. Only ask the user to clarify if the question cannot be answered by exploring the codebase. Do not guess.
+4. Follow the tmux SKILL: **Sending input safely** to dispatch commands. Unless the user explicitly asks not to wait, use **Watching output** (capture mode) to report results. For long-running commands, use **Watching output** (poll mode) to wait for completion first.
 
-### /ws run [<name>] [-p|--poll] [-s|--silent] <cmd> (alias: /ws r)
+### /ws run [<name>] [-p=<pattern> | --poll=<pattern>] [-s|--silent] <input> (alias: /ws r)
 
-1. Resolve agent-workspace state for `<name>` and require `active`. Do not auto-open.
-2. `-p`/`--poll` and `-s`/`--silent` are mutually exclusive; error if both are given.
-3. Discover the target pane via `list-panes` and pick the first pane.
-4. Send `<cmd>` via the tmux SKILL **Sending input safely**.
-5. Unless `--silent` is given, use **Watching output** (capture mode) to report results. If `--poll` is given, use **Watching output** (poll mode) to wait for completion first, then capture.
+`/ws run` is fully manual: `<input>` is sent verbatim to the target pane. It may be a shell command, a REPL expression, or plain text addressed to whatever interactive program is running in the pane (pi, python, gdb, etc.). Do not parse, validate, or rewrite `<input>`; what runs in the pane is the user's responsibility.
+
+1. Apply active guard. Apply pane target convention.
+2. Parse flags from the front of the argument list:
+   - `-p=<pattern>` / `--poll=<pattern>`: poll the pane until `<pattern>` (regex) appears before capturing. The `=` form is required; `-p <pattern>` (space-separated) is a syntax error, do not accept it. Timeout uses the `wait-for-text.sh` default; do not expose it.
+   - `-s` / `--silent`: skip the post-send capture entirely.
+   - `-p`/`--poll` and `-s`/`--silent` are mutually exclusive; error if both are given.
+   - Stop flag parsing at the first token that does not start with `-`. Everything from that token to the end of the argument list is `<input>`, taken literally (including spaces, quotes, and shell metacharacters).
+3. Send `<input>` literally via the tmux SKILL **Sending input safely** (`send-keys -l -- "<input>"`), then send `Enter`.
+4. Reporting:
+   - If `--silent` is given, do not capture.
+   - Else if `--poll=<pattern>` is given, use **Watching output** (poll mode) with `<pattern>` to wait for completion, then capture and report.
+   - Otherwise, use **Watching output** (capture mode) once and report.
 
 ### /ws status [<name>] (alias: /ws st)
 
-1. Resolve agent-workspace state for `<name>` and require `active`. Error if not.
-2. Discover the target pane via `list-panes` and pick the first pane.
-3. Capture pane output (tmux SKILL **Watching output**, capture mode; `-S -200`). Do not send any keys. Report the captured text.
+1. Apply active guard. Apply pane target convention.
+2. Capture pane output (tmux SKILL **Watching output**, capture mode; `-S -200`). Do not send any keys. Report the captured text.
