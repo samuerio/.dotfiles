@@ -35,9 +35,9 @@ For `/ws list` and `/ws task` and `/ws run` and `/ws status` and `/ws close`: if
 
 tmux conventions (per the tmux SKILL):
 
-- `SOCKET=${TMPDIR:-/tmp}/claude-tmux-sockets/claude.sock`
-- session name equals `<branch>`
-- target pane: discover via `tmux -S "$SOCKET" list-panes -t <branch> -F '#{session_name}:#{window_index}.#{pane_index}'`, pick the first pane
+- Use the default socket path from the tmux SKILL.
+- Session name equals `<branch>`.
+- Target pane: discover via `list-panes` per the tmux SKILL **Targeting panes and naming**; pick the first pane.
 
 ### /ws (no args)
 
@@ -70,7 +70,7 @@ Print usage: list available subcommands (`open`, `list`, `close`, `task`, `run`,
 
 1. Strict mode (require active): verify the branch appears in `{baseDir}/workspace.sh list` and session `<branch>` exists. If either is missing, error: `workspace <branch> is not active; run /ws open <branch> first.` Do not auto-open.
 2. Discover the target pane via `list-panes` and pick the first pane.
-3. Follow the tmux SKILL **Watching output** to observe the current pane state.
+3. Capture the current pane state (tmux SKILL **Watching output**, capture mode).
 4. If `<task>` is still ambiguous or underspecified after observing the pane (e.g. missing a target file, unclear scope, or multiple reasonable interpretations), explore the codebase under the branch's worktree path first to resolve ambiguity. Only ask the user to clarify if the question cannot be answered by exploring the codebase. Do not guess.
 5. Follow the tmux SKILL: **Sending input safely** to dispatch commands. Unless the user explicitly asks not to wait, use **Watching output** (capture mode) to report results. For long-running commands, use **Watching output** (poll mode) to wait for completion first.
 
@@ -86,7 +86,7 @@ Print usage: list available subcommands (`open`, `list`, `close`, `task`, `run`,
 
 1. Strict mode (require active): verify the branch appears in `{baseDir}/workspace.sh list` and session `<branch>` exists. Error if either is missing.
 2. Discover the target pane via `list-panes` and pick the first pane.
-3. Run `capture-pane -p -J -t <pane> -S -200`. Do not send any keys. Report the captured text.
+3. Capture pane output (tmux SKILL **Watching output**, capture mode; `-S -200`). Do not send any keys. Report the captured text.
 
 Strictness summary:
 
