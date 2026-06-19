@@ -67,16 +67,16 @@ fi
 
 repo_main="$(dirname "$git_common_dir")"
 if [ "$repo_root" != "$repo_main" ]; then
-  echo "error: workspace.sh must be run from the main worktree" >&2
+  echo "error: worktree.sh must be run from the main worktree" >&2
   printf 'main worktree: %s\n' "$repo_main" >&2
   printf 'current:       %s\n' "$repo_root" >&2
   exit 2
 fi
 
-AGENT_BRANCHES=()
-AGENT_PATHS=()
+WORKTREE_BRANCHES=()
+WORKTREE_PATHS=()
 
-append_agent_workspace() {
+append_worktree() {
   local path="$1"
   local branch_ref="$2"
   local branch_name=""
@@ -92,13 +92,13 @@ append_agent_workspace() {
   branch_name="${branch_ref#refs/heads/}"
   [ -n "$branch_name" ] || return 0
 
-  AGENT_BRANCHES+=("$branch_name")
-  AGENT_PATHS+=("$path")
+  WORKTREE_BRANCHES+=("$branch_name")
+  WORKTREE_PATHS+=("$path")
 }
 
-collect_agent_workspaces() {
-  AGENT_BRANCHES=()
-  AGENT_PATHS=()
+collect_worktrees() {
+  WORKTREE_BRANCHES=()
+  WORKTREE_PATHS=()
 
   local line=""
   local path=""
@@ -106,7 +106,7 @@ collect_agent_workspaces() {
 
   while IFS= read -r line || [ -n "$line" ]; do
     if [[ "$line" == worktree\ * ]]; then
-      append_agent_workspace "$path" "$branch_ref"
+      append_worktree "$path" "$branch_ref"
       path="${line#worktree }"
       branch_ref=""
       continue
@@ -118,43 +118,43 @@ collect_agent_workspaces() {
     fi
 
     if [ -z "$line" ]; then
-      append_agent_workspace "$path" "$branch_ref"
+      append_worktree "$path" "$branch_ref"
       path=""
       branch_ref=""
     fi
   done < <(git -C "$repo_main" worktree list --porcelain)
 
-  append_agent_workspace "$path" "$branch_ref"
+  append_worktree "$path" "$branch_ref"
 }
 
-print_agent_workspace_list() {
+print_worktree_list() {
   local i=0
   local output_index=1
   local dirty="no"
 
   echo "mode=list"
-  printf 'workspace_count=%s\n' "${#AGENT_BRANCHES[@]}"
+  printf 'worktree_count=%s\n' "${#WORKTREE_BRANCHES[@]}"
 
-  for i in "${!AGENT_BRANCHES[@]}"; do
+  for i in "${!WORKTREE_BRANCHES[@]}"; do
     dirty="no"
-    if [ -n "$(git -C "${AGENT_PATHS[$i]}" status --porcelain 2>/dev/null || true)" ]; then
+    if [ -n "$(git -C "${WORKTREE_PATHS[$i]}" status --porcelain 2>/dev/null || true)" ]; then
       dirty="yes"
     fi
 
-    printf 'workspace_%s_branch=%s\n' "$output_index" "${AGENT_BRANCHES[$i]}"
-    printf 'workspace_%s_path=%s\n' "$output_index" "${AGENT_PATHS[$i]}"
-    printf 'workspace_%s_dirty=%s\n' "$output_index" "$dirty"
+    printf 'worktree_%s_branch=%s\n' "$output_index" "${WORKTREE_BRANCHES[$i]}"
+    printf 'worktree_%s_path=%s\n' "$output_index" "${WORKTREE_PATHS[$i]}"
+    printf 'worktree_%s_dirty=%s\n' "$output_index" "$dirty"
     output_index=$((output_index + 1))
   done
 }
 
-branch_for_workspace_path() {
+branch_for_worktree_path() {
   local target_path="$1"
   local i=0
 
-  for i in "${!AGENT_PATHS[@]}"; do
-    if [ "${AGENT_PATHS[$i]}" = "$target_path" ]; then
-      printf '%s' "${AGENT_BRANCHES[$i]}"
+  for i in "${!WORKTREE_PATHS[@]}"; do
+    if [ "${WORKTREE_PATHS[$i]}" = "$target_path" ]; then
+      printf '%s' "${WORKTREE_BRANCHES[$i]}"
       return 0
     fi
   done
@@ -162,20 +162,20 @@ branch_for_workspace_path() {
   return 1
 }
 
-collect_agent_workspaces
+collect_worktrees
 
 if [ "$command" = "list" ]; then
-  print_agent_workspace_list
+  print_worktree_list
   exit 0
 fi
 
 branch_tail="${branch##*/}"
 worktree_path="$repo_main/.worktree/$branch_tail"
 
-existing_branch="$(branch_for_workspace_path "$worktree_path" || true)"
+existing_branch="$(branch_for_worktree_path "$worktree_path" || true)"
 if [ -n "$existing_branch" ] && [ "$existing_branch" != "$branch" ]; then
   echo "error: $worktree_path is already bound to branch '$existing_branch'" >&2
-  echo "choose a different branch name or clean up the conflicting workspace" >&2
+  echo "choose a different branch name or clean up the conflicting worktree" >&2
   exit 1
 fi
 
@@ -187,7 +187,7 @@ if [ "$command" = "clean" ]; then
   fi
 
   echo "success: worktree removed"
-  printf 'workspace_path=%s\n' "$worktree_path"
+  printf 'worktree_path=%s\n' "$worktree_path"
 
   leftovers=()
   if [ -d "$worktree_path" ]; then
@@ -197,7 +197,7 @@ if [ "$command" = "clean" ]; then
   fi
 
   leftover_count="${#leftovers[@]}"
-  printf 'workspace_leftover_count=%s\n' "$leftover_count"
+  printf 'worktree_leftover_count=%s\n' "$leftover_count"
 
   if [ "$leftover_count" -gt 0 ]; then
     max_items=200
@@ -210,12 +210,12 @@ if [ "$command" = "clean" ]; then
     while [ "$i" -lt "$print_count" ]; do
       path="${leftovers[$i]}"
       rel_path="${path#$worktree_path/}"
-      printf 'workspace_leftover=%s\n' "$rel_path"
+      printf 'worktree_leftover=%s\n' "$rel_path"
       i=$((i + 1))
     done
 
     if [ "$leftover_count" -gt "$max_items" ]; then
-      printf 'workspace_leftover_truncated=%s\n' "$((leftover_count - max_items))"
+      printf 'worktree_leftover_truncated=%s\n' "$((leftover_count - max_items))"
     fi
 
     echo "action_required=ask_user_cleanup_leftovers"
@@ -242,8 +242,8 @@ elif [ -d "$worktree_path/.git" ] || [ -f "$worktree_path/.git" ]; then
 fi
 
 if [ "$needs_new_worktree" = "yes" ] && [ -n "$(git -C "$repo_main" status --porcelain)" ]; then
-  echo "error: current workspace has uncommitted changes" >&2
-  echo "please commit or stash your changes before creating a new agent workspace" >&2
+  echo "error: current worktree has uncommitted changes" >&2
+  echo "please commit or stash your changes before creating a new worktree" >&2
   exit 1
 fi
 
