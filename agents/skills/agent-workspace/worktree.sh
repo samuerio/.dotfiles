@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: $0 open <branch> | list [-q <query>] | clean <branch> [--force]" >&2
+  echo "usage: $0 open <branch> | list [-q <query>] | clean <branch> [--force] | root-name" >&2
 }
 
 command="${1:-}"
@@ -22,6 +22,12 @@ case "$command" in
     if [ "$#" -eq 2 ] && [ "$1" = "-q" ]; then
       query="$2"
     elif [ "$#" -ne 0 ]; then
+      usage
+      exit 2
+    fi
+    ;;
+  root-name)
+    if [ "$#" -ne 0 ]; then
       usage
       exit 2
     fi
@@ -177,6 +183,11 @@ branch_for_worktree_path() {
 }
 
 collect_worktrees
+
+if [ "$command" = "root-name" ]; then
+  basename "$repo_main"
+  exit 0
+fi
 
 if [ "$command" = "list" ]; then
   print_worktree_list

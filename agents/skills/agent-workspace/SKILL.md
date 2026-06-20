@@ -73,7 +73,7 @@ To resolve agent-workspace state for `<name>`:
 
 tmux conventions (per the tmux SKILL):
 
-- Use the default socket path from the tmux SKILL.
+- Derive the socket name from the repo root: `SOCKET_NAME=$(bash {baseDir}/worktree.sh root-name)`, then set `SOCKET="$CLAUDE_TMUX_SOCKET_DIR/$SOCKET_NAME.sock"` (using the tmux SKILL's default socket dir).
 - Session name equals `<name>`.
 - Target pane: discover via `list-panes` per the tmux SKILL **Targeting panes and naming**; pick the first pane.
 
