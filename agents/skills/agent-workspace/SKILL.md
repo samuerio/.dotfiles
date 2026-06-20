@@ -127,7 +127,7 @@ tmux conventions (per the tmux SKILL):
 4. Reporting:
    - If `--silent` is given, do not capture.
    - Else if `--poll=<pattern>` is given, use **Watching output** (poll mode) with `<pattern>` to wait for completion, then capture and report.
-   - Otherwise, use **Watching output** (capture mode) once and report.
+   - Otherwise, use **Watching output** (capture mode) to snapshot and report.
 
 ### /ws status [<name>] (alias: /ws st)
 
