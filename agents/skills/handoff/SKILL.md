@@ -1,6 +1,6 @@
 ---
-name: handoff
-description: Generate a self-contained context-transfer prompt from the current conversation for starting a new thread. Use when user invokes /handoff <goal> to hand off work to a fresh conversation.
+name: handoff-implement
+description: Generate a self-contained context-transfer prompt for handing off a finalized plan to a new thread for implementation. Use when user invokes /handoff-implement and a clear plan exists in the current conversation.
 ---
 
 # Handoff
@@ -9,16 +9,17 @@ Generate a focused, self-contained prompt that lets a new thread continue the wo
 
 ## Trigger
 
-`/handoff <goal>` — the `<goal>` argument describes what the new thread should accomplish.
+`/handoff-implement` — signals that a design or plan has been finalized in this conversation and should be handed off to a new thread for implementation.
 
 ## Process
 
-1. Review the current conversation history (this session).
-2. Extract what is relevant to `<goal>`:
-   - Key decisions made
-   - Approaches tried and their outcomes
-   - Important findings, constraints, or open questions
+1. Review the current conversation history to identify the finalized plan. This includes both decisions discussed in the conversation and any plan documents referenced or quoted within it. If the user references a plan file by path, read the file content first before proceeding. If no clear plan is found after checking the conversation and any referenced files, do not generate the handoff — reply asking the user to clarify what has been decided.
+2. Extract what is relevant to implementation:
+   - The finalized plan or design (what has been decided)
+   - What has already been implemented (to avoid duplication)
+   - What remains to be implemented (the concrete TODO)
    - Files discussed or modified (with paths)
+   - Known constraints, edge cases, or pitfalls
 3. Draft the handoff prompt following the **Template** below.
 4. Ensure `/tmp/handoff/` exists, then write the prompt to `/tmp/handoff/handoff-<timestamp>.md`, where `<timestamp>` is `YYYYMMDD-HHMMSS` in local time.
 5. Reply with **only** the absolute file path. Do not print the full prompt in the response.
@@ -31,9 +32,9 @@ Write the prompt content in the language of the current conversation (Chinese co
 
 ```
 ## Context
-[1-3 sentence summary of what we've been working on.]
+[1-2 sentence summary of the background and the finalized design.]
 
-Key decisions:
+Decisions (already made, not up for debate):
 - [Decision 1]
 - [Decision 2]
 
@@ -41,13 +42,22 @@ Files involved:
 - path/to/file1
 - path/to/file2
 
+## What's Done
+- [Already implemented parts, if any]
+
 ## Task
-[Clear, self-contained description of the next task based on <goal>. Include enough context that a new thread with no access to this conversation can proceed.]
+Implement the following. Do not redesign or re-discuss the approach — execute it.
+
+[Concrete list of what needs to be implemented, specific enough to act on directly.]
+
+Constraints:
+- [Constraint 1]
+- [Constraint 2]
 ```
 
 ## Notes
 
-- The prompt must be self-contained: a new thread with no access to this conversation should understand and proceed.
+- The prompt must be self-contained: a new thread with no access to this conversation should be able to implement the plan without needing to ask clarifying questions about the design.
 - Be concise. Omit filler and pleasantries. Include only decisions, files, and context relevant to the goal.
 - If no files were discussed or modified, omit the Files section.
 - The filename carries the timestamp; do not embed it in the prompt body.
