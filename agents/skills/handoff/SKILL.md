@@ -30,6 +30,24 @@ Write the prompt content in the language of the current conversation (Chinese co
 
 ## Template
 
+If a plan file was provided, use this template:
+
+```
+## Plan
+- /absolute/path/to/plan-file.md
+- /absolute/path/to/design-doc.md  (if any)
+
+Files involved:
+(See plan above.)
+
+## Task
+Implement the plan. Do not redesign or re-discuss the approach — execute it.
+```
+
+If the plan does not list the files involved, replace `(See plan above.)` with the actual file list.
+
+Otherwise, use this template:
+
 ```
 ## Context
 [1-2 sentence summary of the background and the finalized design.]
