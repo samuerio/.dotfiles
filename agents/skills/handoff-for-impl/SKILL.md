@@ -24,10 +24,10 @@ Triggered by `/handoff-for-impl`. Write the prompt in the language of the curren
 
 ```
 ## Plan
-- /absolute/path/to/plan-file.md
-- /absolute/path/to/design-doc.md
+- /absolute/path/to/plan-file.md   # absolute path
+- /absolute/path/to/design-doc.md  # absolute path
 
-Files involved:
+Files involved:                     # relative to project root
 - path/to/file1.ts
 - path/to/file2.ts
 
@@ -43,7 +43,7 @@ We've been working on X. Key decisions:
 - Decision 1
 - Decision 2
 
-Files involved:
+Files involved:  # relative to project root
 - path/to/file1.ts
 - path/to/file2.ts
 
