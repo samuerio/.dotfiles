@@ -1,6 +1,6 @@
 ---
 name: pi-print-mode
-description: Use this skill whenever the user wants Claude to invoke the "pi" coding agent (earendil-works/pi, the `pi` CLI) non-interactively from a script, subprocess, CI step, or one-shot bash command — for example to delegate a coding task to pi, audit a repo with pi, parse pi's output programmatically, or chain pi into a larger automation. Triggers on mentions of "pi -p", "pi print mode", "pi --mode json", "run pi non-interactively", "call pi from a script", or any request to drive earendil-works/pi without its interactive TUI. Do NOT use for pi's RPC mode (long-lived bidirectional stdin/stdout integration) or for the pi SDK (embedding pi in a Node app) — those are different mechanisms. Also do not confuse with Claude Code, Codex, or other CLI coding agents that share similar flag names.
+description: Use this skill when invoking the "pi" coding agent (earendil-works/pi) non-interactively — e.g. from a script, subprocess, CI step, or one-shot bash command. Triggers on "pi -p", "pi --print", "pi --mode json", or any request to drive pi without its interactive TUI.
 ---
 
 # Using pi in Non-Interactive Mode
