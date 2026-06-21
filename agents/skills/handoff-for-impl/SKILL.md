@@ -1,6 +1,6 @@
 ---
-name: handoff-implement
-description: Generate a self-contained context-transfer prompt for handing off a finalized plan to a new thread for implementation. Use when user invokes /handoff-implement and a clear plan exists in the current conversation.
+name: handoff-for-impl
+description: Generate a self-contained context-transfer prompt for handing off a finalized plan to a new thread for implementation. Use when user invokes /handoff-for-impl and a clear plan exists in the current conversation.
 ---
 
 # Handoff
@@ -8,7 +8,7 @@ Generate a focused, self-contained prompt that lets a new thread continue the wo
 
 ## Process
 
-Triggered by `/handoff-implement`. Write the prompt in the language of the current conversation (headers stay in English).
+Triggered by `/handoff-for-impl`. Write the prompt in the language of the current conversation (headers stay in English).
 
 1. Review the conversation to identify the finalized plan (check referenced file paths too). If the plan isn't fully actionable — open questions, unclear scope, no clear implementation path — ask targeted questions until it is.
 2. Extract what is relevant to implementation:
@@ -16,7 +16,7 @@ Triggered by `/handoff-implement`. Write the prompt in the language of the curre
    - Files discussed or modified (with paths)
    - Known constraints, edge cases, or pitfalls
 3. Draft the handoff prompt following the **Template** below. Omit any section with no content.
-4. Ensure `/tmp/handoff/` exists, write the prompt to `/tmp/handoff/handoff-<YYYYMMDD-HHMMSS>.md`, then reply with **only** the absolute path.
+4. Ensure `/tmp/handoff-for-impl/` exists, write the prompt to `/tmp/handoff-for-impl/handoff-for-impl-<YYYYMMDD-HHMMSS>.md`, then reply with **only** the absolute path.
 
 ## Template
 

@@ -98,6 +98,6 @@ result=$(cat error.log | pi --no-session -p "Summarize the root cause of this er
 echo "$result"
 
 # Hand off an implementation plan to pi and let it execute autonomously
-pi --no-session @handoff-plan.md
+pi --no-session @handoff-for-impl.md
 pi --no-session @plan.md "Implement exactly what this plan describes"
 ```
