@@ -60,8 +60,7 @@ pi --session <id> -p "..."
 pi --mode json "List files" 2>/dev/null | jq -c 'select(.type == "message_end")'
 ```
 
-- Output is JSON Lines; first line is always the session header. See `references/json-mode-events.md` for the full event schema.
-- Key filters: `message_end` (final reply) · `message_update` + `assistantMessageEvent.type=="text_delta"` (streaming tokens) · `tool_execution_end` (tool results). Full schema, field definitions, and jq recipes → `references/json-mode-events.md`.
+- Output is JSON Lines; first line is always the session header. See `references/json-mode-events.md` for the full event schema, field definitions, and jq recipes.
 
 ## Common Flags
 
@@ -69,15 +68,13 @@ pi --mode json "List files" 2>/dev/null | jq -c 'select(.type == "message_end")'
 |---|---|
 | `--model <pattern>` | e.g. `sonnet:high`, `openai/gpt-4o` |
 | `--thinking <level>` | `off`/`minimal`/`low`/`medium`/`high`/`xhigh` |
-| `--tools <list>`, `-t` | Tool allowlist, e.g. `read,grep,find,ls` |
 | `--no-session` | Ephemeral mode; don't persist |
 | `-c`, `--continue` | Continue the most recent session |
 | `--session <id>` | Target a specific session |
-| `--approve`/`-a` | One-shot approve project trust (useful in CI) |
 
 ## Common Pitfalls
 
-1. **Project trust prompt**: interactive mode asks whether to trust a project the first time you open it; non-interactive modes (`-p`/`--mode json`/`--mode rpc`) **skip this prompt entirely** and instead follow the global `defaultProjectTrust` setting (default: `ask`). In CI/automation, if the project has never been trusted, behavior may not be what you expect — use `--approve`/`-a` to explicitly approve, or run once interactively beforehand to establish trust.
+1. **Project trust prompt**: interactive mode asks whether to trust a project the first time you open it; non-interactive modes (`-p`/`--mode json`/`--mode rpc`) **skip this prompt entirely** and instead follow the global `defaultProjectTrust` setting (default: `ask`). In CI/automation, if the project has never been trusted, behavior may not be what you expect — run once interactively beforehand to establish trust.
 
 2. **stdin is merged into the prompt, not a separate message**: `cat file | pi -p "task"` appends `file`'s content after `"task"` as a single initial user message — it does not create two separate messages. Watch your context budget if the file is large.
 
