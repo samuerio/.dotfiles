@@ -167,7 +167,7 @@ tmux conventions (per the tmux SKILL):
    - Use the `handoff-for-impl` SKILL to generate a handoff document.
    - Then use the `pi-headless` SKILL print-mode pattern to execute it from inside the workspace:
      ```bash
-     pi --no-session @<handoff-file>
+     pi --no-session -p @<handoff-file>
      ```
    - Use the tmux SKILL **Sending input safely** convention:
      ```bash
