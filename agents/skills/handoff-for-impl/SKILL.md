@@ -13,7 +13,7 @@ Triggered by `/handoff-for-impl`. Write the prompt in the language of the curren
 1. Review the conversation to identify the finalized plan (check referenced file paths too). If the plan isn't fully actionable — open questions, unclear scope, no clear implementation path — ask targeted questions until it is.
 2. Extract what is relevant to implementation:
    - The finalized plan or design (what has been decided)
-   - Files discussed or modified (with paths)
+   - Files discussed or modified (with paths — relative to project root if inside it, absolute otherwise)
    - Known constraints, edge cases, or pitfalls
 3. Draft the handoff prompt following the **Template** below. Omit any section with no content.
 4. Ensure `/tmp/handoff-for-impl/` exists, write the prompt to `/tmp/handoff-for-impl/handoff-for-impl-<YYYYMMDD-HHMMSS>.md`, then reply with **only** the absolute path.
@@ -24,10 +24,10 @@ Triggered by `/handoff-for-impl`. Write the prompt in the language of the curren
 
 ```
 ## Plan
-- /absolute/path/to/plan-file.md   # absolute path
-- /absolute/path/to/design-doc.md  # absolute path
+- /absolute/path/to/plan-file.md   # absolute if outside project root, else relative
+- /absolute/path/to/design-doc.md  # absolute if outside project root, else relative
 
-Files involved:                     # relative to project root
+Files involved:                     # relative to project root, absolute otherwise
 - path/to/file1.ts
 - path/to/file2.ts
 
@@ -43,7 +43,7 @@ We've been working on X. Key decisions:
 - Decision 1
 - Decision 2
 
-Files involved:  # relative to project root
+Files involved:  # relative to project root, absolute otherwise
 - path/to/file1.ts
 - path/to/file2.ts
 
