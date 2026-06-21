@@ -1,5 +1,5 @@
 ---
-name: pi-print-mode
+name: pi-headless
 description: Use this skill when invoking the "pi" coding agent (earendil-works/pi) non-interactively — e.g. from a script, subprocess, CI step, or one-shot bash command. Triggers on "pi -p", "pi --print", "pi --mode json", or any request to drive pi without its interactive TUI.
 ---
 
