@@ -96,4 +96,8 @@ pi --mode json --name "ci-task-$(date +%s)" "Fix the failing test in src/foo.tes
 # Feed file content in and capture the result as a string in a script
 result=$(cat error.log | pi --no-session -p "Summarize the root cause of this error in one sentence")
 echo "$result"
+
+# Hand off an implementation plan to pi and let it execute autonomously
+pi --no-session @handoff-plan.md
+pi --no-session @plan.md "Implement exactly what this plan describes"
 ```
