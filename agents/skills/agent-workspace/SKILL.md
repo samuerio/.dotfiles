@@ -1,6 +1,6 @@
 ---
 name: agent-workspace
-description: "Manage agent-workspaces (git worktree + tmux session). Triggered by /ws, /ws open, /ws list, /ws close, /ws run, /ws status."
+description: "Manage agent-workspaces (git worktree + tmux session). Triggered by /ws, /ws open, /ws list, /ws close, /ws run, /ws status, /ws handoff-for-impl."
 ---
 
 ## Concept
@@ -81,6 +81,8 @@ tmux conventions (per the tmux SKILL):
 
 **Active guard**: name-scoped commands other than `open` and `list` require state `active`; error if not; never auto-open.
 
+- `/ws handoff-for-impl` / `/ws hfi`: silently open a derived `feat/<feature-name>` workspace and kick off implementation.
+
 ### /ws open <name> (alias: /ws op)  ← also sets AGENT_WS_NAME
 
 1. Run `bash {baseDir}/worktree.sh open <name>`. Read `branch`, `worktree_path`, and `worktree_created` from stdout.
@@ -133,3 +135,49 @@ tmux conventions (per the tmux SKILL):
 
 1. Apply active guard. Apply pane target convention.
 2. Capture pane output (tmux SKILL **Watching output**, capture mode; `-S -200`). Do not send any keys. Report the captured text.
+
+### /ws handoff-for-impl (alias: /ws hfi)
+
+`handoff-for-impl` is a silent kickoff command for implementation work whose duration is unknown. It creates or reuses an agent-workspace, sends the implementation command into its tmux pane, and does not wait for completion or capture output.
+
+1. Derive an agent-workspace name from the implementation work described by the current conversation:
+   - Format must be `feat/<feature-name>`.
+   - Use a short kebab-case feature name.
+   - Do not accept a positional name/task argument for this subcommand.
+   - If the feature name cannot be derived from the conversation, ask the user for the feature name.
+
+2. Run the equivalent of `/ws open <name>`:
+   - Create or reuse the worktree.
+   - Create or reuse the tmux session.
+   - Set `AGENT_WS_NAME=<name>` as usual.
+
+3. Choose the implementation command:
+
+   **Ralph path** — if the recent conversation has already used the `ralph` SKILL to generate `task.json` and has produced the exact Ralph execution command:
+
+   - Send that Ralph command to the workspace pane.
+   - Use the tmux SKILL **Sending input safely** convention:
+     ```bash
+     tmux -S "$SOCKET" send-keys -t "$TARGET" -l -- "<ralph command>"
+     tmux -S "$SOCKET" send-keys -t "$TARGET" Enter
+     ```
+
+   **handoff-for-impl path** — otherwise:
+
+   - Use the `handoff-for-impl` SKILL to generate a handoff document.
+   - Then use the `pi-headless` SKILL print-mode pattern to execute it from inside the workspace:
+     ```bash
+     pi --no-session @<handoff-file>
+     ```
+   - Use the tmux SKILL **Sending input safely** convention:
+     ```bash
+     tmux -S "$SOCKET" send-keys -t "$TARGET" -l -- "pi --no-session @<handoff-file>"
+     tmux -S "$SOCKET" send-keys -t "$TARGET" Enter
+     ```
+
+4. Do not wait for completion.
+5. Do not capture pane output after sending.
+6. Report only:
+   - the agent-workspace name
+   - that the command was sent
+   - the monitor command from the tmux SKILL
