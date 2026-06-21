@@ -10,25 +10,22 @@ Generate a focused, self-contained prompt that lets a new thread continue the wo
 
 Triggered by `/handoff-implement`. Write the prompt in the language of the current conversation (headers stay in English).
 
-1. Review the current conversation history to identify the finalized plan. This includes both decisions discussed in the conversation and any plan documents referenced or quoted within it. If the user references a plan file by path, read the file content first before proceeding. Assess whether the plan has converged to an actionable state — all key decisions made, no open questions, and a clear implementation path. If not, do not generate the handoff — ask the user targeted questions to resolve the remaining ambiguities, and repeat until the plan is fully actionable.
+1. Review the conversation to identify the finalized plan (check referenced file paths too). If the plan isn't fully actionable — open questions, unclear scope, no clear implementation path — ask targeted questions until it is.
 2. Extract what is relevant to implementation:
    - The finalized plan or design (what has been decided)
-   - What has already been implemented (to avoid duplication)
-   - What remains to be implemented (the concrete TODO)
    - Files discussed or modified (with paths)
    - Known constraints, edge cases, or pitfalls
-3. Draft the handoff prompt following the **Template** below. Omit any section with no content — do not emit empty headers.
-4. Ensure `/tmp/handoff/` exists, then write the prompt to `/tmp/handoff/handoff-<timestamp>.md`, where `<timestamp>` is `YYYYMMDD-HHMMSS` in local time.
-5. Reply with **only** the absolute file path. Do not print the full prompt in the response.
+3. Draft the handoff prompt following the **Template** below. Omit any section with no content.
+4. Ensure `/tmp/handoff/` exists, write the prompt to `/tmp/handoff/handoff-<YYYYMMDD-HHMMSS>.md`, then reply with **only** the absolute path.
 
 ## Template
 
-If a plan file exists, use:
+**If a plan file exists:**
 
 ```
 ## Plan
 - /absolute/path/to/plan-file.md
-- /absolute/path/to/design-doc.md  (if any)
+- /absolute/path/to/design-doc.md
 
 Files involved:
 - path/to/file1.ts
@@ -38,7 +35,7 @@ Files involved:
 Implement the plan. Do not redesign or re-discuss the approach — execute it.
 ```
 
-Otherwise:
+**Otherwise:**
 
 ```
 ## Context
@@ -54,4 +51,4 @@ Files involved:
 Implement the following. Do not redesign or re-discuss the approach — execute it.
 ```
 
-The prompt must be self-contained (no access to this conversation). Be concise — omit filler; include only decisions, files, and context needed to implement. Omit "Files involved" if no files were discussed (or if files are already listed in the plan file).
+Omit "Files involved" if no files were discussed or if files are already listed in the plan file.
