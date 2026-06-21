@@ -32,9 +32,6 @@ cat README.md | pi -p "Summarize this text"
 # Name the session (so you can find it later with -r or --session)
 pi --name "release audit" -p "Audit this repository"
 
-# Read-only mode — restrict tools, good for "review but don't touch code"
-pi --tools read,grep,find,ls -p "Review the code"
-
 # Reference files as attachments (@ prefix, supports text and images)
 pi -p @screenshot.png "What's in this image?"
 pi @code.ts @test.ts -p "Review these files"
@@ -90,7 +87,7 @@ pi --mode json "List files" 2>/dev/null | jq -c 'select(.type == "message_end")'
 
 ```bash
 # Run a one-off code review in CI: read-only, no session persisted, result to a file
-pi --no-session --tools read,grep,find,ls -p "Review the diff in this PR for bugs and style issues" > review.txt
+pi --no-session -p "Review the diff in this PR for bugs and style issues" > review.txt
 
 # Use JSON mode to log the full execution trace for auditing
 pi --mode json --name "ci-task-$(date +%s)" "Fix the failing test in src/foo.test.ts" \
