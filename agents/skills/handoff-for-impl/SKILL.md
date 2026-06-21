@@ -13,14 +13,14 @@ Triggered by `/handoff-for-impl`. Write the prompt in the language of the curren
 1. Review the conversation to identify the finalized plan (check referenced file paths too). If the plan isn't fully actionable — open questions, unclear scope, no clear implementation path — ask targeted questions until it is.
 2. Extract what is relevant to implementation:
    - The finalized plan or design (what has been decided)
-   - Files discussed or modified (with paths — relative to project root if inside it, absolute otherwise)
+   - Files discussed or modified. For every referenced file path, run `bash {baseDir}/ref-path.sh <CWD> <path> [path...]` from the current working directory and use the script output verbatim.
    - Known constraints, edge cases, or pitfalls
 3. Draft the handoff prompt following the **Template** below. Omit any section with no content.
 4. Ensure `/tmp/handoff-for-impl/` exists, write the prompt to `/tmp/handoff-for-impl/handoff-for-impl-<YYYYMMDD-HHMMSS>.md`, then reply with the path.
 
 ## Template
 
-All file paths: use relative paths when inside project root; absolute paths otherwise.
+All file paths: use `bash {baseDir}/ref-path.sh <CWD> <path> [path...]` and copy the script output verbatim.
 
 **If a plan file exists:**
 
