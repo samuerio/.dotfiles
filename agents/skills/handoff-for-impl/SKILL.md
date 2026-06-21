@@ -20,14 +20,16 @@ Triggered by `/handoff-for-impl`. Write the prompt in the language of the curren
 
 ## Template
 
+All file paths: use relative paths when inside project root; absolute paths otherwise.
+
 **If a plan file exists:**
 
 ```
 ## Plan
-- /absolute/path/to/plan-file.md   # absolute if outside project root, else relative
-- /absolute/path/to/design-doc.md  # absolute if outside project root, else relative
+- path/to/plan-file.md
+- path/to/design-doc.md
 
-Files involved:                     # relative to project root, absolute otherwise
+Files involved:
 - path/to/file1.ts
 - path/to/file2.ts
 
@@ -43,7 +45,7 @@ We've been working on X. Key decisions:
 - Decision 1
 - Decision 2
 
-Files involved:  # relative to project root, absolute otherwise
+Files involved:
 - path/to/file1.ts
 - path/to/file2.ts
 
