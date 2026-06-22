@@ -167,6 +167,9 @@ if [[ $(uname) == "Darwin" ]]; then
     # export PYTHON3_HOME=/Users/zhenghe/Library/Python/3.8
     # export PATH=$PYTHON3_HOME/bin:$PATH
 
+    # pip install --user 安装的工具（如 aider-install）在此目录
+    export PATH=$PATH:/Users/zhe/Library/Python/3.9/bin
+
     # 使用brew安装后就不需要设置如下环境变量将可执行包引入了, brew会将可执行包放在/usr/local/bin
     # export GOPATH=/Users/zhenghe/repo/go
     # export PATH=$GOPATH/bin:$PATH
