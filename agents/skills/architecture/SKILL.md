@@ -41,7 +41,7 @@ Record the reasoning behind key architectural decisions that cannot be inferred 
 
 ## Output Path
 
-- **Research**: `research/[slug].md` -- kebab-case slug derived from the topic
+- **Research**: `/tmp/research/[YYYYMMDD-HHMMSS]-[slug]/research.md`, where the timestamp is taken at the time `/research-codebase` is executed and the kebab-case slug is derived from the topic (e.g., `/tmp/research/20250622-143000-auth-module/research.md`)
 - **Draft**: same directory as the plan file (e.g., `spec/[slug]/design.md`); if no plan file exists, write `design.md` to the current working directory
 
 > All prose in **Simplified Chinese**; file paths, section headings, Mermaid node IDs, and code identifiers in **English**.
