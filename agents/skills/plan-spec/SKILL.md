@@ -30,6 +30,8 @@ Derive a concise kebab-case slug from the topic, e.g. `implement-auth`, `fix-iss
 
 All explanatory prose in Simplified Chinese. Headings, paths, module names, identifiers in English.
 
+When referenced file paths appear in the document content, load and follow the `ref-path` SKILL to normalize them and copy its output verbatim.
+
 Do not infer implementation permission from approval of the plan.
 
 ## finalize

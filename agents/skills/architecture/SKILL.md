@@ -7,7 +7,7 @@ description: Use this skill to produce a structured architecture document with M
 
 Produce a structured architecture document from either an existing codebase (Research) or a written plan (Draft), with Mermaid diagrams and prose in Simplified Chinese.
 
-When referenced file paths appear in the document content (component tables, design notes, prose), load and follow the `ref-path` SKILL to normalize them and copy its output verbatim.
+When referenced file paths appear in the document content, load and follow the `ref-path` SKILL to normalize them and copy its output verbatim.
 
 ## Step 0 - Clarify if Needed (Draft mode only)
 
