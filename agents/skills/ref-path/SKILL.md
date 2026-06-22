@@ -23,15 +23,20 @@ bash {baseDir}/ref-path.sh <CWD> <path> [path...]
 
 ## Example
 
+Both files and directories are accepted; paths are normalized as strings (no existence check, trailing slashes dropped, symlinks resolved).
+
 If the active task working directory is `/repo`:
 
 ```bash
-bash {baseDir}/ref-path.sh /repo /repo/src/app.ts /tmp/file.txt
+bash {baseDir}/ref-path.sh /repo /repo/src/app.ts /repo/src /repo /tmp/file.txt /var/log/
 ```
 
 Output:
 
 ```text
 src/app.ts
+src
+.
 /tmp/file.txt
+/var/log
 ```
