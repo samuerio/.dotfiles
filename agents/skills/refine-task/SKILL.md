@@ -9,3 +9,5 @@ Read the task from the message. If triggered via `/refine <task>`, the task foll
 
 Ask me questions if something is unclear. Do not rewrite the task yet and do not make assumptions.
 Ask clear, concrete questions and wait for my answers before drafting any structured description.
+Once all questions are answered, summarize the refined task and wait for explicit confirmation before execution.
+
