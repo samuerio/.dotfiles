@@ -81,7 +81,7 @@ tmux conventions (per the tmux SKILL):
 
 **Active guard**: name-scoped commands other than `open` and `list` require state `active`; error if not; never auto-open.
 
-- `/ws handoff-for-impl` / `/ws hfi`: silently open a derived `feat/<feature-name>` workspace and kick off implementation.
+- `/ws handoff-for-impl` / `/ws hfi`: silently open an agent-workspace (manual `<name>` or derived `feat/<feature-name>`) and kick off implementation.
 
 ### /ws open <name> (alias: /ws op)  ← also sets AGENT_WS_NAME
 
@@ -139,15 +139,18 @@ tmux conventions (per the tmux SKILL):
 1. Apply active guard. Apply pane target convention.
 2. Capture pane output (tmux SKILL **Watching output**, capture mode; `-S -200`). Do not send any keys. Report the captured text.
 
-### /ws handoff-for-impl [-m|--choose-model] (alias: /ws hfi)
+### /ws handoff-for-impl [<name>] [-m|--choose-model] (alias: /ws hfi)
 
 `handoff-for-impl` is a silent kickoff command for implementation work whose duration is unknown. It creates or reuses an agent-workspace, sends the implementation command into its tmux pane, and does not wait for completion or capture output.
 
-1. Derive an agent-workspace name from the implementation work described by the current conversation:
-   - Format must be `feat/<feature-name>`.
-   - Use a short kebab-case feature name.
-   - Do not accept a positional name/task argument for this subcommand.
-   - If the feature name cannot be derived from the conversation, ask the user for the feature name.
+Argument parsing: `<name>` is an optional positional argument; `-m`/`--choose-model` is a flag with no value. The flag may appear before or after `<name>`. The first non-`-` token is `<name>`.
+
+1. Resolve the agent-workspace name:
+   - If `<name>` was given as a positional argument, use it verbatim. Do not validate or rewrite its format; the user is responsible for the chosen prefix (e.g. `feat/`, `fix/`, `refactor/`, `exp/`).
+   - Otherwise, derive a name from the implementation work described by the current conversation:
+     - Default format is `feat/<feature-name>` with a short kebab-case feature name.
+     - If the conversation clearly indicates a different kind of work (bug fix, refactor, chore, experiment, etc.), use the matching prefix instead (`fix/`, `refactor/`, `chore/`, `exp/`, ...).
+     - If a suitable name cannot be derived, ask the user for it.
 
 2. Run the equivalent of `/ws open <name>`:
    - Create or reuse the worktree.
