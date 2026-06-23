@@ -9,6 +9,14 @@ description: use this skill when invoking the "pi" coding agent (earendil-works/
 
 Use interactive mode or `--mode rpc` for multi-turn workflows; print and JSON modes do not support appending messages mid-run.
 
+## Before You Start
+
+Always pass `--no-session` to avoid persisting a session, and guard required variables before invoking:
+
+```bash
+: "${PI_WORKER_MODEL:?}" "${PI_WORKER_THINKING:?}"
+```
+
 ## Choose the Mode
 
 | Need | Use | Output |
@@ -16,16 +24,9 @@ Use interactive mode or `--mode rpc` for multi-turn workflows; print and JSON mo
 | Final answer only | `pi -p "..."` or `pi --print "..."` | plain text final reply |
 | Tool logs, streaming events, or audit trail | `pi --mode json "..."` | JSON Lines on stdout |
 
+> Prefer print mode for final-answer-only scripts; use JSON mode when you need observability, logs, or streaming.
+
 ## Print Mode
-
-Use print mode when a script only needs pi's final reply. Always pass `--no-session` and set model/thinking via variables to keep invocations consistent.
-
-Before invoking pi, verify the required variables are set:
-
-```bash
-: "${PI_WORKER_MODEL:?PI_WORKER_MODEL is not set}"
-: "${PI_WORKER_THINKING:?PI_WORKER_THINKING is not set}"
-```
 
 **Without piped input:**
 
@@ -42,31 +43,23 @@ pi --no-session --model "$PI_WORKER_MODEL" --thinking "$PI_WORKER_THINKING" \
 cat README.md \
   | pi --no-session --model "$PI_WORKER_MODEL" --thinking "$PI_WORKER_THINKING" \
     -p "Summarize this text"
-result=$(cat error.log \
-  | pi --no-session --model "$PI_WORKER_MODEL" --thinking "$PI_WORKER_THINKING" \
-    -p "Summarize the root cause in one sentence")
 ```
 
 ## JSON Mode
 
-Use JSON mode when callers need execution details, tool-call records, deltas, or logs.
+stdout: JSON Lines, one event per line (first line = session header). Logs/warnings go to stderr — redirect before piping to `jq`.
 
 ```bash
-pi --mode json "List files" 2>/dev/null \
+pi --no-session --model "$PI_WORKER_MODEL" --thinking "$PI_WORKER_THINKING" \
+  --mode json "List files" 2>/dev/null \
   | jq -c 'select(.type == "message_end")'
 ```
-
-Rules:
-
-- stdout contains JSON Lines, one event per line.
-- the first line is the session header.
-- logs and warnings go to stderr.
-- redirect stderr or keep it separate before piping to `jq`.
 
 Example audit log:
 
 ```bash
-pi --mode json "Fix the failing test in src/foo.test.ts" \
+pi --no-session --model "$PI_WORKER_MODEL" --thinking "$PI_WORKER_THINKING" \
+  --mode json "Fix the failing test in src/foo.test.ts" \
   2>ci-task.err \
   | tee ci-task.jsonl \
   | jq -c 'select(.type=="tool_execution_end")'
@@ -87,13 +80,3 @@ pi --mode json "Fix the failing test in src/foo.test.ts" \
 - **stdin merging:** `cat file | pi -p "task"` appends stdin to the initial prompt as one user message. Large stdin can exhaust context.
 - **stdout vs stderr:** JSON events are on stdout; warnings/logs are on stderr. Mixed streams can break `jq`.
 - **process lifecycle:** after the final output is printed, the process exits. Do not expect to keep writing to stdin.
-
-## Guidance for ChatGPT
-
-When helping users automate `pi`:
-
-1. Recommend print mode when they only need the final answer.
-2. Recommend JSON mode when they need observability, logs, streaming, or custom UI integration.
-3. Always add `--no-session`; pass model and thinking level via `$PI_WORKER_MODEL` / `$PI_WORKER_THINKING` and guard with `: "${PI_WORKER_MODEL:?}"` before invoking.
-4. Redirect stderr before piping JSON output to `jq`.
-5. Warn that print and JSON modes are single-shot and cannot support mid-run follow-ups.
