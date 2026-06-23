@@ -112,7 +112,7 @@ tmux conventions (per the tmux SKILL):
 
 1. Apply active guard. Apply pane target convention.
 2. Capture the current pane state (tmux SKILL **Watching output**, capture mode).
-3. Before dispatching, always verify the task is fully specified: explore the codebase under the agent-workspace's worktree path to resolve any ambiguity (missing target file, unclear scope, multiple reasonable interpretations, etc.). Only ask the user to clarify if the question cannot be answered by exploring the codebase. Do not guess and do not proceed until the task is unambiguous.
+3. Before dispatching, apply the `refine-task` SKILL to clarify the task. When exploring the codebase, use the agent-workspace's worktree path.
 4. Choose how to dispatch the task:
    - **pi path** (default for non-trivial implementation or analysis tasks): construct a `pi` command following the `pi-headless` SKILL (**Print Mode** or **JSON Mode**) and send it via the tmux SKILL **Sending input safely**. Use `--no-session` and guard `PI_WORKER_MODEL`/`PI_WORKER_THINKING` as specified in that SKILL.
    - **shell path**: for simple shell commands or when the user explicitly provides a raw command, send it directly without wrapping in `pi`.
