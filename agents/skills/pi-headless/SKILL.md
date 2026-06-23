@@ -73,6 +73,33 @@ pi --no-session --model "$PI_WORKER_MODEL" --thinking "$PI_WORKER_THINKING" \
 | `--thinking <level>` | set reasoning effort: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
 | `--no-session` | avoid persisting a session |
 
+## Common Workflows
+
+### Running pi as an Implementation Worker
+
+Use pi as a headless worker to execute a scoped implementation task defined in a file.
+
+**Plan without implementation instruction (`@file` + inline prompt):**
+
+```bash
+pi --no-session --model "$PI_WORKER_MODEL" --thinking "$PI_WORKER_THINKING" \
+  -p @plan.md "Implement exactly what this plan describes"
+```
+
+References an existing plan file and pairs it with an implementation instruction to direct the worker. The plan provides the what; the inline prompt tells the worker to execute it.
+
+**Plan with implementation instruction (piped handoff doc):**
+
+```bash
+cat handoff-for-impl.md \
+  | pi --no-session --model "$PI_WORKER_MODEL" --thinking "$PI_WORKER_THINKING" \
+    -p
+```
+
+The handoff doc contains both the plan and the implementation instruction in one file. The worker receives everything it needs from the doc alone.
+
+> In both cases the worker runs to completion and exits — no follow-up turns. Keep the input doc focused so pi has everything it needs in a single pass.
+
 ## Pitfalls
 
 - **Project trust:** non-interactive modes skip the interactive trust prompt and follow global `defaultProjectTrust`. For CI, trust the project interactively first or configure trust explicitly.
