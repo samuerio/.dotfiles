@@ -100,6 +100,61 @@ The handoff doc contains both the plan and the implementation instruction in one
 
 > In both cases the worker runs to completion and exits — no follow-up turns. Keep the input doc focused so pi has everything it needs in a single pass.
 
+### Code Review Automation
+
+```bash
+# Quick security scan
+find . -name "*.py" -print0 \
+  | xargs -0 cat \
+  | pi --no-session --model "$PI_WORKER_MODEL" --thinking "$PI_WORKER_THINKING" \
+    -p "Check these files for security vulnerabilities and summarize findings by file"
+
+# Performance analysis of staged changes
+git diff \
+  | pi --no-session --model "$PI_WORKER_MODEL" --thinking "$PI_WORKER_THINKING" \
+    -p "Analyze the performance impact of these changes"
+
+# Documentation consistency check
+pi --no-session --model "$PI_WORKER_MODEL" --thinking "$PI_WORKER_THINKING" \
+  -p "Verify all public functions and classes in src/ have complete docstrings. List any missing ones."
+```
+
+### Test Generation
+
+```bash
+# Unit tests for a specific module
+pi --no-session --model "$PI_WORKER_MODEL" --thinking "$PI_WORKER_THINKING" \
+  -p @auth.py "Generate comprehensive pytest unit tests for this module. Write them to tests/test_auth.py."
+
+# Integration tests
+pi --no-session --model "$PI_WORKER_MODEL" --thinking "$PI_WORKER_THINKING" \
+  -p "Create API integration tests with realistic fixture data for all endpoints in src/api/"
+
+# Test coverage gap analysis (requires a coverage report)
+coverage json -o coverage.json && cat coverage.json \
+  | pi --no-session --model "$PI_WORKER_MODEL" --thinking "$PI_WORKER_THINKING" \
+    -p "Analyze this coverage report and list the highest-value missing test cases, grouped by module"
+```
+
+### Documentation Automation
+
+```bash
+# OpenAPI spec from source
+find src/ -name "*.py" -print0 \
+  | xargs -0 cat \
+  | pi --no-session --model "$PI_WORKER_MODEL" --thinking "$PI_WORKER_THINKING" \
+    -p "Generate an OpenAPI 3.1 specification for all HTTP endpoints found in this source. Write it to docs/openapi.yaml."
+
+# README generation
+pi --no-session --model "$PI_WORKER_MODEL" --thinking "$PI_WORKER_THINKING" \
+  -p "Read the project structure and source files, then create a comprehensive README.md covering setup, usage, and examples"
+
+# Changelog from recent commits
+git log --oneline -50 \
+  | pi --no-session --model "$PI_WORKER_MODEL" --thinking "$PI_WORKER_THINKING" \
+    -p "Generate a Keep-a-Changelog formatted CHANGELOG entry from these commits, grouped by type (Added, Fixed, Changed)"
+```
+
 ## Pitfalls
 
 - **Project trust:** non-interactive modes skip the interactive trust prompt and follow global `defaultProjectTrust`. For CI, trust the project interactively first or configure trust explicitly.
