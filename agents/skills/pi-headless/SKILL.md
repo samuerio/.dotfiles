@@ -37,10 +37,7 @@ echo "$result"
 Useful options:
 
 ```bash
-pi --name "release audit" -p "Audit this repository"
 pi --no-session -p "quick one-off question"
-pi -c -p "continue the previous task"
-pi --session <id> -p "continue this session"
 
 pi --model openai/gpt-4o -p "Help me refactor"
 pi --model sonnet:high -p "Review this plan"
@@ -66,7 +63,7 @@ Rules:
 Example audit log:
 
 ```bash
-pi --mode json --name "ci-task-$(date +%s)" "Fix the failing test in src/foo.test.ts" \
+pi --mode json "Fix the failing test in src/foo.test.ts" \
   2>ci-task.err \
   | tee ci-task.jsonl \
   | jq -c 'select(.type=="tool_execution_end")'
@@ -79,9 +76,6 @@ pi --mode json --name "ci-task-$(date +%s)" "Fix the failing test in src/foo.tes
 | `--model <pattern>` | choose model, e.g. `openai/gpt-4o` or `sonnet:high` |
 | `--thinking <level>` | set reasoning effort: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
 | `--no-session` | avoid persisting a session |
-| `--name <name>` | name the session for later lookup |
-| `-c`, `--continue` | continue the most recent session |
-| `--session <id>` | target a specific session |
 
 ## Pitfalls
 
@@ -89,7 +83,6 @@ pi --mode json --name "ci-task-$(date +%s)" "Fix the failing test in src/foo.tes
 - **Single turn only:** print and JSON modes run once and exit. They cannot receive follow-up messages mid-run.
 - **stdin merging:** `cat file | pi -p "task"` appends stdin to the initial prompt as one user message. Large stdin can exhaust context.
 - **stdout vs stderr:** JSON events are on stdout; warnings/logs are on stderr. Mixed streams can break `jq`.
-- **session persistence:** by default, calls create session files under `~/.pi/agent/sessions/`. Use `--no-session` for high-frequency automation.
 - **process lifecycle:** after the final output is printed, the process exits. Do not expect to keep writing to stdin.
 
 ## Common Recipes
