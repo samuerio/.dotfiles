@@ -18,30 +18,33 @@ Use interactive mode or `--mode rpc` for multi-turn workflows; print and JSON mo
 
 ## Print Mode
 
-Use print mode when a script only needs pi's final reply.
+Use print mode when a script only needs pi's final reply. Always pass `--no-session` and set model/thinking via variables to keep invocations consistent.
+
+Before invoking pi, verify the required variables are set:
 
 ```bash
-pi -p "Summarize this codebase"
-cat README.md | pi --no-session -p "Summarize this text"
-pi -p @screenshot.png "What's in this image?"
-pi @code.ts @test.ts -p "Review these files"
+: "${PI_WORKER_MODEL:?PI_WORKER_MODEL is not set}"
+: "${PI_WORKER_THINKING:?PI_WORKER_THINKING is not set}"
 ```
 
-Capture the result directly from stdout:
+**Without piped input:**
 
 ```bash
-result=$(pi --no-session -p "Summarize the root cause in one sentence")
-echo "$result"
+pi --no-session --model "$PI_WORKER_MODEL" --thinking "$PI_WORKER_THINKING" \
+  -p "Summarize this codebase"
+pi --no-session --model "$PI_WORKER_MODEL" --thinking "$PI_WORKER_THINKING" \
+  -p @plan.md "Implement exactly what this plan describes"
 ```
 
-Useful options:
+**With piped input:**
 
 ```bash
-pi --no-session -p "quick one-off question"
-
-pi --model openai/gpt-4o -p "Help me refactor"
-pi --model sonnet:high -p "Review this plan"
-pi --thinking high -p "Solve this carefully"
+cat README.md \
+  | pi --no-session --model "$PI_WORKER_MODEL" --thinking "$PI_WORKER_THINKING" \
+    -p "Summarize this text"
+result=$(cat error.log \
+  | pi --no-session --model "$PI_WORKER_MODEL" --thinking "$PI_WORKER_THINKING" \
+    -p "Summarize the root cause in one sentence")
 ```
 
 ## JSON Mode
@@ -85,31 +88,12 @@ pi --mode json "Fix the failing test in src/foo.test.ts" \
 - **stdout vs stderr:** JSON events are on stdout; warnings/logs are on stderr. Mixed streams can break `jq`.
 - **process lifecycle:** after the final output is printed, the process exits. Do not expect to keep writing to stdin.
 
-## Common Recipes
-
-```bash
-# One-off CI review, no session saved
-pi --no-session -p "Review the diff in this PR for bugs and style issues" > review.txt
-```
-
-```bash
-# Feed a log file and capture a concise result
-result=$(cat error.log | pi --no-session -p "Summarize the root cause in one sentence")
-echo "$result"
-```
-
-```bash
-# Execute an implementation handoff
-pi --no-session -p @handoff-for-impl.md
-pi --no-session -p @plan.md "Implement exactly what this plan describes"
-```
-
 ## Guidance for ChatGPT
 
 When helping users automate `pi`:
 
 1. Recommend print mode when they only need the final answer.
 2. Recommend JSON mode when they need observability, logs, streaming, or custom UI integration.
-3. Add `--no-session` for ephemeral or high-frequency scripted calls.
+3. Always add `--no-session`; pass model and thinking level via `$PI_WORKER_MODEL` / `$PI_WORKER_THINKING` and guard with `: "${PI_WORKER_MODEL:?}"` before invoking.
 4. Redirect stderr before piping JSON output to `jq`.
 5. Warn that print and JSON modes are single-shot and cannot support mid-run follow-ups.
