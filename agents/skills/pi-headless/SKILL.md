@@ -11,31 +11,18 @@ Use interactive mode or `--mode rpc` for multi-turn workflows; print and JSON mo
 
 ## Before You Start
 
-Always pass `--no-session` to avoid persisting a session. Before the first invocation (or when the user asks to switch models), resolve `WORKER_MODEL` and `WORKER_THINKING` if not already set:
+Always pass `--no-session` to avoid persisting a session.
 
-```bash
-# Inherit from defaults if not already set in the current environment
-WORKER_MODEL="${WORKER_MODEL:-${DEFAULT_WORKER_MODEL:-}}"
-WORKER_THINKING="${WORKER_THINKING:-${DEFAULT_WORKER_THINKING:-}}"
+Resolve `WORKER_MODEL` and `WORKER_THINKING` for the current run using this flow:
 
-# If WORKER_MODEL is still empty, list available models and prompt the user to choose
-if [[ -z "$WORKER_MODEL" ]]; then
-    echo "Available models:"
-    pi --list-models "${DEFAULT_WORKER_PROVIDER:-}" | column -t
-    echo ""
-    read -rp "Enter model (format: provider/model): " WORKER_MODEL
-fi
+1. If the user explicitly wants to choose a model, run `pi --list-models "${DEFAULT_WORKER_PROVIDER:-}"` and show the available models to the user.
+2. Show the allowed thinking levels — `off`, `minimal`, `low`, `medium`, `high`, `xhigh` — and let the user choose one.
+3. Store the selected values in temporary environment variables (`WORKER_MODEL`, `WORKER_THINKING`) for subsequent headless `pi` commands in the current shell/session only.
+4. Otherwise, default `WORKER_MODEL` from `DEFAULT_WORKER_MODEL` and `WORKER_THINKING` from `DEFAULT_WORKER_THINKING`.
+5. After applying defaults, if `WORKER_MODEL` is still empty, fall back to the same user-choice flow and run `pi --list-models "${DEFAULT_WORKER_PROVIDER:-}"`.
+6. If `WORKER_THINKING` is still empty after applying defaults, ask the user to choose one of the allowed thinking levels and set it temporarily for subsequent commands.
 
-# If WORKER_THINKING is still empty, prompt the user to choose
-if [[ -z "$WORKER_THINKING" ]]; then
-    echo "Available thinking levels: off  minimal  low  medium  high  xhigh"
-    read -rp "Enter thinking level: " WORKER_THINKING
-fi
-
-export WORKER_MODEL WORKER_THINKING
-```
-
-These variables persist for the duration of the shell session. Re-run the block above only if the user explicitly asks to switch models or thinking level.
+For headless execution, never block on terminal prompts. Any required selection should happen in the chat/user flow, then be passed into the command environment for the current run.
 
 ## Choose the Mode
 
