@@ -76,7 +76,10 @@ pi --no-session --model "$PI_WORKER_MODEL" --thinking "$PI_WORKER_THINKING" \
 ## Pitfalls
 
 - **Project trust:** non-interactive modes skip the interactive trust prompt and follow global `defaultProjectTrust`. For CI, trust the project interactively first or configure trust explicitly.
-- **Single turn only:** print and JSON modes run once and exit. They cannot receive follow-up messages mid-run.
+- **Single turn only:** print and JSON modes run once and exit — the process exits after final output. They cannot receive follow-up messages or further stdin mid-run.
 - **stdin merging:** `cat file | pi -p "task"` appends stdin to the initial prompt as one user message. Large stdin can exhaust context.
 - **stdout vs stderr:** JSON events are on stdout; warnings/logs are on stderr. Mixed streams can break `jq`.
-- **process lifecycle:** after the final output is printed, the process exits. Do not expect to keep writing to stdin.
+
+## Reference Files
+
+- [`references/json-mode-events.md`](references/json-mode-events.md) — Full JSON mode event schema (`AgentSessionEvent` / `AgentEvent` type definitions), message types, output format, jq recipes, and debugging tips. Consult this when you need field-level details beyond what the table above covers.
