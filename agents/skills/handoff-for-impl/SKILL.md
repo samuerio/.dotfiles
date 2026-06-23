@@ -24,23 +24,6 @@ Triggered by `/handoff-for-impl`. Write the prompt in the language of the curren
 
 All file paths: normalize with the `ref-path` SKILL and copy its output verbatim.
 
-**If a plan file exists:**
-
-```
-## Plan
-- path/to/plan-file.md
-- path/to/design-doc.md
-
-Files involved:
-- path/to/file1.ts
-- path/to/file2.ts
-
-## Task
-Implement the plan. Do not redesign or re-discuss the approach — execute it.
-```
-
-**Otherwise:**
-
 ```
 ## Context
 We've been working on X. Key decisions:
@@ -55,4 +38,4 @@ Files involved:
 Implement the following. Do not redesign or re-discuss the approach — execute it.
 ```
 
-Omit "Files involved" if no files were discussed or if files are already listed in the plan file.
+Omit "Files involved" if no files were discussed.
