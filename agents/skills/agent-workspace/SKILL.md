@@ -108,13 +108,13 @@ tmux conventions (per the tmux SKILL):
 5. Only after the script succeeds: if a session exists, run `tmux -S "$SOCKET" kill-session -t "<name>"`; otherwise skip.
 6. If `kill-session` fails after a successful clean, the session becomes orphan. Surface this to the user and do not auto-resolve.
 
-### /ws task [<name>] <task> (alias: /ws t)
+### /ws task [<name>] [-m|--choose-model] <task> (alias: /ws t)
 
 1. Apply active guard. Apply pane target convention.
 2. Capture the current pane state (tmux SKILL **Watching output**, capture mode).
 3. Before dispatching, apply the `refine-task` SKILL to clarify the task. When exploring the codebase, use the agent-workspace's worktree path.
 4. Choose how to dispatch the task:
-   - **pi path** (default for non-trivial implementation or analysis tasks): construct a `pi` command following the `pi-headless` SKILL (**Print Mode** or **JSON Mode**) and send it via the tmux SKILL **Sending input safely**. Use `--no-session` and guard `PI_WORKER_MODEL`/`PI_WORKER_THINKING` as specified in that SKILL.
+   - **pi path** (default for non-trivial implementation or analysis tasks): construct a `pi` command following the `pi-headless` SKILL (**Print Mode** or **JSON Mode**) and send it via the tmux SKILL **Sending input safely**. Use `--no-session`. If `-m`/`--choose-model` was given, follow the `pi-headless` SKILL model-selection flow (run `pi --list-models` and prompt the user to choose model and thinking level) before constructing the command; otherwise use defaults as specified in that SKILL.
    - **shell path**: for simple shell commands or when the user explicitly provides a raw command, send it directly without wrapping in `pi`.
 5. Follow the tmux SKILL: **Sending input safely** to dispatch commands. Unless the user explicitly asks not to wait, use **Watching output** (capture mode) to report results. For long-running commands, use **Watching output** (poll mode) to wait for completion first.
 
@@ -139,7 +139,7 @@ tmux conventions (per the tmux SKILL):
 1. Apply active guard. Apply pane target convention.
 2. Capture pane output (tmux SKILL **Watching output**, capture mode; `-S -200`). Do not send any keys. Report the captured text.
 
-### /ws handoff-for-impl (alias: /ws hfi)
+### /ws handoff-for-impl [-m|--choose-model] (alias: /ws hfi)
 
 `handoff-for-impl` is a silent kickoff command for implementation work whose duration is unknown. It creates or reuses an agent-workspace, sends the implementation command into its tmux pane, and does not wait for completion or capture output.
 
@@ -155,6 +155,8 @@ tmux conventions (per the tmux SKILL):
    - Set `AGENT_WS_NAME=<name>` as usual.
 
 3. Choose the implementation command:
+
+   Before constructing any `pi` command: if `-m`/`--choose-model` was given, follow the `pi-headless` SKILL model-selection flow (run `pi --list-models` and prompt the user to choose model and thinking level); otherwise use defaults.
 
    **Ralph path** — if the recent conversation has already used the `ralph` SKILL to generate `task.json` and has produced the exact Ralph execution command:
 
