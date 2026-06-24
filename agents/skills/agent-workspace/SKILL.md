@@ -113,9 +113,11 @@ tmux conventions (per the tmux SKILL):
 1. Apply active guard. Apply pane target convention.
 2. Capture the current pane state (tmux SKILL **Watching output**, capture mode).
 3. Before dispatching, apply the `refine-task` SKILL to clarify the task. When exploring the codebase, use the agent-workspace's worktree path.
-4. Choose how to dispatch the task:
-   - **pi path** (default for non-trivial implementation or analysis tasks): construct a `pi` command following the `pi-headless` SKILL (**Print Mode** or **JSON Mode**) and send it via the tmux SKILL **Sending input safely**. Use `--no-session`. If `-m`/`--choose-model` was given, follow the `pi-headless` SKILL model-selection flow (run `pi --list-models` and prompt the user to choose model and thinking level) before constructing the command; otherwise use defaults as specified in that SKILL.
-   - **shell path**: for simple shell commands or when the user explicitly provides a raw command, send it directly without wrapping in `pi`.
+4. Determine how to dispatch:
+   - **worker path** (default for any task whose output is file changes — writing code, docs, tests, or review comments): construct a `pi -p` command following the `pi-headless` SKILL **Print Mode** and send it via the tmux SKILL **Sending input safely**. Use `--no-session`. If `-m`/`--choose-model` was given, follow the `pi-headless` SKILL model-selection flow before constructing the command; otherwise use defaults.
+   - **dispatcher path** (only for tasks requiring observability — running tests, executing commands, debugging runtime errors): run the command directly using bash or a tmux pane, capturing output for the user.
+
+   The dispatcher agent MUST NOT write to or modify files in the agent-workspace directly, even for trivial changes. All file writes go through the worker. The dispatcher may explore the agent-workspace's worktree path codebase at any point (to refine the task with the user or to review worker output), but this is a supporting behavior, not a dispatch path.
 5. Follow the tmux SKILL: **Sending input safely** to dispatch commands. Unless the user explicitly asks not to wait, use **Watching output** (capture mode) to report results. For long-running commands, use **Watching output** (poll mode) to wait for completion first.
 
 ### /ws run [<name>] [-p=<pattern> | --poll=<pattern>] [-s|--silent] <input> (alias: /ws r)
