@@ -77,9 +77,7 @@ tmux conventions (per the tmux SKILL):
 
 - Derive the socket name from the repo root: `SOCKET_NAME=$(bash {baseDir}/worktree.sh root-name)`, then set `SOCKET="$CLAUDE_TMUX_SOCKET_DIR/$SOCKET_NAME.sock"` (using the tmux SKILL's default socket dir).
 - Session name equals `<name>`.
-- Target pane: discover via `list-panes` per the tmux SKILL **Targeting panes and naming**; pick the first pane.
-
-**Pane target**: for all name-scoped commands, discover the target pane via `list-panes` and pick the first pane; never hardcode `:0.0`.
+- **Pane target**: for all name-scoped commands, discover the target pane via `list-panes` and pick the first pane; never hardcode `:0.0`.
 
 **Active guard**: name-scoped commands other than `open` and `list` require state `active`; error if not; never auto-open.
 
@@ -105,7 +103,7 @@ tmux conventions (per the tmux SKILL):
 
 1. Resolve worker-workspace state for `<name>`.
 2. If state is `missing`, report an error and stop. If state is `orphan`, suggest manual cleanup and stop.
-3. If `dirty=yes`, ask the user to confirm before proceeding. Abort on no or unclear answer.
+3. If `dirty=yes`, ask the user to confirm before proceeding. On no or unclear answer, abort and leave the worktree and session untouched.
 4. Run `bash {baseDir}/worktree.sh clean <name>` without `--force`. On git failure, surface the error and stop.
 5. Only after the script succeeds: if a session exists, run `tmux -S "$SOCKET" kill-session -t "<name>"`; otherwise skip.
 6. If `kill-session` fails after a successful clean, the session becomes orphan. Surface this to the user and do not auto-resolve.
@@ -118,7 +116,9 @@ tmux conventions (per the tmux SKILL):
 4. The dispatcher must choose how to route the work, but it must not implement file changes itself. If the task output is expected to be code, docs, tests, review comments, or any other file modification, send it to the worker path.
 5. Determine how to dispatch:
    - **worker path** (default for any task whose output is file changes — writing code, docs, tests, or review comments): construct a `pi -p` command following the `pi-headless` SKILL **Print Mode** and send it via the tmux SKILL **Sending input safely**. Use `--no-session`. Write the refined task text to `/tmp/task/<YYYY-MM-DD-HHMMSS>-<slug>.md` (create the directory with `mkdir -p /tmp/task` if needed), where `<slug>` is a short meaningful kebab-case English phrase derived from the task content. Write the refined task text in the same language as the original `<task>` input. Then pass it to pi via `@/tmp/task/<filename>.md`. If `-m`/`--choose-model` was given, follow the `pi-headless` SKILL model-selection flow before constructing the command; otherwise use defaults.
-   - **dispatcher path** (only for tasks requiring observability — running tests, executing commands, debugging runtime errors): run the command directly using bash or a tmux pane, capturing output for the user.
+   - **dispatcher path** (for tasks requiring observability — running tests, executing commands, checking runtime errors): run the command directly using bash or a tmux pane, capturing output for the user.
+
+   If a task requires both (e.g. run tests then fix failures, or fix code then verify with a command), handle the observable step via the dispatcher and the file-change step via the worker — in whichever order the task demands. Pass findings between steps in the task doc.
 
    The dispatcher agent MUST NOT write to or modify files in the worker-workspace directly, even for trivial changes. All file writes go through the worker. The dispatcher may explore the worker-workspace's worktree path codebase at any point — whether as the task goal itself (e.g. code review, analysis) or to support task refinement and result review.
 6. Follow the tmux SKILL: **Sending input safely** to dispatch commands. Unless the user explicitly asks not to wait, use **Watching output** (capture mode) to report results. For long-running commands, use **Watching output** (poll mode) to wait for completion first.
@@ -128,11 +128,9 @@ tmux conventions (per the tmux SKILL):
 `/ws run` is fully manual: `<input>` is sent verbatim to the target pane. It may be a shell command, a REPL expression, or plain text addressed to whatever interactive program is running in the pane (pi, python, gdb, etc.). Do not parse, validate, or rewrite `<input>`; what runs in the pane is the user's responsibility.
 
 1. Apply active guard. Apply pane target convention.
-2. Parse flags from the front of the argument list:
+2. Parse flags from the front of the argument list. Stop at the first token that does not start with `-`; everything from that token onward is `<input>` taken literally. `-p`/`--poll` and `-s`/`--silent` are mutually exclusive; error if both are given.
    - `-p=<pattern>` / `--poll=<pattern>`: poll the pane until `<pattern>` (regex) appears before capturing. The `=` form is required; `-p <pattern>` (space-separated) is a syntax error, do not accept it. Timeout uses the `wait-for-text.sh` default; do not expose it.
    - `-s` / `--silent`: skip the post-send capture entirely.
-   - `-p`/`--poll` and `-s`/`--silent` are mutually exclusive; error if both are given.
-   - Stop flag parsing at the first token that does not start with `-`. Everything from that token to the end of the argument list is `<input>`, taken literally (including spaces, quotes, and shell metacharacters).
 3. Send `<input>` literally via the tmux SKILL **Sending input safely** (`send-keys -l -- "<input>"`), then send `Enter`.
 4. Reporting:
    - If `--silent` is given, do not capture.
@@ -164,7 +162,7 @@ Argument parsing: `<name>` is an optional positional argument; `-m`/`--choose-mo
 
 3. Choose the implementation command:
 
-   Before constructing any `pi` command: if `-m`/`--choose-model` was given, follow the `pi-headless` SKILL model-selection flow (run `pi --list-models` and prompt the user to choose model and thinking level); otherwise use defaults.
+   Before constructing any `pi` command: if `-m`/`--choose-model` was given, follow the `pi-headless` SKILL model-selection flow; otherwise use defaults.
 
    **Ralph path** — if the recent conversation has already used the `ralph` SKILL to generate `task.json` and has produced the exact Ralph execution command:
 
