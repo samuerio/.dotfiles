@@ -11,7 +11,7 @@ Use interactive mode or `--mode rpc` for multi-turn workflows; print and JSON mo
 
 ## Before You Start
 
-Always pass `--no-session` to avoid persisting a session.
+Always pass `--no-session` to avoid persisting a session. In headless mode, pi has no access to any prior session history — each run starts from a blank slate. The task document must therefore be fully self-contained; never rely on or reference context from a previous conversation or session.
 
 Resolve `WORKER_MODEL` and `WORKER_THINKING` for the current run using this flow:
 
