@@ -19,10 +19,11 @@ Resolve `WORKER_MODEL` and `WORKER_THINKING` for the current run using this flow
 2. Show the allowed thinking levels — `off`, `minimal`, `low`, `medium`, `high`, `xhigh` — and let the user choose one.
 3. Store the selected values in temporary environment variables (`WORKER_MODEL`, `WORKER_THINKING`) for subsequent headless `pi` commands in the current shell/session only.
 4. Otherwise, default `WORKER_MODEL` from `DEFAULT_WORKER_MODEL` and `WORKER_THINKING` from `DEFAULT_WORKER_THINKING`.
-5. After applying defaults, if `WORKER_MODEL` is still empty, fall back to the same user-choice flow and run `pi --list-models "${DEFAULT_WORKER_PROVIDER:-}"`.
-6. If `WORKER_THINKING` is still empty after applying defaults, ask the user to choose one of the allowed thinking levels and set it temporarily for subsequent commands.
+5. After applying defaults, if `WORKER_MODEL` is still empty, fall back to the same user-choice flow and run `pi --list-models "${DEFAULT_WORKER_PROVIDER:-}"`. Never substitute a hardcoded model — stop and ask the user.
+6. If `WORKER_THINKING` is still empty after applying defaults, ask the user to choose one of the allowed thinking levels and set it temporarily for subsequent commands. Never substitute a hardcoded thinking level — stop and ask the user.
 
 For headless execution, never block on terminal prompts. Any required selection should happen in the chat/user flow, then be passed into the command environment for the current run.
+If a `pi` command fails due to an empty or invalid `--model` or `--thinking` value, do not retry with a hardcoded fallback. Return to step 1 and resolve the values with the user before retrying.
 
 ## Choose the Mode
 
