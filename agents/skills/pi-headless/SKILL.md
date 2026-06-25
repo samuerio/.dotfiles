@@ -13,17 +13,14 @@ Use interactive mode or `--mode rpc` for multi-turn workflows; print and JSON mo
 
 Always pass `--no-session` to avoid persisting a session. In headless mode, pi has no access to any prior session history — each run starts from a blank slate. The task document must therefore be fully self-contained; never rely on or reference context from a previous conversation or session.
 
-Resolve `WORKER_MODEL` and `WORKER_THINKING` for the current run using this flow:
+Resolve the model and thinking level for the current run:
 
-1. If the user explicitly wants to choose a model, run `pi --list-models "${DEFAULT_WORKER_PROVIDER:-}"` and show the available models to the user.
+1. If the user explicitly wants to choose a model, run `pi --list-models` and show the available models.
 2. Show the allowed thinking levels — `off`, `minimal`, `low`, `medium`, `high`, `xhigh` — and let the user choose one.
-3. Store the selected values in temporary environment variables (`WORKER_MODEL`, `WORKER_THINKING`) for subsequent headless `pi` commands in the current shell/session only.
-4. Otherwise, default `WORKER_MODEL` from `DEFAULT_WORKER_MODEL` and `WORKER_THINKING` from `DEFAULT_WORKER_THINKING`.
-5. After applying defaults, if `WORKER_MODEL` is still empty, fall back to the same user-choice flow and run `pi --list-models "${DEFAULT_WORKER_PROVIDER:-}"`. Never substitute a hardcoded model — stop and ask the user.
-6. If `WORKER_THINKING` is still empty after applying defaults, ask the user to choose one of the allowed thinking levels and set it temporarily for subsequent commands. Never substitute a hardcoded thinking level — stop and ask the user.
+3. Otherwise, use the values from `DEFAULT_WORKER_MODEL` and `DEFAULT_WORKER_THINKING` if set.
+4. If either value is still unresolved, ask the user before proceeding. Never substitute hardcoded values.
 
-For headless execution, never block on terminal prompts. Any required selection should happen in the chat/user flow, then be passed into the command environment for the current run.
-If a `pi` command fails due to an empty or invalid `--model` or `--thinking` value, do not retry with a hardcoded fallback. Return to step 1 and resolve the values with the user before retrying.
+After resolving, use the model and thinking level directly as `<model>` and `<thinking>` in all commands below.
 
 ## Choose the Mode
 
@@ -39,9 +36,9 @@ If a `pi` command fails due to an empty or invalid `--model` or `--thinking` val
 **Without piped input:**
 
 ```bash
-pi --no-session --model "$WORKER_MODEL" --thinking "$WORKER_THINKING" \
+pi --no-session --model <model> --thinking <thinking> \
   -p "Summarize this codebase"
-pi --no-session --model "$WORKER_MODEL" --thinking "$WORKER_THINKING" \
+pi --no-session --model <model> --thinking <thinking> \
   -p @plan.md "Implement exactly what this plan describes"
 ```
 
@@ -49,7 +46,7 @@ pi --no-session --model "$WORKER_MODEL" --thinking "$WORKER_THINKING" \
 
 ```bash
 cat README.md \
-  | pi --no-session --model "$WORKER_MODEL" --thinking "$WORKER_THINKING" \
+  | pi --no-session --model <model> --thinking <thinking> \
     -p "Summarize this text"
 ```
 
@@ -58,7 +55,7 @@ cat README.md \
 stdout: JSON Lines, one event per line (first line = session header). Logs/warnings go to stderr — redirect before piping to `jq`.
 
 ```bash
-pi --no-session --model "$WORKER_MODEL" --thinking "$WORKER_THINKING" \
+pi --no-session --model <model> --thinking <thinking> \
   --mode json "List files" 2>/dev/null \
   | jq -c 'select(.type == "message_end")'
 ```
@@ -66,7 +63,7 @@ pi --no-session --model "$WORKER_MODEL" --thinking "$WORKER_THINKING" \
 Example audit log:
 
 ```bash
-pi --no-session --model "$WORKER_MODEL" --thinking "$WORKER_THINKING" \
+pi --no-session --model <model> --thinking <thinking> \
   --mode json "Fix the failing test in src/foo.test.ts" \
   2>ci-task.err \
   | tee ci-task.jsonl \
@@ -77,8 +74,8 @@ pi --no-session --model "$WORKER_MODEL" --thinking "$WORKER_THINKING" \
 
 | Flag | Use |
 |---|---|
-| `--model <pattern>` | choose model, e.g. `openai/gpt-4o` or `sonnet:high` |
-| `--thinking <level>` | set reasoning effort: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
+| `--model <model>` | choose model, e.g. `openai/gpt-4o` or `sonnet:high` |
+| `--thinking <thinking>` | set reasoning effort: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
 | `--no-session` | avoid persisting a session |
 
 ## Common Workflows
@@ -90,7 +87,7 @@ Use pi as a headless worker to execute a scoped implementation task defined in a
 **Plan without implementation instruction (`@file` + inline prompt):**
 
 ```bash
-pi --no-session --model "$WORKER_MODEL" --thinking "$WORKER_THINKING" \
+pi --no-session --model <model> --thinking <thinking> \
   -p @plan.md "Implement exactly what this plan describes"
 ```
 
@@ -100,7 +97,7 @@ References an existing plan file and pairs it with an implementation instruction
 
 ```bash
 cat handoff-for-impl.md \
-  | pi --no-session --model "$WORKER_MODEL" --thinking "$WORKER_THINKING" \
+  | pi --no-session --model <model> --thinking <thinking> \
     -p
 ```
 
@@ -114,16 +111,16 @@ The handoff doc contains both the plan and the implementation instruction in one
 # Quick security scan
 find . -name "*.py" -print0 \
   | xargs -0 cat \
-  | pi --no-session --model "$WORKER_MODEL" --thinking "$WORKER_THINKING" \
+  | pi --no-session --model <model> --thinking <thinking> \
     -p "Check these files for security vulnerabilities and summarize findings by file"
 
 # Performance analysis of staged changes
 git diff \
-  | pi --no-session --model "$WORKER_MODEL" --thinking "$WORKER_THINKING" \
+  | pi --no-session --model <model> --thinking <thinking> \
     -p "Analyze the performance impact of these changes"
 
 # Documentation consistency check
-pi --no-session --model "$WORKER_MODEL" --thinking "$WORKER_THINKING" \
+pi --no-session --model <model> --thinking <thinking> \
   -p "Verify all public functions and classes in src/ have complete docstrings. List any missing ones."
 ```
 
@@ -131,16 +128,16 @@ pi --no-session --model "$WORKER_MODEL" --thinking "$WORKER_THINKING" \
 
 ```bash
 # Unit tests for a specific module
-pi --no-session --model "$WORKER_MODEL" --thinking "$WORKER_THINKING" \
+pi --no-session --model <model> --thinking <thinking> \
   -p @auth.py "Generate comprehensive pytest unit tests for this module. Write them to tests/test_auth.py."
 
 # Integration tests
-pi --no-session --model "$WORKER_MODEL" --thinking "$WORKER_THINKING" \
+pi --no-session --model <model> --thinking <thinking> \
   -p "Create API integration tests with realistic fixture data for all endpoints in src/api/"
 
 # Test coverage gap analysis (requires a coverage report)
 coverage json -o coverage.json && cat coverage.json \
-  | pi --no-session --model "$WORKER_MODEL" --thinking "$WORKER_THINKING" \
+  | pi --no-session --model <model> --thinking <thinking> \
     -p "Analyze this coverage report and list the highest-value missing test cases, grouped by module"
 ```
 
@@ -150,16 +147,16 @@ coverage json -o coverage.json && cat coverage.json \
 # OpenAPI spec from source
 find src/ -name "*.py" -print0 \
   | xargs -0 cat \
-  | pi --no-session --model "$WORKER_MODEL" --thinking "$WORKER_THINKING" \
+  | pi --no-session --model <model> --thinking <thinking> \
     -p "Generate an OpenAPI 3.1 specification for all HTTP endpoints found in this source. Write it to docs/openapi.yaml."
 
 # README generation
-pi --no-session --model "$WORKER_MODEL" --thinking "$WORKER_THINKING" \
+pi --no-session --model <model> --thinking <thinking> \
   -p "Read the project structure and source files, then create a comprehensive README.md covering setup, usage, and examples"
 
 # Changelog from recent commits
 git log --oneline -50 \
-  | pi --no-session --model "$WORKER_MODEL" --thinking "$WORKER_THINKING" \
+  | pi --no-session --model <model> --thinking <thinking> \
     -p "Generate a Keep-a-Changelog formatted CHANGELOG entry from these commits, grouped by type (Added, Fixed, Changed)"
 ```
 
