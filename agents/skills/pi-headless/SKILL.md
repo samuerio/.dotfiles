@@ -77,6 +77,9 @@ pi --no-session --model <model> --thinking <thinking> \
 | `--model <model>` | choose model, e.g. `openai/gpt-4o` or `sonnet:high` |
 | `--thinking <thinking>` | set reasoning effort: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
 | `--no-session` | avoid persisting a session |
+| `--tools <tools>` | comma-separated allowlist of tools, e.g. `read,grep,find,ls` for read-only mode |
+| `--exclude-tools <tools>` | comma-separated denylist of tools to disable |
+| `--no-tools` | disable all tools |
 
 ## Common Workflows
 
@@ -104,6 +107,18 @@ cat handoff-for-impl.md \
 The handoff doc contains both the plan and the implementation instruction in one file. The worker receives everything it needs from the doc alone.
 
 > In both cases the worker runs to completion and exits — no follow-up turns. Keep the input doc focused so pi has everything it needs in a single pass.
+
+### Read-Only Mode
+
+Restrict pi to read-only tools to safely review or analyze code without risk of modification:
+
+```bash
+pi --no-session --model <model> --thinking <thinking> \
+  --tools read,grep,find,ls \
+  -p "Review the code and summarize findings"
+```
+
+Useful for code review subagents, security scans, or any task where file modification must be prevented.
 
 ### Code Review Automation
 
