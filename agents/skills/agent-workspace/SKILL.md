@@ -114,6 +114,8 @@ tmux conventions (per the tmux SKILL):
 1. Apply active guard. Apply pane target convention.
 2. Capture the current pane state (tmux SKILL **Watching output**, capture mode).
 3. Before dispatching, apply the `refine-task` SKILL to clarify the task. When exploring the codebase, use `$WORKER_WS_PATH` as the working directory for all file exploration commands.
+
+   After `refine-task` completes (including any clarifying exchange with the user), resume `/ws task` from step 4 using the refined task text as `<task>`.
 4. The dispatcher must choose how to route the work, but it must not implement file changes itself. If the task output is expected to be code, docs, tests, review comments, or any other file modification, send it to the worker path.
 5. Determine how to dispatch:
    - **worker path** (default for any task whose output is file changes — writing code, docs, tests, or review comments): construct a `pi -p` command following the `pi-headless` SKILL **Print Mode** and send it via the tmux SKILL **Sending input safely**. Use `--no-session`. Write the refined task text to `/tmp/task/<YYYY-MM-DD-HHMMSS>-<slug>.md` (create the directory with `mkdir -p /tmp/task` if needed), where `<slug>` is a short meaningful kebab-case English phrase derived from the task content. Write the refined task text in the same language as the original `<task>` input. Then pass it to pi via `@/tmp/task/<filename>.md`. If `-m`/`--choose-model` was given, follow the `pi-headless` SKILL model-selection flow before constructing the command; otherwise use defaults.
