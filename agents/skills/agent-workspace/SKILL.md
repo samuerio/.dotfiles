@@ -12,7 +12,16 @@ A **worker-workspace** is an isolated execution environment that the dispatcher 
 
 Each worker-workspace is identified by `<name>`. The git branch name and the tmux session name both equal `<name>`. The two components share this identity and must be managed together. This skill owns their joint lifecycle.
 
-Role boundary: the dispatcher agent manages lifecycle, routing, observation, and user-facing status. The worker agent performs implementation work inside the worker-workspace. The dispatcher may inspect the worktree to refine tasks or review results, but must not directly modify files there.
+## Role Boundaries
+
+The dispatcher agent owns the worker-workspace lifecycle and all coordination:
+
+- **Explore freely**: the dispatcher may read and inspect files in the worker worktree at any point — to refine a task with the user, to review results, or to understand context.
+- **No direct writes**: the dispatcher must never write to or modify files in the worker worktree, even for trivial changes. All file modifications go through the worker agent.
+- **Observable tasks**: running commands, running tests, and debugging in the worktree are the dispatcher's responsibility — done directly in the tmux pane for observability.
+- **Review after completion**: after the worker agent signals completion, the dispatcher inspects the result and reports back to the user.
+
+The worker agent performs implementation work inside the worker-workspace. It receives a self-contained task document and runs to completion.
 
 `worktree.sh` owns the git worktree side. tmux operations must follow the tmux SKILL. `<name>` always means the complete worker-workspace identifier and must be matched exactly; never fuzzy-match or shorten it.
 
@@ -112,7 +121,7 @@ tmux conventions (per the tmux SKILL):
 ### /ws task [<name>] [-m|--choose-model] <task> (alias: /ws t)
 
 1. Apply active guard. Apply pane target convention.
-2. Before dispatching, apply the `refine-task` SKILL to clarify the task. When exploring the codebase, use `$WORKER_WS_PATH` as the working directory for all file exploration commands.
+2. Before dispatching, apply the `refine-task` SKILL to clarify the task. The dispatcher should proactively explore the worktree (using `$WORKER_WS_PATH`) to answer questions from context rather than asking the user unnecessarily. After the task is refined and confirmed, the dispatcher reviews the worker's output once the worker signals completion.
 
    After `refine-task` completes (including any clarifying exchange with the user), resume `/ws task` from step 3 using the refined task text as `<task>`.
 3. The dispatcher must choose how to route the work, but it must not implement file changes itself. If the task output is expected to be code, docs, tests, review comments, or any other file modification, send it to the worker path.
@@ -121,8 +130,6 @@ tmux conventions (per the tmux SKILL):
    - **dispatcher path** (for tasks requiring observability — running tests, executing commands, checking runtime errors): run the command directly using bash or a tmux pane, capturing output for the user.
 
    If a task requires both (e.g. run tests then fix failures, or fix code then verify with a command), handle the observable step via the dispatcher and the file-change step via the worker — in whichever order the task demands. Pass findings between steps in the task doc.
-
-   The dispatcher agent MUST NOT write to or modify files in the worker-workspace directly, even for trivial changes. All file writes go through the worker. The dispatcher may explore the worker-workspace's worktree path codebase at any point — whether as the task goal itself (e.g. code review, analysis) or to support task refinement and result review.
 
 ### /ws run [<name>] [-p=<pattern> | --poll=<pattern>] [-s|--silent] <input> (alias: /ws r)
 
