@@ -109,22 +109,22 @@ tmux conventions (per the tmux SKILL):
 5. Only after the script succeeds: if a session exists, run `tmux -S "$SOCKET" kill-session -t "<name>"`; otherwise skip.
 6. If `kill-session` fails after a successful clean, the session becomes orphan. Surface this to the user and do not auto-resolve.
 
-### /ws task [<name>] [-m|--choose-model] <task> (alias: /ws t)
+### /ws task [<name>] [-m|--choose-model] [-t|--tmux] <task> (alias: /ws t)
 
 1. Apply active guard. Apply pane target convention.
-2. Capture the current pane state (tmux SKILL **Watching output**, capture mode).
-3. Before dispatching, apply the `refine-task` SKILL to clarify the task. When exploring the codebase, use `$WORKER_WS_PATH` as the working directory for all file exploration commands.
+2. Before dispatching, apply the `refine-task` SKILL to clarify the task. When exploring the codebase, use `$WORKER_WS_PATH` as the working directory for all file exploration commands.
 
-   After `refine-task` completes (including any clarifying exchange with the user), resume `/ws task` from step 4 using the refined task text as `<task>`.
-4. The dispatcher must choose how to route the work, but it must not implement file changes itself. If the task output is expected to be code, docs, tests, review comments, or any other file modification, send it to the worker path.
-5. Determine how to dispatch:
-   - **worker path** (default for any task whose output is file changes — writing code, docs, tests, or review comments): construct a `pi -p` command following the `pi-headless` SKILL **Print Mode** and send it via the tmux SKILL **Sending input safely**. Use `--no-session`. Write the refined task text to `/tmp/task/<YYYY-MM-DD-HHMMSS>-<slug>.md` (create the directory with `mkdir -p /tmp/task` if needed), where `<slug>` is a short meaningful kebab-case English phrase derived from the task content. Write the refined task text in the same language as the original `<task>` input. Then pass it to pi via `@/tmp/task/<filename>.md`. If `-m`/`--choose-model` was given, follow the `pi-headless` SKILL model-selection flow before constructing the command; otherwise use defaults.
+   After `refine-task` completes (including any clarifying exchange with the user), resume `/ws task` from step 3 using the refined task text as `<task>`.
+3. The dispatcher must choose how to route the work, but it must not implement file changes itself. If the task output is expected to be code, docs, tests, review comments, or any other file modification, send it to the worker path.
+4. Determine how to dispatch:
+   - **worker path** (default for any task whose output is file changes — writing code, docs, tests, or review comments): construct a `pi -p` command following the `pi-headless` SKILL **Print Mode**. Use `--no-session`. Write the refined task text to `/tmp/task/<YYYY-MM-DD-HHMMSS>-<slug>.md` (create the directory with `mkdir -p /tmp/task` if needed), where `<slug>` is a short meaningful kebab-case English phrase derived from the task content. Write the refined task text in the same language as the original `<task>` input. Then pass it to pi via `@/tmp/task/<filename>.md`. If `-m`/`--choose-model` was given, follow the `pi-headless` SKILL model-selection flow before constructing the command; otherwise use defaults.
+     - Without `-t` (default): run the `pi` command directly in the shell and capture its output.
+     - With `-t`/`--tmux`: send the command to the tmux pane via the tmux SKILL **Sending input safely** and use **Watching output** (poll mode) to wait for completion.
    - **dispatcher path** (for tasks requiring observability — running tests, executing commands, checking runtime errors): run the command directly using bash or a tmux pane, capturing output for the user.
 
    If a task requires both (e.g. run tests then fix failures, or fix code then verify with a command), handle the observable step via the dispatcher and the file-change step via the worker — in whichever order the task demands. Pass findings between steps in the task doc.
 
    The dispatcher agent MUST NOT write to or modify files in the worker-workspace directly, even for trivial changes. All file writes go through the worker. The dispatcher may explore the worker-workspace's worktree path codebase at any point — whether as the task goal itself (e.g. code review, analysis) or to support task refinement and result review.
-6. Follow the tmux SKILL: **Sending input safely** to dispatch commands. Unless the user explicitly asks not to wait, use **Watching output** (capture mode) to report results. For long-running commands, use **Watching output** (poll mode) to wait for completion first.
 
 ### /ws run [<name>] [-p=<pattern> | --poll=<pattern>] [-s|--silent] <input> (alias: /ws r)
 
