@@ -220,7 +220,8 @@ function streamQoderCli(
       const msg = makeAbortedMessage(model);
       stream.push({ type: "start", partial: msg });
       stream.push({ type: "error", reason: "aborted", error: msg });
-      stream.end(msg);
+      stream.push({ type: "done", reason: "error", message: msg });
+      stream.end();
       return stream;
     }
     options.signal.addEventListener(
@@ -267,13 +268,15 @@ function streamQoderCli(
     const msg = makeErrorMessage(model, `Failed to spawn qodercli: ${errMsg}`);
     stream.push({ type: "start", partial: msg });
     stream.push({ type: "error", reason: "error", error: msg });
-    stream.end(msg);
+    stream.push({ type: "done", reason: "error", message: msg });
+    stream.end();
     return stream;
   }
 
   let stderrBuf = "";
   const textBuffer: string[] = [];
   const hasTools = !!context.tools?.length;
+  let firstLine = true;
 
   // Read stdout line by line
   const rl = createInterface({ input: child.stdout!, crlfDelay: Infinity });
@@ -282,38 +285,46 @@ function streamQoderCli(
     if (aborted) return;
     const text = extractTextFromLine(line);
     if (text) {
+      // Always buffer text for final message construction
+      textBuffer.push(text);
+
       if (hasTools) {
-        // Buffer all text for post-hoc tool call detection
-        textBuffer.push(text);
+        // Buffer all text for post-hoc tool call detection (already done above)
       } else {
-        // Stream text directly
-        const partial: AssistantMessage = {
-          role: "assistant",
-          content: [{ type: "text", text: text }],
-          api: model.api,
-          provider: "qoder-stdio",
-          model: model.id,
-          usage: zeroUsage(model),
-          stopReason: "stop",
-          timestamp: Date.now(),
-        };
-        stream.push({ type: "start", partial });
-        stream.push({
-          type: "text_start",
-          contentIndex: 0,
-          partial,
-        });
+        // Stream text directly: start + text_start on first line, text_delta on each line
+        if (firstLine) {
+          const partial: AssistantMessage = {
+            role: "assistant",
+            content: [{ type: "text", text: "" }],
+            api: model.api,
+            provider: "qoder-stdio",
+            model: model.id,
+            usage: zeroUsage(model),
+            stopReason: "stop",
+            timestamp: Date.now(),
+          };
+          stream.push({ type: "start", partial });
+          stream.push({
+            type: "text_start",
+            contentIndex: 0,
+            partial,
+          });
+          firstLine = false;
+        }
         stream.push({
           type: "text_delta",
           contentIndex: 0,
           delta: text,
-          partial,
-        });
-        stream.push({
-          type: "text_end",
-          contentIndex: 0,
-          content: text,
-          partial,
+          partial: {
+            role: "assistant",
+            content: [{ type: "text", text: "" }],
+            api: model.api,
+            provider: "qoder-stdio",
+            model: model.id,
+            usage: zeroUsage(model),
+            stopReason: "stop",
+            timestamp: Date.now(),
+          },
         });
       }
     }
@@ -341,7 +352,8 @@ function streamQoderCli(
       );
       stream.push({ type: "start", partial: msg });
       stream.push({ type: "error", reason: "error", error: msg });
-      stream.end(msg);
+      stream.push({ type: "done", reason: "error", message: msg });
+      stream.end();
       return;
     }
 
@@ -391,7 +403,7 @@ function streamQoderCli(
           reason: "toolUse",
           message: partial,
         });
-        stream.end(partial);
+        stream.end();
       } else {
         // Emit as text
         const partial: AssistantMessage = {
@@ -423,10 +435,10 @@ function streamQoderCli(
           partial,
         });
         stream.push({ type: "done", reason: "stop", message: partial });
-        stream.end(partial);
+        stream.end();
       }
     } else {
-      // No tools: already streamed text inline
+      // No tools: already streamed text_delta per line; now push text_end + done
       const fullText = textBuffer.join("");
       const partial: AssistantMessage = {
         role: "assistant",
@@ -438,8 +450,14 @@ function streamQoderCli(
         stopReason: "stop",
         timestamp: Date.now(),
       };
+      stream.push({
+        type: "text_end",
+        contentIndex: 0,
+        content: fullText,
+        partial,
+      });
       stream.push({ type: "done", reason: "stop", message: partial });
-      stream.end(partial);
+      stream.end();
     }
   });
 
@@ -451,7 +469,8 @@ function streamQoderCli(
     );
     stream.push({ type: "start", partial: msg });
     stream.push({ type: "error", reason: "error", error: msg });
-    stream.end(msg);
+    stream.push({ type: "done", reason: "error", message: msg });
+    stream.end();
   });
 
   return stream;
