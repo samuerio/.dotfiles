@@ -11,7 +11,6 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
-  calculateCost,
   createAssistantMessageEventStream,
   type AssistantMessage,
   type AssistantMessageEventStream,
@@ -131,7 +130,7 @@ function extractText(
 function extractTextFromLine(line: string): string | null {
   try {
     const parsed = JSON.parse(line);
-    // Try common stream-json field paths
+    if (parsed.type === "system" || parsed.type === "result") return null;
     const data = parsed.data ?? parsed;
     if (typeof data.message?.content === "string") {
       return data.message.content;
@@ -143,12 +142,10 @@ function extractTextFromLine(line: string): string | null {
         .join("");
       if (parts) return parts;
     }
-    if (typeof data.result === "string") return data.result;
     if (typeof data.text === "string") return data.text;
     if (typeof data.output === "string") return data.output;
     return null;
   } catch {
-    // Not valid JSON
     if (!line.startsWith("{")) return line;
     return null;
   }
@@ -229,6 +226,11 @@ function streamQoderCli(
       () => {
         aborted = true;
         child?.kill("SIGTERM");
+        const msg = makeAbortedMessage(model);
+        stream.push({ type: "start", partial: msg });
+        stream.push({ type: "error", reason: "aborted", error: msg });
+        stream.push({ type: "done", reason: "stop", message: msg });
+        stream.end();
       },
       { once: true },
     );
@@ -480,20 +482,15 @@ function streamQoderCli(
 // Helpers
 // ---------------------------------------------------------------------------
 
-function zeroUsage(model: Model<string>): Usage {
+function zeroUsage(_model: Model<string>): Usage {
+  const zero = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
   return {
     input: 0,
     output: 0,
     cacheRead: 0,
     cacheWrite: 0,
     totalTokens: 0,
-    cost: calculateCost(model, {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      totalTokens: 0,
-    }),
+    cost: { ...zero },
   };
 }
 
