@@ -239,6 +239,7 @@ function updateWidget(
 }
 
 async function runRole(
+	pi: ExtensionAPI,
 	ctx: ExtensionCommandContext,
 	role: RoleName,
 	systemPrompt: string,
@@ -368,6 +369,7 @@ async function runIterate(pi: ExtensionAPI, args: string | undefined, ctx: Exten
 	for (let iteration = 1; iteration <= maxIter; iteration++) {
 		updateWidget(ctx, { phase: "actor", iteration, maxIter, acceptedScore, commit: acceptedCommit });
 		const actor = await runRole(
+			pi,
 			ctx,
 			"actor",
 			ACTOR_SYSTEM_PROMPT,
@@ -378,6 +380,7 @@ async function runIterate(pi: ExtensionAPI, args: string | undefined, ctx: Exten
 
 		updateWidget(ctx, { phase: "critic", iteration, maxIter, acceptedScore, commit: acceptedCommit });
 		const criticRun = await runRole(
+			pi,
 			ctx,
 			"critic",
 			CRITIC_SYSTEM_PROMPT,
@@ -413,6 +416,7 @@ async function runIterate(pi: ExtensionAPI, args: string | undefined, ctx: Exten
 			}
 
 			const commitRun = await runRole(
+				pi,
 				ctx,
 				"commit",
 				COMMIT_SYSTEM_PROMPT,
@@ -441,7 +445,11 @@ async function runIterate(pi: ExtensionAPI, args: string | undefined, ctx: Exten
 				`Rejected iteration ${iteration} with score ${critic.score} <= accepted score ${acceptedScore}. Summary: ${critic.summary}`,
 				...critic.suggestions,
 			].filter(Boolean);
+			const reportBeforeRollback = await fs.readFile(reportPath, "utf8").catch(() => undefined);
 			await rollback(pi, acceptedCommit);
+			if (reportBeforeRollback !== undefined) {
+				await fs.writeFile(reportPath, reportBeforeRollback, "utf8");
+			}
 			await appendReport(reportPath, {
 				iteration,
 				actorStatus: actor.output || "completed",
