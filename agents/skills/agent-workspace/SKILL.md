@@ -120,7 +120,7 @@ tmux conventions (per the tmux SKILL):
 
 ### /ws task [<name>] [-m|--choose-model] <task> (alias: /ws t)
 
-1. Apply active guard. Apply pane target convention.
+1. Apply active guard. Apply pane target convention. Apply pane readiness check (tmux SKILL **Checking pane readiness**); if the pane is busy, report it and stop.
 2. Before dispatching, apply the `refine-task` SKILL to clarify the task. The dispatcher should proactively explore the worktree (using `$WORKER_WS_PATH`) to answer questions from context rather than asking the user unnecessarily. After the task is refined and confirmed, the dispatcher reviews the worker's output once the worker signals completion.
 
    After `refine-task` completes (including any clarifying exchange with the user), resume `/ws task` from step 3 using the refined task text as `<task>`.
@@ -169,6 +169,8 @@ Argument parsing: `<name>` is an optional positional argument; `-m`/`--choose-mo
    - Set `WORKER_WS_NAME=<name>` as usual.
 
 3. Choose the implementation command:
+
+   Apply pane readiness check (tmux SKILL **Checking pane readiness**); if the pane is busy, report it and stop.
 
    Before constructing any `pi` command: if `-m`/`--choose-model` was given, follow the `pi-headless` SKILL model-selection flow; otherwise use defaults.
 

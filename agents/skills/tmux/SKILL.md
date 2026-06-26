@@ -53,6 +53,16 @@ This must ALWAYS be printed right after a session was started and once again at 
 - For machine parsing, emit JSON: `bash scripts/find-sessions.sh -S "$SOCKET" --json`.
 - Scan all sockets under the shared directory: `bash scripts/find-sessions.sh --all` (uses `CLAUDE_TMUX_SOCKET_DIR` or `${TMPDIR:-/tmp}/claude-tmux-sockets`).
 
+## Checking pane readiness
+
+Before sending any command to a pane, verify the pane is at an idle shell prompt and not running a process:
+
+```bash
+tmux -S "$SOCKET" capture-pane -p -J -t "$TARGET" -S -10
+```
+
+Inspect the last 10 lines. The pane is **ready** if the last non-empty line matches a shell prompt pattern (`\$\s*$`, `#\s*$`, or `%\s*$`). If it does not match — e.g. a process is still running, or a program like `pi` is active — **do not send input**. Report to the user that the pane is busy and wait for explicit confirmation before proceeding.
+
 ## Sending input safely
 
 - Prefer literal sends to avoid shell splitting: `tmux -S "$SOCKET" send-keys -t target -l -- "$cmd"`
