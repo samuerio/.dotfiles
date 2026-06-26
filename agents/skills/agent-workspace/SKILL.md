@@ -81,6 +81,8 @@ To resolve worker-workspace state for `<name>`:
 
 ## /ws trigger
 
+> **SKILL roles**: `refine-task` clarifies a single task's scope through Q&A and outputs plain task text for immediate dispatch. `draft-impl-handoff` produces a structured handoff document consumed by a headless `pi` worker. Do not conflate the two — `/ws task` always uses `refine-task`; `/ws hfi`'s generate-then-run path always uses `draft-impl-handoff`.
+
 `/ws` is the only entry point. Name-scoped subcommands operate on a specific `<name>`: full worker-workspace name, exact match, no fuzzy lookup.
 
 tmux conventions (per the tmux SKILL):
