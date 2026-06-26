@@ -224,16 +224,18 @@ function updateWidget(
 		acceptedScore?: number;
 		currentScore?: number;
 		commit?: string;
+		activity?: string;
 	},
 ): void {
 	if (!ctx.hasUI) return;
 	const iter = state.iteration && state.maxIter ? `iter ${state.iteration}/${state.maxIter}` : "idle";
 	const score = state.currentScore === undefined ? "" : ` current ${state.currentScore}`;
 	const accepted = state.acceptedScore === undefined ? "accepted n/a" : `accepted ${state.acceptedScore}`;
+	const activity = state.activity ? ` | ${state.activity}` : "";
 	ctx.ui.setWidget("iterate", [
 		ctx.ui.theme.fg(
 			"accent",
-			`Iterate: ${state.phase} | ${iter} | ${accepted}${score} | ${shortSha(state.commit)}`,
+			`Iterate: ${state.phase} | ${iter} | ${accepted}${score} | ${shortSha(state.commit)}${activity}`,
 		),
 	]);
 }
@@ -245,6 +247,7 @@ async function runRole(
 	systemPrompt: string,
 	tools: string[],
 	prompt: string,
+	widgetBase: { iteration: number; maxIter: number; acceptedScore?: number; commit: string },
 ): Promise<RunRoleResult> {
 	const agentDir = getAgentDir();
 	const loader = new DefaultResourceLoader({
@@ -267,6 +270,36 @@ async function runRole(
 	});
 
 	const { session } = result;
+	let currentTool = "";
+	let currentText = "";
+
+	const unsubscribe = session.subscribe((event) => {
+		if (!ctx.hasUI) return;
+
+		if (event.type === "tool_execution_start") {
+			currentTool = event.toolName;
+			currentText = "";
+		} else if (event.type === "tool_execution_end") {
+			currentTool = "";
+		} else if (event.type === "message_update") {
+			const ae = event.assistantMessageEvent;
+			if (ae.type === "text_delta") {
+				currentText += ae.delta;
+			}
+		}
+
+		const textPreview = currentText.slice(-60).replace(/\n/g, " ").trim();
+		updateWidget(ctx, {
+			...widgetBase,
+			phase: role,
+			activity: currentTool
+				? `tool: ${currentTool}`
+				: textPreview
+					? `...${textPreview}`
+					: undefined,
+		});
+	});
+
 	try {
 		await session.prompt(prompt, { expandPromptTemplates: false, source: "extension" });
 		const lastAssistant = getLastAssistantMessage(session.messages);
@@ -276,6 +309,7 @@ async function runRole(
 			errorMessage: lastAssistant?.errorMessage,
 		};
 	} finally {
+		unsubscribe();
 		session.dispose();
 	}
 }
@@ -368,6 +402,7 @@ async function runIterate(pi: ExtensionAPI, args: string | undefined, ctx: Exten
 
 	for (let iteration = 1; iteration <= maxIter; iteration++) {
 		updateWidget(ctx, { phase: "actor", iteration, maxIter, acceptedScore, commit: acceptedCommit });
+		const widgetBase = { iteration, maxIter, acceptedScore, commit: acceptedCommit };
 		const actor = await runRole(
 			pi,
 			ctx,
@@ -375,6 +410,7 @@ async function runIterate(pi: ExtensionAPI, args: string | undefined, ctx: Exten
 			ACTOR_SYSTEM_PROMPT,
 			["read", "bash", "edit", "write", "grep", "find", "ls"],
 			buildActorPrompt({ iteration, maxIter, task, acceptedScore, acceptedSuggestions, avoidNotes }),
+			widgetBase,
 		);
 		assertRoleSuccess("actor", actor);
 
@@ -386,6 +422,7 @@ async function runIterate(pi: ExtensionAPI, args: string | undefined, ctx: Exten
 			CRITIC_SYSTEM_PROMPT,
 			["read", "grep", "find", "ls"],
 			buildCriticPrompt({ iteration, task, acceptedScore }),
+			widgetBase,
 		);
 		assertRoleSuccess("critic", criticRun);
 		const critic = parseCriticResult(criticRun.output);
@@ -434,6 +471,7 @@ async function runIterate(pi: ExtensionAPI, args: string | undefined, ctx: Exten
 				COMMIT_SYSTEM_PROMPT,
 				["bash"],
 				buildCommitPrompt({ iteration, task, score: critic.score, summary: critic.summary }),
+				widgetBase,
 			);
 			assertRoleSuccess("commit", commitRun);
 
