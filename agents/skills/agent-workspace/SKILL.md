@@ -176,7 +176,7 @@ Argument parsing: `<name>` is an optional positional argument; `-m`/`--choose-mo
 
    Before constructing any `pi` command: if `-m`/`--choose-model` was given, follow the `pi-headless` SKILL model-selection flow; otherwise use defaults.
 
-   **Ralph path** — if the recent conversation has already used the `ralph` SKILL to generate `task.json` and has produced the exact Ralph execution command:
+   **Ralph path** — if the `ralph` SKILL has been used in the current conversation and `task.json` exists on disk with a corresponding Ralph execution command:
 
    - Send that Ralph command to the workspace pane via the tmux SKILL **Sending input safely** convention.
 
