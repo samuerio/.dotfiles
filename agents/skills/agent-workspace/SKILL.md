@@ -97,7 +97,7 @@ tmux conventions (per the tmux SKILL):
 
 ### /ws open <name> (alias: /ws op)  ← also sets WORKER_WS_NAME
 
-1. Run `bash {baseDir}/worktree.sh open <name>`. Read `branch`, `worktree_path`, and `worktree_created` from stdout.
+1. Run `bash {baseDir}/worktree.sh open <name>`. Read `branch`, `worktree_path`, and `worktree_created` from stdout. If the command fails, surface the error and stop.
 2. Ensure a tmux session named `<name>` with cwd `<worktree_path>`:
    - If `tmux -S "$SOCKET" has-session -t "<name>"` succeeds, switch or attach.
    - Otherwise, run `tmux -S "$SOCKET" new-session -d -s "<name>" -c "<worktree_path>"`.
