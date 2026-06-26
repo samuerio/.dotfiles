@@ -16,9 +16,9 @@ Each worker-workspace is identified by `<name>`. The git branch name and the tmu
 
 The dispatcher agent owns the worker-workspace lifecycle and all coordination:
 
-- **Explore freely**: the dispatcher may read and inspect files in the worker worktree at any point — to refine a task with the user, to review results, or to understand context.
+- **Explore freely**: the dispatcher may read and inspect files in the worker worktree at any point — to refine a task with the user, to review results, or to understand context. Use bash or read-only tools directly for speed and efficiency.
 - **No direct writes**: the dispatcher must never write to or modify files in the worker worktree, even for trivial changes. All file modifications go through the worker agent.
-- **Observable tasks**: running commands, running tests, and debugging in the worktree are the dispatcher's responsibility — done directly in the tmux pane for observability.
+- **Observable tasks**: running commands, running tests, and debugging in the worktree are the dispatcher's responsibility — done directly in the worker tmux pane for observability.
 - **Review after completion**: after the worker agent signals completion, the dispatcher inspects the result and reports back to the user.
 
 The worker agent performs implementation work inside the worker-workspace. It receives a self-contained task document and runs to completion.
