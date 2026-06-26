@@ -183,14 +183,14 @@ Argument parsing: `<name>` is an optional positional argument; `-m`/`--choose-mo
    - Follow the `pi-headless` SKILL **Running pi as an Implementation Worker — Plan without implementation instruction** pattern to construct the command.
    - Send the constructed command via the tmux SKILL **Sending input safely** convention.
 
-   **handoff doc path** — if the `handoff-for-impl` SKILL has already been run in the current conversation and produced a handoff file:
+   **handoff doc path** — if the `draft-impl-handoff` SKILL has already been run in the current conversation and produced a handoff file:
 
    - Follow the `pi-headless` SKILL **Running pi as an Implementation Worker — Plan with implementation instruction** pattern to construct the command.
    - Send the constructed command via the tmux SKILL **Sending input safely** convention.
 
    **generate then run path** — otherwise (no plan doc, no handoff doc):
 
-   - First run the `handoff-for-impl` SKILL to generate a handoff document, then follow the **handoff doc path** above.
+   - First run the `draft-impl-handoff` SKILL to generate a handoff document, then follow the **handoff doc path** above.
 
 4. Do not wait for completion.
 5. Do not capture pane output after sending.
