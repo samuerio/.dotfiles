@@ -112,7 +112,7 @@ function extractJsonCandidates(text: string): string[] {
 	return candidates.reverse();
 }
 
-function parseCriticResult(text: string): CriticResult {
+function parseCriticResult(text: string): CriticResult | undefined {
 	for (const candidate of extractJsonCandidates(text)) {
 		try {
 			const parsed = JSON.parse(candidate);
@@ -128,7 +128,7 @@ function parseCriticResult(text: string): CriticResult {
 			// Try next candidate.
 		}
 	}
-	throw new Error(`Failed to parse critic JSON. Critic output:\n${text}`);
+	return undefined;
 }
 
 async function readTask(cwd: string, rawTask: string): Promise<string> {
@@ -389,6 +389,18 @@ async function runIterate(pi: ExtensionAPI, args: string | undefined, ctx: Exten
 		);
 		assertRoleSuccess("critic", criticRun);
 		const critic = parseCriticResult(criticRun.output);
+
+		if (!critic) {
+			await rollback(pi, acceptedCommit);
+			await appendReport(reportPath, {
+				iteration,
+				actorStatus: actor.output || "completed",
+				accepted: false,
+				rollback: `reset to ${acceptedCommit}`,
+				error: `Critic produced no parseable JSON output. Raw output (${criticRun.output.length} chars): ${criticRun.output.slice(0, 200)}`,
+			});
+			continue;
+		}
 
 		const isBaseline = acceptedScore === undefined;
 		const shouldAccept = isBaseline || critic.score > acceptedScore;
