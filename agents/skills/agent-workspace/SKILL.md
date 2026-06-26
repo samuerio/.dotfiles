@@ -89,7 +89,7 @@ tmux conventions (per the tmux SKILL):
 - Session name equals `<name>`.
 - **Pane target**: for all name-scoped commands, discover the target pane via `list-panes` and pick the first pane; never hardcode `:0.0`.
 
-**Active guard**: name-scoped commands other than `open` and `list` require state `active`; error if not; never auto-open.
+**Active guard**: name-scoped commands other than `open`, `list`, and `close` require state `active`; error if not; never auto-open.
 
 - `/ws handoff-for-impl` / `/ws hfi`: silently open a worker-workspace (manual `<name>` or derived `feat/<feature-name>`) and kick off implementation.
 
