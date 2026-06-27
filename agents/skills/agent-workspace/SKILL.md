@@ -46,13 +46,13 @@ Rules:
 
 The "current" branch-workspace is the one most recently opened via `/ws open`, tracked on disk.
 
-State file: `{repoRoot}/.pi/branch-workspace-current.json`, holding exactly one record:
+State file: `.branch-workspace-current.json` in the current working directory, holding exactly one record:
 
 ```json
 {"name": "<name>", "worktreePath": "<worktree_path>"}
 ```
 
-Only one current branch-workspace exists at a time; writing this file always overwrites any prior record. Add `.pi/branch-workspace-current.json` to `.gitignore` if not already ignored — this is per-checkout local state, not something to commit.
+Only one current branch-workspace exists at a time; writing this file always overwrites any prior record. Add `.branch-workspace-current.json` to `.gitignore` if not already ignored — this is per-checkout local state, not something to commit.
 
 - **Write**: after every successful `/ws open <name>`, write `{"name": "<name>", "worktreePath": "<worktree_path>"}` to the state file, overwriting whatever was there.
 - **Read**: for name-scoped commands (`close`, `task`, `run`, `status`), if `<name>` is omitted, read the state file and use its `name` as `<name>` (and its `worktreePath` wherever a worktree path is needed, e.g. in `/ws task` step 2 below). If the file does not exist, error:
