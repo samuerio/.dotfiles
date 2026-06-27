@@ -1,4 +1,6 @@
-# pi 目录
+# pi 扩展 TypeScript 模块解析问题
+
+本文只记录 coc / tsserver 解析 pi 扩展依赖的问题，不是 `pi/` 目录总览。
 
 ## tsserver 模块解析问题
 
