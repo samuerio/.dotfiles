@@ -44,7 +44,7 @@ Rules:
 
 ## Current branch-workspace state
 
-The "current" branch-workspace is the one most recently opened via `/ws open`. It is tracked on disk, not in shell environment variables (`export` does not persist across separate bash invocations) and not purely in conversational memory (it must survive across tool calls within the same session reliably).
+The "current" branch-workspace is the one most recently opened via `/ws open`, tracked on disk.
 
 State file: `{repoRoot}/.pi/branch-workspace-current.json`, holding exactly one record:
 
