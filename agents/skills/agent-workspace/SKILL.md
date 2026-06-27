@@ -44,24 +44,17 @@ Rules:
 
 ## Current branch-workspace state
 
-The "current" branch-workspace is the one most recently opened via `/ws open`, tracked on disk.
-
-State file: `.branch-workspace-current.json` in the current working directory, holding exactly one record:
-
+The "current" branch-workspace is the one most recently opened via `/ws open`, tracked in `.branch-workspace-current.json` in the current working directory:
 ```json
 {"name": "<name>", "worktreePath": "<worktree_path>"}
 ```
+Add this file to `.gitignore` — it is per-checkout local state. Writing always overwrites any prior record.
 
-Only one current branch-workspace exists at a time; writing this file always overwrites any prior record. Add `.branch-workspace-current.json` to `.gitignore` if not already ignored — this is per-checkout local state, not something to commit.
-
-- **Write**: after every successful `/ws open <name>`, write `{"name": "<name>", "worktreePath": "<worktree_path>"}` to the state file, overwriting whatever was there.
-- **Read**: for name-scoped commands (`close`, `task`, `run`, `status`), if `<name>` is omitted, read the state file and use its `name` as `<name>` (and its `worktreePath` wherever a worktree path is needed, e.g. in `/ws task` step 2 below). If the file does not exist, error:
-  ```text
-  no name specified and no current branch-workspace is set; run /ws open <name> first.
-  ```
-- **Validate after read**: a name read from the state file is not guaranteed to still be valid — the workspace may since have been closed or become orphaned elsewhere. Always resolve branch-workspace state for it (below) and apply the normal active guard; never skip validation just because the name came from the state file.
-- **Clear on close**: when `/ws close` successfully closes a branch-workspace whose name matches the state file's `name` (whether `<name>` was passed explicitly or read from the file), delete the state file. If the closed name does not match the file's current record, leave the file untouched.
-- **`/ws handoff-for-impl` does not read this file.** It always derives or accepts a name per its own argument-resolution rules (see below), even when a current branch-workspace is set — silently reusing a stale current value there could route new implementation work into the wrong worktree.
+- **Write**: after every successful `/ws open <name>`.
+- **Read**: for name-scoped commands (`close`, `task`, `run`, `status`), if `<name>` is omitted, read the state file. If the file does not exist, error: `no name specified and no current branch-workspace is set; run /ws open <name> first.`
+- **Validate after read**: always resolve branch-workspace state and apply the active guard — never skip validation because the name came from the state file.
+- **Clear on close**: delete the state file when `/ws close` closes a workspace whose name matches it; leave it untouched otherwise.
+- **`/ws handoff-for-impl` does not read this file** — it always derives or accepts a name per its own rules.
 
 To resolve branch-workspace state for `<name>`:
 
