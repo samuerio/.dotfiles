@@ -1,6 +1,6 @@
 ---
 name: branch-workspace
-description: "manage isolated branch-scoped workspaces composed of a git worktree and matching tmux session. use this skill for /ws commands, including /ws open, /ws list, /ws close, /ws task, /ws run, /ws status, and /ws handoff-for-impl."
+description: "manage isolated branch-scoped workspaces composed of a git worktree and matching tmux session. use this skill for /ws commands, including /ws open, /ws list, /ws close, /ws task, /ws status, and /ws handoff-for-impl."
 ---
 
 ## Concept
@@ -51,7 +51,7 @@ The "current" branch-workspace is the one most recently opened via `/ws open`, t
 Add this file to `.gitignore` — it is per-checkout local state. Writing always overwrites any prior record.
 
 - **Write**: after every successful `/ws open <name>`.
-- **Read**: for name-scoped commands (`close`, `task`, `run`, `status`), if `<name>` is omitted, read the state file. If the file does not exist, error: `no name specified and no current branch-workspace is set; run /ws open <name> first.`
+- **Read**: for name-scoped commands (`close`, `task`, `status`), if `<name>` is omitted, read the state file. If the file does not exist, error: `no name specified and no current branch-workspace is set; run /ws open <name> first.`
 - **Validate after read**: always resolve branch-workspace state and apply the active guard — never skip validation because the name came from the state file.
 - **Clear on close**: delete the state file when `/ws close` closes a workspace whose name matches it; leave it untouched otherwise.
 - **`/ws handoff-for-impl` does not read this file** — it always derives or accepts a name per its own rules.
@@ -134,20 +134,6 @@ tmux conventions (per the tmux SKILL):
    - **dispatcher path** (for tasks requiring observability — running tests, executing commands, checking runtime errors): run the command directly in the tmux pane, capturing output for the user.
 
    If a task requires both (e.g. run tests then fix failures, or fix code then verify with a command), handle the observable step via the dispatcher and the file-change step via the worker — in whichever order the task demands. Pass findings between steps in the task doc.
-
-### /ws run [<name>] [-p=<pattern> | --poll=<pattern>] [-s|--silent] <input> (alias: /ws r)
-
-`/ws run` is fully manual: `<input>` is sent verbatim to the target pane. It may be a shell command, a REPL expression, or plain text addressed to whatever interactive program is running in the pane (pi, python, gdb, etc.). Do not parse, validate, or rewrite `<input>`; what runs in the pane is the user's responsibility.
-
-1. If `<name>` is omitted, read it from the state file (**Current branch-workspace state**); error per that section if unset. Apply active guard. Apply pane target convention.
-2. Parse flags from the front of the argument list. Stop at the first token that does not start with `-`; everything from that token onward is `<input>` taken literally. `-p`/`--poll` and `-s`/`--silent` are mutually exclusive; error if both are given.
-   - `-p=<pattern>` / `--poll=<pattern>`: poll the pane until `<pattern>` (regex) appears before capturing. The `=` form is required; `-p <pattern>` (space-separated) is a syntax error, do not accept it. Timeout uses the `wait-for-text.sh` default; do not expose it.
-   - `-s` / `--silent`: skip the post-send capture entirely.
-3. Send `<input>` literally via the tmux SKILL **Sending input safely** (`send-keys -l -- "<input>"`), then send `Enter`.
-4. Reporting:
-   - If `--silent` is given, do not capture.
-   - Else if `--poll=<pattern>` is given, use **Watching output** (poll mode) with `<pattern>` to wait for completion, then capture and report.
-   - Otherwise, use **Watching output** (capture mode) to snapshot and report.
 
 ### /ws status [<name>] (alias: /ws st)
 
