@@ -82,6 +82,8 @@ To resolve branch-workspace state for `<name>`:
 
 `/ws` is the only entry point. Name-scoped subcommands operate on a specific `<name>`: full branch-workspace name, exact match, no fuzzy lookup.
 
+> **`/ws hfi` is an advanced command** that chains workspace creation, handoff-doc generation (if needed), and `pi` dispatch in a single step. Use it when a finalized plan already exists in the current conversation (plan doc, handoff doc, or Ralph `task.json`). Without any of these, it automatically invokes `draft-impl-handoff` before dispatching.
+
 tmux conventions (per the tmux SKILL):
 
 - Derive the socket name from the repo root: `SOCKET_NAME=$(bash {baseDir}/worktree.sh root-name)`, then set `SOCKET="$CLAUDE_TMUX_SOCKET_DIR/$SOCKET_NAME.sock"` (using the tmux SKILL's default socket dir).
