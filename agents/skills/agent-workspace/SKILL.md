@@ -109,7 +109,7 @@ tmux conventions (per the tmux SKILL):
 1. Run `bash {baseDir}/worktree.sh list`.
 2. List sessions on the socket using tmux SKILL **Finding sessions** with `--json`. Treat a missing socket or no sessions as an empty list.
 3. Join worktrees and sessions by exact `branch == session_name` (both equal `<name>`).
-4. Present each branch-workspace as `active`, `idle`, or `orphan`, including dirty status.
+4. Present each branch-workspace as `active`, `idle`, or `orphan`, including dirty status. If the state file (`.branch-workspace-current.json`) exists and its `name` matches a listed branch-workspace, append `(current)` to that entry.
 
 ### /ws close [<name>]
 
