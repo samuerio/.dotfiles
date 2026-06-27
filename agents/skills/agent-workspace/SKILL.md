@@ -1,33 +1,33 @@
 ---
-name: worker-workspace
-description: "manage isolated worker-agent workspaces composed of a git worktree and matching tmux session. use this skill for /ws commands, including /ws open, /ws list, /ws close, /ws task, /ws run, /ws status, and /ws handoff-for-impl."
+name: branch-workspace
+description: "manage isolated branch-scoped workspaces composed of a git worktree and matching tmux session. use this skill for /ws commands, including /ws open, /ws list, /ws close, /ws task, /ws run, /ws status, and /ws handoff-for-impl."
 ---
 
 ## Concept
 
-A **worker-workspace** is an isolated execution environment that the dispatcher agent uses to supervise a worker agent. It is composed of two coupled components:
+A **branch-workspace** is an isolated execution environment bound to a single branch. It is composed of two coupled components:
 
 - a **`git worktree`**: a writable, branch-scoped filesystem where the worker agent edits code without disturbing the main checkout.
-- a **`tmux` session**: an observable, persistent execution environment where the worker agent runs commands and the user or dispatcher can attach to watch.
+- a **`tmux` session**: an observable, persistent execution environment for that branch. The pane is shared — the worker agent runs implementation commands there, and the dispatcher agent runs observable tasks (tests, debugging, runtime checks) there directly. The user or dispatcher can attach to watch either.
 
-Each worker-workspace is identified by `<name>`. The git branch name and the tmux session name both equal `<name>`. The two components share this identity and must be managed together. This skill owns their joint lifecycle.
+Each branch-workspace is identified by `<name>`. The git branch name and the tmux session name both equal `<name>`. The two components share this identity and must be managed together. This skill owns their joint lifecycle.
 
 ## Role Boundaries
 
-The dispatcher agent owns the worker-workspace lifecycle and all coordination:
+The dispatcher agent owns the branch-workspace lifecycle and all coordination. The tmux pane is a shared execution environment — both agents may run commands there, but only the worker agent may write files:
 
-- **Explore freely**: the dispatcher may read and inspect files in the worker worktree at any point — to refine a task with the user, to review results, or to understand context. Use bash or read-only tools directly for speed and efficiency.
-- **No direct writes**: the dispatcher must never write to or modify files in the worker worktree, even for trivial changes. All file modifications go through the worker agent.
-- **Observable tasks**: running commands, running tests, and debugging in the worktree are the dispatcher's responsibility — done directly in the worker tmux pane for observability.
+- **Explore freely**: the dispatcher may read and inspect files in the branch-workspace's worktree at any point — to refine a task with the user, to review results, or to understand context. Use bash or read-only tools directly for speed and efficiency.
+- **No direct writes**: the dispatcher must never write to or modify files in the branch-workspace's worktree, even for trivial changes. All file modifications go through the worker agent.
+- **Observable tasks**: running commands, running tests, and debugging in the worktree are the dispatcher's responsibility — done directly in the branch-workspace's tmux pane for observability.
 - **Review after completion**: after the worker agent signals completion, the dispatcher inspects the result and reports back to the user.
 
-The worker agent performs implementation work inside the worker-workspace. It receives a self-contained task document and runs to completion.
+The worker agent performs implementation work inside the branch-workspace. It receives a self-contained task document and runs to completion.
 
-`worktree.sh` owns the git worktree side. tmux operations must follow the tmux SKILL. `<name>` always means the complete worker-workspace identifier and must be matched exactly; never fuzzy-match or shorten it.
+`worktree.sh` owns the git worktree side. tmux operations must follow the tmux SKILL. `<name>` always means the complete branch-workspace identifier and must be matched exactly; never fuzzy-match or shorten it.
 
 ## worktree.sh Usage
 
-`worktree.sh` is the implementation script and uses `<branch>` as its parameter name, since it operates only on the git worktree side. At the SKILL layer this `<branch>` always equals the worker-workspace `<name>`.
+`worktree.sh` is the implementation script and uses `<branch>` as its parameter name, since it operates only on the git worktree side. At the SKILL layer this `<branch>` always equals the branch-workspace `<name>`.
 
 ```bash
 bash {baseDir}/worktree.sh open <branch>
@@ -40,26 +40,30 @@ Rules:
 - Always run `{baseDir}/worktree.sh` from the main worktree; never `cd` there implicitly and retry.
 - `open` may update `.gitignore` and create commits. `clean <name>` only removes the worktree via `git worktree remove`.
 - For `clean`: never infer `--force`; on failure, surface the error and stop — no retries, no extra cleanup (`rm -rf`, `git worktree prune`, etc.) unless the user asks.
-- Never expose worktree paths from script output; always refer to worker-workspaces by full `<name>`.
+- Never expose worktree paths from script output; always refer to branch-workspaces by full `<name>`.
 
-## Name resolution and worker-workspace state
+## Current branch-workspace state
 
-After every successful `/ws open <name>`, export both variables into the current shell by sending:
+The "current" branch-workspace is the one most recently opened via `/ws open`. It is tracked on disk, not in shell environment variables (`export` does not persist across separate bash invocations) and not purely in conversational memory (it must survive across tool calls within the same session reliably).
 
-```bash
-export WORKER_WS_NAME=<name>
-export WORKER_WS_PATH=<worktree_path>
+State file: `{repoRoot}/.pi/branch-workspace-current.json`, holding exactly one record:
+
+```json
+{"name": "<name>", "worktreePath": "<worktree_path>"}
 ```
 
-Also remember `<name>` as the session-level default for this conversation.
+Only one current branch-workspace exists at a time; writing this file always overwrites any prior record. Add `.pi/branch-workspace-current.json` to `.gitignore` if not already ignored — this is per-checkout local state, not something to commit.
 
-For name-scoped commands (`close`, `task`, `run`, `status`), if `<name>` is omitted, use the session-level `WORKER_WS_NAME`. If unset, error:
+- **Write**: after every successful `/ws open <name>`, write `{"name": "<name>", "worktreePath": "<worktree_path>"}` to the state file, overwriting whatever was there.
+- **Read**: for name-scoped commands (`close`, `task`, `run`, `status`), if `<name>` is omitted, read the state file and use its `name` as `<name>` (and its `worktreePath` wherever a worktree path is needed, e.g. in `/ws task` step 2 below). If the file does not exist, error:
+  ```text
+  no name specified and no current branch-workspace is set; run /ws open <name> first.
+  ```
+- **Validate after read**: a name read from the state file is not guaranteed to still be valid — the workspace may since have been closed or become orphaned elsewhere. Always resolve branch-workspace state for it (below) and apply the normal active guard; never skip validation just because the name came from the state file.
+- **Clear on close**: when `/ws close` successfully closes a branch-workspace whose name matches the state file's `name` (whether `<name>` was passed explicitly or read from the file), delete the state file. If the closed name does not match the file's current record, leave the file untouched.
+- **`/ws handoff-for-impl` does not read this file.** It always derives or accepts a name per its own argument-resolution rules (see below), even when a current branch-workspace is set — silently reusing a stale current value there could route new implementation work into the wrong worktree.
 
-```text
-no name specified and WORKER_WS_NAME is not set; run /ws open <name> first.
-```
-
-To resolve worker-workspace state for `<name>`:
+To resolve branch-workspace state for `<name>`:
 
 1. Worktree:
    ```bash
@@ -83,7 +87,7 @@ To resolve worker-workspace state for `<name>`:
 
 > **SKILL roles**: `refine-task` clarifies a single task's scope through Q&A and outputs plain task text for immediate dispatch. `draft-impl-handoff` produces a structured handoff document consumed by a headless `pi` worker. Do not conflate the two — `/ws task` always uses `refine-task`; `/ws hfi`'s generate-then-run path always uses `draft-impl-handoff`.
 
-`/ws` is the only entry point. Name-scoped subcommands operate on a specific `<name>`: full worker-workspace name, exact match, no fuzzy lookup.
+`/ws` is the only entry point. Name-scoped subcommands operate on a specific `<name>`: full branch-workspace name, exact match, no fuzzy lookup.
 
 tmux conventions (per the tmux SKILL):
 
@@ -93,37 +97,40 @@ tmux conventions (per the tmux SKILL):
 
 **Active guard**: name-scoped commands other than `open`, `list`, and `close` require state `active`; error if not; never auto-open.
 
-- `/ws handoff-for-impl` / `/ws hfi`: silently open a worker-workspace (manual `<name>` or derived `feat/<feature-name>`) and kick off implementation.
+- `/ws handoff-for-impl` / `/ws hfi`: silently open a branch-workspace (manual `<name>` or derived `feat/<feature-name>`) and kick off implementation.
 
-### /ws open <name> (alias: /ws op)  ← also sets WORKER_WS_NAME
+### /ws open <name> (alias: /ws op)  ← also sets the current branch-workspace
 
 1. Run `bash {baseDir}/worktree.sh open <name>`. Read `branch`, `worktree_path`, and `worktree_created` from stdout. If the command fails, surface the error and stop.
 2. Ensure a tmux session named `<name>` with cwd `<worktree_path>`:
    - If `tmux -S "$SOCKET" has-session -t "<name>"` succeeds, switch or attach.
    - Otherwise, run `tmux -S "$SOCKET" new-session -d -s "<name>" -c "<worktree_path>"`.
 3. Do not create duplicate sessions.
-4. When a session is started, print the monitor command from the tmux SKILL.
+4. Write `{"name": "<name>", "worktreePath": "<worktree_path>"}` to the state file (**Current branch-workspace state**), overwriting any prior record.
+5. When a session is started, print the monitor command from the tmux SKILL.
 
 ### /ws list (alias: /ws ls)
 
 1. Run `bash {baseDir}/worktree.sh list`.
 2. List sessions on the socket using tmux SKILL **Finding sessions** with `--json`. Treat a missing socket or no sessions as an empty list.
 3. Join worktrees and sessions by exact `branch == session_name` (both equal `<name>`).
-4. Present each worker-workspace as `active`, `idle`, or `orphan`, including dirty status.
+4. Present each branch-workspace as `active`, `idle`, or `orphan`, including dirty status.
 
 ### /ws close [<name>]
 
-1. Resolve worker-workspace state for `<name>`.
-2. If state is `missing`, report an error and stop. If state is `orphan`, suggest manual cleanup and stop.
-3. If `dirty=yes`, ask the user to confirm before proceeding. On no or unclear answer, abort and leave the worktree and session untouched.
-4. Run `bash {baseDir}/worktree.sh clean <name>` without `--force`. On git failure, surface the error and stop.
-5. Only after the script succeeds: if a session exists, run `tmux -S "$SOCKET" kill-session -t "<name>"`; otherwise skip.
-6. If `kill-session` fails after a successful clean, the session becomes orphan. Surface this to the user and do not auto-resolve.
+1. If `<name>` is omitted, read it from the state file (**Current branch-workspace state**); error per that section if unset.
+2. Resolve branch-workspace state for `<name>`.
+3. If state is `missing`, report an error and stop. If state is `orphan`, suggest manual cleanup and stop.
+4. If `dirty=yes`, ask the user to confirm before proceeding. On no or unclear answer, abort and leave the worktree and session untouched.
+5. Run `bash {baseDir}/worktree.sh clean <name>` without `--force`. On git failure, surface the error and stop.
+6. Only after the script succeeds: if a session exists, run `tmux -S "$SOCKET" kill-session -t "<name>"`; otherwise skip.
+7. If `kill-session` fails after a successful clean, the session becomes orphan. Surface this to the user and do not auto-resolve.
+8. If the closed `<name>` matches the state file's current record, delete the state file. Skip if no state file exists or its `name` differs.
 
 ### /ws task [<name>] [-m|--choose-model] <task> (alias: /ws t)
 
-1. Apply active guard. Apply pane target convention. Apply pane readiness check (tmux SKILL **Checking pane readiness**); if the pane is busy, report it and stop.
-2. Before dispatching, apply the `refine-task` SKILL to clarify the task. The dispatcher should proactively explore the worktree (using `$WORKER_WS_PATH`) to answer questions from context rather than asking the user unnecessarily. After the task is refined and confirmed, the dispatcher reviews the worker's output once the worker signals completion.
+1. If `<name>` is omitted, read it (and its `worktreePath`) from the state file (**Current branch-workspace state**); error per that section if unset. Apply active guard. Apply pane target convention. Apply pane readiness check (tmux SKILL **Checking pane readiness**); if the pane is busy, report it and stop.
+2. Before dispatching, apply the `refine-task` SKILL to clarify the task. The dispatcher should proactively explore the worktree (using the `worktreePath` resolved in step 1) to answer questions from context rather than asking the user unnecessarily. After the task is refined and confirmed, the dispatcher reviews the worker's output once the worker signals completion.
 
    After `refine-task` completes (including any clarifying exchange with the user), resume `/ws task` from step 3 using the refined task text as `<task>`.
 3. The dispatcher must choose how to route the work, but it must not implement file changes itself. If the task output is expected to be code, docs, tests, review comments, or any other file modification, send it to the worker path.
@@ -137,7 +144,7 @@ tmux conventions (per the tmux SKILL):
 
 `/ws run` is fully manual: `<input>` is sent verbatim to the target pane. It may be a shell command, a REPL expression, or plain text addressed to whatever interactive program is running in the pane (pi, python, gdb, etc.). Do not parse, validate, or rewrite `<input>`; what runs in the pane is the user's responsibility.
 
-1. Apply active guard. Apply pane target convention.
+1. If `<name>` is omitted, read it from the state file (**Current branch-workspace state**); error per that section if unset. Apply active guard. Apply pane target convention.
 2. Parse flags from the front of the argument list. Stop at the first token that does not start with `-`; everything from that token onward is `<input>` taken literally. `-p`/`--poll` and `-s`/`--silent` are mutually exclusive; error if both are given.
    - `-p=<pattern>` / `--poll=<pattern>`: poll the pane until `<pattern>` (regex) appears before capturing. The `=` form is required; `-p <pattern>` (space-separated) is a syntax error, do not accept it. Timeout uses the `wait-for-text.sh` default; do not expose it.
    - `-s` / `--silent`: skip the post-send capture entirely.
@@ -149,16 +156,16 @@ tmux conventions (per the tmux SKILL):
 
 ### /ws status [<name>] (alias: /ws st)
 
-1. Apply active guard. Apply pane target convention.
+1. If `<name>` is omitted, read it from the state file (**Current branch-workspace state**); error per that section if unset. Apply active guard. Apply pane target convention.
 2. Capture pane output (tmux SKILL **Watching output**, capture mode; `-S -200`). Do not send any keys. Report the captured text.
 
 ### /ws handoff-for-impl [<name>] [-m|--choose-model] (alias: /ws hfi)
 
-`handoff-for-impl` is a silent kickoff command for implementation work whose duration is unknown. It creates or reuses a worker-workspace, sends the implementation command into its tmux pane, and does not wait for completion or capture output.
+`handoff-for-impl` is a silent kickoff command for implementation work whose duration is unknown. It creates or reuses a branch-workspace, sends the implementation command into its tmux pane, and does not wait for completion or capture output.
 
 Argument parsing: `<name>` is an optional positional argument; `-m`/`--choose-model` is a flag with no value. The flag may appear before or after `<name>`. The first non-`-` token is `<name>`.
 
-1. Resolve the worker-workspace name:
+1. Resolve the branch-workspace name:
    - If `<name>` was given as a positional argument, use it verbatim. Do not validate or rewrite its format; the user is responsible for the chosen prefix (e.g. `feat/`, `fix/`, `refactor/`, `exp/`).
    - Otherwise, derive a name from the implementation work described by the current conversation:
      - Default format is `feat/<feature-name>` with a short kebab-case feature name.
@@ -168,7 +175,7 @@ Argument parsing: `<name>` is an optional positional argument; `-m`/`--choose-mo
 2. Run the equivalent of `/ws open <name>`:
    - Create or reuse the worktree.
    - Create or reuse the tmux session.
-   - Set `WORKER_WS_NAME=<name>` as usual.
+   - Write the state file as in `/ws open` step 4, making this the current branch-workspace.
 
 3. Choose the implementation command:
 
@@ -197,6 +204,6 @@ Argument parsing: `<name>` is an optional positional argument; `-m`/`--choose-mo
 4. Do not wait for completion.
 5. Do not capture pane output after sending.
 6. Report only:
-   - the worker-workspace name
+   - the branch-workspace name
    - that the command was sent
    - the monitor command from the tmux SKILL
