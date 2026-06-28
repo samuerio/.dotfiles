@@ -34,6 +34,10 @@ When referenced file paths appear in the document content, load and follow the `
 
 Do not infer implementation permission from approval of the plan.
 
+After writing the plan file, use this exact phrasing:
+
+> Draft saved — run `code <plan-path>` to review.
+
 ## finalize
 
 Update the plan to instruct yourself which files to read in full so you get up to speed in a new session immediately.
