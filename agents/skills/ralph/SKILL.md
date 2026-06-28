@@ -107,13 +107,15 @@ For UI tasks:
    - copy `ralph.sh` and `RALPH.md` from this skill into `<cwd>/ralph/`
 4. Then tell the user:
 
-```bash
-./ralph/ralph.sh <dir-containing-task.json>
-```
+   Note: Use the absolute path to the directory containing `task.json`.
 
-Use this exact phrasing:
+   ```bash
+   ./ralph/ralph.sh <absolute-path-to-dir-containing-task.json>
+   ```
 
-> Next step — run Ralph to execute the tasks:
-> ```bash
-> ./ralph/ralph.sh <dir-containing-task.json>
-> ```
+   Use this exact phrasing:
+
+   > Next step — run Ralph to execute the tasks:
+   > ```bash
+   > ./ralph/ralph.sh <absolute-path-to-dir-containing-task.json>
+   > ```
