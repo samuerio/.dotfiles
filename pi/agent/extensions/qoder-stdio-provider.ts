@@ -83,41 +83,56 @@ function buildPrompt(context: Context): string {
       "<pi_tool_calls>\n[\n  { \"name\": \"<tool_name>\", \"arguments\": { ... } },\n  { \"name\": \"<tool_name>\", \"arguments\": { ... } }\n]\n</pi_tool_calls>",
     );
     parts.push(
-      "Rules:\n- Each tool call must have \"name\" (string) and \"arguments\" (JSON object).\n- You may include multiple tool calls in one block.\n- You may include multiple <pi_tool_calls> blocks; all will be merged.\n- Explanatory text outside the XML blocks is preserved.\n- If you do not need any tools, respond with plain text only (no XML block).\n- Do NOT repeat \"Tool call:\" or \"Tool result:\" blocks from conversation history in your response.",
+      "Rules:\n- Each tool call must have \"name\" (string) and \"arguments\" (JSON object).\n- You may include multiple tool calls in one block.\n- You may include multiple <pi_tool_calls> blocks; all will be merged.\n- Explanatory text outside the XML blocks is preserved.\n- If you do not need any tools, respond with plain text only (no XML block).",
     );
   }
 
-  // 3. Last 20 messages
-  const messages = context.messages.slice(-20);
-  for (const msg of messages) {
-    switch (msg.role) {
-      case "user": {
-        const text = extractText(msg.content);
-        parts.push(`User:\n${text}`);
-        break;
-      }
-      case "assistant": {
-        const blocks: string[] = [];
-        for (const c of msg.content) {
-          if (c.type === "text") {
-            blocks.push(c.text);
-          } else if (c.type === "toolCall") {
-            blocks.push(
-              `Tool call:\nid: ${c.id}\nname: ${c.name}\narguments: ${JSON.stringify(c.arguments)}`,
-            );
-          }
+  // 3. Messages: single chronological conversation log
+  const messages = context.messages;
+  if (messages.length > 0) {
+    const convoParts: string[] = [];
+    for (const msg of messages) {
+      switch (msg.role) {
+        case "user": {
+          const text = extractText(msg.content);
+          convoParts.push(`User:\n${text}`);
+          break;
         }
-        parts.push(`Assistant:\n${blocks.join("\n")}`);
-        break;
-      }
-      case "toolResult": {
-        const text = extractText(msg.content);
-        parts.push(
-          `Tool result:\nid: ${msg.toolCallId}\nname: ${msg.toolName}\nis_error: ${msg.isError}\ncontent:\n${text}`,
-        );
-        break;
+        case "assistant": {
+          const blocks: string[] = [];
+          for (const c of msg.content) {
+            if (c.type === "text") {
+              blocks.push(c.text);
+            } else if (c.type === "toolCall") {
+              blocks.push(
+                `Tool call:\nid: ${c.id}\nname: ${c.name}\narguments: ${JSON.stringify(c.arguments)}`,
+              );
+            }
+          }
+          convoParts.push(`Assistant:\n${blocks.join("\n")}`);
+          break;
+        }
+        case "toolResult": {
+          const text = extractText(msg.content);
+          convoParts.push(
+            `Tool result (already executed):\nid: ${msg.toolCallId}\nname: ${msg.toolName}\nis_error: ${msg.isError}\ncontent:\n${text}`,
+          );
+          break;
+        }
       }
     }
+
+    // If the last message is a toolResult, tell the model to respond based on results
+    const lastMsg = messages[messages.length - 1];
+    const endsWithToolResult = lastMsg.role === "toolResult";
+
+    convoParts.push(
+      endsWithToolResult
+        ? "Your response (provide a text answer based the executed tool results above; do NOT repeat tool calls):"
+        : "Your response:",
+    );
+
+    parts.push(convoParts.join("\n\n"));
   }
 
   return parts.join("\n\n");
