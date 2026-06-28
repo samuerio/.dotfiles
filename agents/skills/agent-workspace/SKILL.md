@@ -66,7 +66,7 @@ To resolve branch-workspace state for `<name>`:
 
 2. Session:
    ```bash
-   bash {baseDir}/../tmux/scripts/find-sessions.sh -S "$SOCKET" -q "<name>" --json
+   bash {baseDir}/../tmux/scripts/find-sessions.sh -S <socket> -q "<name>" --json
    ```
    `-q` is substring matching, so treat the session as found only when one returned `session_name` exactly equals `<name>`. Treat a missing socket, non-zero exit, or no exact match as missing.
 
@@ -98,8 +98,8 @@ tmux conventions (per the tmux SKILL):
 
 1. Run `bash {baseDir}/worktree.sh open <name>`. Read `branch`, `worktree_path`, and `worktree_created` from stdout. If the command fails, surface the error and stop.
 2. Ensure a tmux session named `<name>` with cwd `<worktree_path>`:
-   - If `tmux -S "$SOCKET" has-session -t "<name>"` succeeds, switch or attach.
-   - Otherwise, run `tmux -S "$SOCKET" new-session -d -s "<name>" -c "<worktree_path>"`.
+   - If `tmux -S <socket> has-session -t "<name>"` succeeds, switch or attach.
+   - Otherwise, run `tmux -S <socket> new-session -d -s "<name>" -c "<worktree_path>"`.
 3. Do not create duplicate sessions.
 4. Write `{"name": "<name>", "worktreePath": "<worktree_path>"}` to the state file (**Current branch-workspace state**), overwriting any prior record.
 5. When a session is started, print the monitor command from the tmux SKILL.
@@ -118,7 +118,7 @@ tmux conventions (per the tmux SKILL):
 3. If state is `missing`, report an error and stop. If state is `orphan`, suggest manual cleanup and stop.
 4. If `dirty=yes`, ask the user to confirm before proceeding. On no or unclear answer, abort and leave the worktree and session untouched.
 5. Run `bash {baseDir}/worktree.sh clean <name>` without `--force`. On git failure, surface the error and stop.
-6. Only after the script succeeds: if a session exists, run `tmux -S "$SOCKET" kill-session -t "<name>"`; otherwise skip.
+6. Only after the script succeeds: if a session exists, run `tmux -S <socket> kill-session -t "<name>"`; otherwise skip.
 7. If `kill-session` fails after a successful clean, the session becomes orphan. Surface this to the user and do not auto-resolve.
 8. If the closed `<name>` matches the state file's current record, delete the state file. Skip if no state file exists or its `name` differs.
 
