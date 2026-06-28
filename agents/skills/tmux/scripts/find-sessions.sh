@@ -10,7 +10,7 @@ List tmux sessions on a socket (default tmux socket if none provided).
 Options:
   -L, --socket       tmux socket name (passed to tmux -L)
   -S, --socket-path  tmux socket path (passed to tmux -S)
-  -A, --all          scan all sockets under CLAUDE_TMUX_SOCKET_DIR
+  -A, --all          scan all sockets under /tmp/claude-tmux-sockets
   -q, --query        case-insensitive substring to filter session names
       --json         emit machine-readable JSON array
   -h, --help         show this help
@@ -22,7 +22,7 @@ socket_path=""
 query=""
 scan_all=false
 json_output=false
-socket_dir="${CLAUDE_TMUX_SOCKET_DIR:-${TMPDIR:-/tmp}/claude-tmux-sockets}"
+socket_dir="/tmp/claude-tmux-sockets"
 json_first=true
 
 json_escape() {
