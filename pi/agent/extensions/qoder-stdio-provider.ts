@@ -18,6 +18,8 @@ import {
   type Model,
   type SimpleStreamOptions,
   type ToolCall,
+  type TextContent,
+  type Tool,
   type Usage,
 } from "@earendil-works/pi-ai";
 
@@ -75,7 +77,13 @@ function buildPrompt(context: Context): string {
       );
     }
     parts.push(
-      '\nWhen you need to use a tool, respond with a JSON object: {"tool_call":{"name":"<tool_name>","arguments":{...}}}\nOtherwise, respond with plain text.',
+      "\nWhen you need to use tools, respond with one or more XML blocks in this exact format:",
+    );
+    parts.push(
+      "<pi_tool_calls>\n[\n  { \"name\": \"<tool_name>\", \"arguments\": { ... } },\n  { \"name\": \"<tool_name>\", \"arguments\": { ... } }\n]\n</pi_tool_calls>",
+    );
+    parts.push(
+      "Rules:\n- Each tool call must have \"name\" (string) and \"arguments\" (JSON object).\n- You may include multiple tool calls in one block.\n- You may include multiple <pi_tool_calls> blocks; all will be merged.\n- Explanatory text outside the XML blocks is preserved.\n- If you do not need any tools, respond with plain text only (no XML block).\n- Do NOT repeat \"Tool call:\" or \"Tool result:\" blocks from conversation history in your response.",
     );
   }
 
@@ -95,7 +103,7 @@ function buildPrompt(context: Context): string {
             blocks.push(c.text);
           } else if (c.type === "toolCall") {
             blocks.push(
-              `Tool call: ${c.name} ${JSON.stringify(c.arguments)}`,
+              `Tool call:\nid: ${c.id}\nname: ${c.name}\narguments: ${JSON.stringify(c.arguments)}`,
             );
           }
         }
@@ -104,7 +112,9 @@ function buildPrompt(context: Context): string {
       }
       case "toolResult": {
         const text = extractText(msg.content);
-        parts.push(`Tool result:\n${text}`);
+        parts.push(
+          `Tool result:\nid: ${msg.toolCallId}\nname: ${msg.toolName}\nis_error: ${msg.isError}\ncontent:\n${text}`,
+        );
         break;
       }
     }
@@ -160,41 +170,86 @@ interface DetectedToolCall {
   arguments: Record<string, any>;
 }
 
-function detectToolCall(text: string): DetectedToolCall | null {
-  // Try fenced JSON block first
-  const fenceMatch = text.match(
-    /```(?:json)?\s*(\{[\s\S]*?"tool_call"[\s\S]*?\})\s*```/,
-  );
-  if (fenceMatch) {
-    const result = tryParseToolCall(fenceMatch[1]);
-    if (result) return result;
-  }
-
-  // Search for the last `{` containing "tool_call"
-  const lastBrace = text.lastIndexOf("{");
-  if (lastBrace !== -1) {
-    const candidate = text.slice(lastBrace);
-    const endBrace = candidate.lastIndexOf("}");
-    if (endBrace !== -1) {
-      const result = tryParseToolCall(candidate.slice(0, endBrace + 1));
-      if (result) return result;
-    }
-  }
-
-  return null;
+interface DetectResult {
+  text: string;
+  toolCalls: DetectedToolCall[];
+  errors: string[];
 }
 
-function tryParseToolCall(jsonStr: string): DetectedToolCall | null {
-  try {
-    const parsed = JSON.parse(jsonStr);
-    const tc = parsed.tool_call;
-    if (tc && typeof tc.name === "string" && tc.arguments) {
-      return { name: tc.name, arguments: tc.arguments };
-    }
-    return null;
-  } catch {
-    return null;
+function detectToolCalls(raw: string, tools: Tool[]): DetectResult {
+  const errors: string[] = [];
+  const toolCalls: DetectedToolCall[] = [];
+  const toolNames = new Set(tools.map((t) => t.name));
+
+  // Check for incomplete XML blocks
+  const openTags = [...raw.matchAll(/<pi_tool_calls>/g)];
+  const closeTags = [...raw.matchAll(/<\/pi_tool_calls>/g)];
+  if (openTags.length > closeTags.length) {
+    errors.push(
+      "Incomplete <pi_tool_calls> block: missing </pi_tool_calls> closing tag.",
+    );
   }
+
+  // Extract all <pi_tool_calls>...</pi_tool_calls> blocks
+  const blockRegex = /<pi_tool_calls>([\s\S]*?)<\/pi_tool_calls>/g;
+  let match: RegExpExecArray | null;
+  while ((match = blockRegex.exec(raw)) !== null) {
+    const jsonStr = match[1].trim();
+    if (!jsonStr) continue;
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(jsonStr);
+    } catch (e) {
+      errors.push(
+        `Invalid JSON inside <pi_tool_calls>: ${e instanceof Error ? e.message : String(e)}`,
+      );
+      continue;
+    }
+
+    if (!Array.isArray(parsed)) {
+      errors.push(
+        `<pi_tool_calls> content must be a JSON array, got ${typeof parsed}.`,
+      );
+      continue;
+    }
+
+    for (const item of parsed) {
+      if (
+        !item ||
+        typeof item !== "object" ||
+        typeof item.name !== "string" ||
+        !item.arguments ||
+        typeof item.arguments !== "object" ||
+        Array.isArray(item.arguments)
+      ) {
+        errors.push(
+          `Invalid tool call entry: each must have "name" (string) and "arguments" (object). Got: ${JSON.stringify(item)}`,
+        );
+        continue;
+      }
+
+      if (!toolNames.has(item.name)) {
+        errors.push(
+          `Unknown tool name "${item.name}". Available: ${[...toolNames].join(", ")}`,
+        );
+        continue;
+      }
+
+      toolCalls.push({ name: item.name, arguments: item.arguments });
+    }
+  }
+
+  // Remove all XML blocks from raw to get the plain text
+  const text = raw.replace(/<pi_tool_calls>[\s\S]*?<\/pi_tool_calls>/g, "").trim();
+
+  return { text, toolCalls, errors };
+}
+
+let toolCallCounter = 0;
+
+function makeToolCallId(index: number): string {
+  return `tc_qoder_${Date.now()}_${toolCallCounter++}_${index}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -252,11 +307,8 @@ function streamQoderCli(
   if (model.id && model.id !== "auto") {
     args.push("--model", model.id);
   }
-  const disallowed =
-    process.env.QODERCLI_DISALLOWED_TOOLS ?? "Read,Write,Bash,Grep";
-  if (disallowed && disallowed !== "0") {
-    args.push(`--disallowed-tools=${disallowed}`);
-  }
+  const toolsFilter = process.env.QODERCLI_TOOLS ?? "";
+  args.push("--tools", toolsFilter);
 
   // Spawn
   try {
@@ -361,19 +413,42 @@ function streamQoderCli(
 
     if (hasTools) {
       const fullText = textBuffer.join("");
-      const toolCall = detectToolCall(fullText);
+      const result = detectToolCalls(fullText, context.tools ?? []);
 
-      if (toolCall) {
-        // Emit tool call events
-        const tc: ToolCall = {
-          type: "toolCall",
-          id: `tc_${Date.now()}`,
-          name: toolCall.name,
-          arguments: toolCall.arguments,
-        };
+      // Validation errors: emit error response
+      if (result.errors.length > 0) {
+        const errMsg = result.errors.join("\n");
+        const msg = makeErrorMessage(model, errMsg);
+        stream.push({ type: "start", partial: msg });
+        stream.push({ type: "error", reason: "error", error: msg });
+        stream.push({ type: "done", reason: "error", message: msg });
+        stream.end();
+        return;
+      }
+
+      if (result.toolCalls.length > 0) {
+        // Build content: optional text block + tool call blocks
+        const content: (TextContent | ToolCall)[] = [];
+        let contentIndex = 0;
+
+        if (result.text) {
+          content.push({ type: "text", text: result.text });
+          contentIndex = 1;
+        }
+
+        const toolCallBlocks: ToolCall[] = result.toolCalls.map(
+          (tc, i) => ({
+            type: "toolCall" as const,
+            id: makeToolCallId(i),
+            name: tc.name,
+            arguments: tc.arguments,
+          }),
+        );
+        content.push(...toolCallBlocks);
+
         const partial: AssistantMessage = {
           role: "assistant",
-          content: [tc],
+          content,
           api: model.api,
           provider: "qoder-stdio",
           model: model.id,
@@ -381,36 +456,52 @@ function streamQoderCli(
           stopReason: "toolUse",
           timestamp: Date.now(),
         };
+
         stream.push({ type: "start", partial });
-        stream.push({
-          type: "toolcall_start",
-          contentIndex: 0,
-          partial,
-        });
-        const delta = JSON.stringify(toolCall);
-        stream.push({
-          type: "toolcall_delta",
-          contentIndex: 0,
-          delta,
-          partial,
-        });
-        stream.push({
-          type: "toolcall_end",
-          contentIndex: 0,
-          toolCall: tc,
-          partial,
-        });
-        stream.push({
-          type: "done",
-          reason: "toolUse",
-          message: partial,
-        });
+
+        // Emit text events if there is explanatory text
+        if (result.text) {
+          stream.push({ type: "text_start", contentIndex: 0, partial });
+          stream.push({
+            type: "text_delta",
+            contentIndex: 0,
+            delta: result.text,
+            partial,
+          });
+          stream.push({
+            type: "text_end",
+            contentIndex: 0,
+            content: result.text,
+            partial,
+          });
+        }
+
+        // Emit toolcall events for each tool call
+        for (let i = 0; i < toolCallBlocks.length; i++) {
+          const idx = contentIndex + i;
+          stream.push({ type: "toolcall_start", contentIndex: idx, partial });
+          stream.push({
+            type: "toolcall_delta",
+            contentIndex: idx,
+            delta: JSON.stringify(toolCallBlocks[i]),
+            partial,
+          });
+          stream.push({
+            type: "toolcall_end",
+            contentIndex: idx,
+            toolCall: toolCallBlocks[i],
+            partial,
+          });
+        }
+
+        stream.push({ type: "done", reason: "toolUse", message: partial });
         stream.end();
       } else {
-        // Emit as text
+        // No valid tool calls, no errors: emit as text
+        const text = result.text || "No tool calls requested.";
         const partial: AssistantMessage = {
           role: "assistant",
-          content: [{ type: "text", text: fullText }],
+          content: [{ type: "text", text }],
           api: model.api,
           provider: "qoder-stdio",
           model: model.id,
@@ -419,23 +510,9 @@ function streamQoderCli(
           timestamp: Date.now(),
         };
         stream.push({ type: "start", partial });
-        stream.push({
-          type: "text_start",
-          contentIndex: 0,
-          partial,
-        });
-        stream.push({
-          type: "text_delta",
-          contentIndex: 0,
-          delta: fullText,
-          partial,
-        });
-        stream.push({
-          type: "text_end",
-          contentIndex: 0,
-          content: fullText,
-          partial,
-        });
+        stream.push({ type: "text_start", contentIndex: 0, partial });
+        stream.push({ type: "text_delta", contentIndex: 0, delta: text, partial });
+        stream.push({ type: "text_end", contentIndex: 0, content: text, partial });
         stream.push({ type: "done", reason: "stop", message: partial });
         stream.end();
       }
