@@ -86,7 +86,7 @@ To resolve branch-workspace state for `<name>`:
 
 tmux conventions (per the tmux SKILL):
 
-- Derive the socket name from the repo root: `SOCKET_NAME=$(bash {baseDir}/worktree.sh root-name)`, then set `SOCKET="$CLAUDE_TMUX_SOCKET_DIR/$SOCKET_NAME.sock"` (using the tmux SKILL's default socket dir).
+- Derive `<socket>` from the repo root: `<socket>=/tmp/claude-tmux-sockets/$(bash {baseDir}/worktree.sh root-name).sock`
 - Session name equals `<name>`.
 - **Pane target**: for all name-scoped commands, discover the target pane via `list-panes` and pick the first pane; never hardcode `:0.0`.
 
