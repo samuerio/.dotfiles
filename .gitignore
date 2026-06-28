@@ -14,3 +14,4 @@ linux_rime/user.yaml
 /.worktree/
 spec/
 research/
+.branch-workspace-current.json
