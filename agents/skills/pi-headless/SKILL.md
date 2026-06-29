@@ -77,6 +77,7 @@ pi --no-session --model <model> --thinking <thinking> \
 | `--model <model>` | choose model, e.g. `openai/gpt-4o` or `sonnet:high` |
 | `--thinking <thinking>` | set reasoning effort: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
 | `--no-session` | avoid persisting a session |
+| `-c` / `--continue` | continue most recent session |
 | `--tools <tools>` | comma-separated allowlist of tools, e.g. `read,grep,find,ls` for read-only mode |
 | `--exclude-tools <tools>` | comma-separated denylist of tools to disable |
 | `--no-tools` | disable all tools |
