@@ -81,6 +81,10 @@ pi --no-session --model <model> --thinking <thinking> \
 | `--tools <tools>` | comma-separated allowlist of tools, e.g. `read,grep,find,ls` for read-only mode |
 | `--exclude-tools <tools>` | comma-separated denylist of tools to disable |
 | `--no-tools` | disable all tools |
+| `--skill <path>` | load a skill from an explicit path (can be combined with `--no-skills`) |
+| `--no-skills` | disable auto-discovery of skills; only explicitly passed `--skill` paths are loaded |
+| `-e` / `--extension <path>` | load an extension from an explicit path; supports local file or remote repo URL |
+| `--no-extensions` | disable auto-discovery of extensions; only explicitly passed `-e` paths are loaded |
 
 ## Common Workflows
 
@@ -175,6 +179,26 @@ git log --oneline -50 \
   | pi --no-session --model <model> --thinking <thinking> \
     -p "Generate a Keep-a-Changelog formatted CHANGELOG entry from these commits, grouped by type (Added, Fixed, Changed)"
 ```
+
+### Debugging a Single Skill or Extension
+
+Disable auto-discovery and load only the target skill or extension, then capture JSON mode output to inspect what it produces:
+
+```bash
+# Debug a skill
+pi --no-session --model <model> --thinking <thinking> \
+  --no-skills --skill /path/to/your-skill \
+  --mode json "Test prompt" \
+  2>debug.err | tee debug.jsonl | jq -c 'select(.type=="tool_execution_end")'
+
+# Debug an extension
+pi --no-session --model <model> --thinking <thinking> \
+  --no-extensions -e /path/to/your-extension.ts \
+  --mode json "Test prompt" \
+  2>debug.err | tee debug.jsonl | jq -c 'select(.type=="tool_execution_end")'
+```
+
+> `--no-skills` and `--no-extensions` only disable auto-discovery; explicitly passed `--skill` and `-e` paths are always loaded.
 
 ## Pitfalls
 
