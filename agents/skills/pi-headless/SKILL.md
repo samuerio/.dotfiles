@@ -13,6 +13,8 @@ Use interactive mode or `--mode rpc` for multi-turn workflows; print and JSON mo
 
 Always pass `--no-session` to avoid persisting a session. In headless mode, pi has no access to any prior session history — each run starts from a blank slate. The task document must therefore be fully self-contained; never rely on or reference context from a previous conversation or session.
 
+If a run genuinely needs to be followed up later — e.g. to ask a clarifying question or continue the same task — don't reach for `-c`/`--continue` against a `--no-session` run; there's no session to continue. Either start the run without `--no-session` so a session is saved, or use `--mode rpc` for a real multi-turn exchange.
+
 Resolve the model and thinking level for the current run:
 
 1. If the user explicitly wants to choose a model, run `pi --list-models` and show the available models.
@@ -27,11 +29,13 @@ After resolving, use the model and thinking level directly as `<model>` and `<th
 | Need | Use | Output |
 |---|---|---|
 | Final answer only | `pi -p "..."` or `pi --print "..."` | plain text final reply |
-| Tool logs, streaming events, or audit trail | `pi --mode json "..."` | JSON Lines on stdout |
+| Structured events to parse programmatically | `pi --mode json "..."` | JSON Lines on stdout |
 
-> Prefer print mode for final-answer-only scripts; use JSON mode when you need observability, logs, or streaming.
+> Use print mode for final-answer-only scripts. Use JSON mode when a script needs to parse individual events (e.g. checking whether a specific tool ran, extracting token usage) rather than just the final answer. JSON mode is not a substitute for session persistence — if you want a human-reviewable record of a run, start a normal session (no `--no-session`) rather than capturing JSON output.
 
 ## Print Mode
+
+`pi -p "..."` (or `--print`) runs the prompt to completion and prints the final reply as plain text. This is the standard way to run pi headlessly — the output is the answer, nothing else.
 
 **Without piped input:**
 
@@ -60,15 +64,9 @@ pi --no-session --model <model> --thinking <thinking> \
   | jq -c 'select(.type == "message_end")'
 ```
 
-Example audit log:
+For the full event schema (`AgentSessionEvent` / `AgentEvent` type definitions), message types, and more `jq` recipes, see [`references/json-mode-events.md`](references/json-mode-events.md).
 
-```bash
-pi --no-session --model <model> --thinking <thinking> \
-  --mode json "Fix the failing test in src/foo.test.ts" \
-  2>ci-task.err \
-  | tee ci-task.jsonl \
-  | jq -c 'select(.type=="tool_execution_end")'
-```
+> JSON mode mechanics only live here. For using JSON mode to debug a misbehaving skill, extension, or custom provider, see the `pi-debug` skill — it covers the workflow and refers back to this section for the underlying syntax.
 
 ## Common Flags
 
@@ -77,7 +75,7 @@ pi --no-session --model <model> --thinking <thinking> \
 | `--model <model>` | choose model, e.g. `openai/gpt-4o` or `sonnet:high` |
 | `--thinking <thinking>` | set reasoning effort: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
 | `--no-session` | avoid persisting a session |
-| `-c` / `--continue` | continue most recent session |
+| `-c` / `--continue` | continue most recent session (requires a prior run that was *not* `--no-session`) |
 | `--tools <tools>` | comma-separated allowlist of tools, e.g. `read,grep,find,ls` for read-only mode |
 | `--exclude-tools <tools>` | comma-separated denylist of tools to disable |
 | `--no-tools` | disable all tools |
@@ -180,33 +178,14 @@ git log --oneline -50 \
     -p "Generate a Keep-a-Changelog formatted CHANGELOG entry from these commits, grouped by type (Added, Fixed, Changed)"
 ```
 
-### Debugging a Single Skill or Extension
-
-Disable auto-discovery and load only the target skill or extension, then capture JSON mode output to inspect what it produces:
-
-```bash
-# Debug a skill
-pi --no-session --model <model> --thinking <thinking> \
-  --no-skills --skill /path/to/your-skill \
-  --mode json "Test prompt" \
-  2>debug.err | tee debug.jsonl | jq -c 'select(.type=="tool_execution_end")'
-
-# Debug an extension
-pi --no-session --model <model> --thinking <thinking> \
-  --no-extensions -e /path/to/your-extension.ts \
-  --mode json "Test prompt" \
-  2>debug.err | tee debug.jsonl | jq -c 'select(.type=="tool_execution_end")'
-```
-
-> `--no-skills` and `--no-extensions` only disable auto-discovery; explicitly passed `--skill` and `-e` paths are always loaded.
-
 ## Pitfalls
 
-- **Project trust:** non-interactive modes skip the interactive trust prompt and follow global `defaultProjectTrust`. For CI, trust the project interactively first or configure trust explicitly.
-- **Single turn only:** print and JSON modes run once and exit — the process exits after final output. They cannot receive follow-up messages or further stdin mid-run.
+- **Project trust:** non-interactive mode skips the interactive trust prompt and follows global `defaultProjectTrust`. For CI, trust the project interactively first or configure trust explicitly.
+- **Single turn only:** print mode runs once and exits — the process exits after final output. It cannot receive follow-up messages or further stdin mid-run.
 - **stdin merging:** `cat file | pi -p "task"` appends stdin to the initial prompt as one user message. Large stdin can exhaust context.
-- **stdout vs stderr:** JSON events are on stdout; warnings/logs are on stderr. Mixed streams can break `jq`.
+- **`--no-session` blocks `-c`:** if you'll need to continue a run later, don't pair it with `--no-session` — start it as a normal session instead.
+- **stdout vs stderr (JSON mode):** JSON events are on stdout; warnings/logs are on stderr. Mixed streams can break `jq`.
 
-## Reference Files
+## Debugging a skill, extension, or provider?
 
-- [`references/json-mode-events.md`](references/json-mode-events.md) — Full JSON mode event schema (`AgentSessionEvent` / `AgentEvent` type definitions), message types, output format, jq recipes, and debugging tips. Consult this when you need field-level details beyond what the table above covers.
+This skill covers running pi headlessly and the two output modes. If something isn't behaving as expected — a skill/extension not loading correctly, load-order issues, or a custom provider misbehaving — see the `pi-debug` skill for the methodology; it builds on the JSON mode mechanics above.
