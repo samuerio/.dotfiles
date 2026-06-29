@@ -1,6 +1,6 @@
 ---
 name: pi-headless
-description: use this skill when invoking the "pi" coding agent (earendil-works/pi) non-interactively from scripts, subprocesses, ci jobs, or one-shot shell commands. trigger on `pi -p`, `pi --print`, `pi --mode json`, or requests to run pi without its interactive tui.
+description: use this skill when invoking the "pi" coding agent (earendil-works/pi) non-interactively from scripts, subprocesses, ci jobs, or one-shot shell commands, and when debugging pi skills, extensions, providers, or json event streams. trigger on `pi -p`, `pi --print`, `pi --mode json`, headless/non-interactive pi usage, or requests to isolate/troubleshoot pi skill/extension/provider behavior.
 ---
 
 # Using pi Non-Interactively
@@ -66,7 +66,92 @@ pi --no-session --model <model> --thinking <thinking> \
 
 For the full event schema (`AgentSessionEvent` / `AgentEvent` type definitions), message types, and more `jq` recipes, see [`references/json-mode-events.md`](references/json-mode-events.md).
 
-> JSON mode mechanics only live here. For using JSON mode to debug a misbehaving skill, extension, or custom provider, see the `pi-debug` skill — it covers the workflow and refers back to this section for the underlying syntax.
+## Debugging Skills, Extensions, and Providers
+
+Use JSON mode when diagnosing why a pi skill, extension, or custom provider is not behaving as expected. Do not trust print-mode final text alone; inspect the event stream for tool calls, errors, retries, and message boundaries.
+
+### Core Debugging Pattern
+
+Use two moves:
+
+1. **Isolate** — disable auto-discovery and explicitly load only the suspect skill or extension.
+2. **Observe** — capture JSON events and inspect tool execution, errors, retries, and message updates.
+
+```bash
+# Isolate one skill
+pi --no-session --model <model> --thinking <thinking> \
+  --no-skills --skill /path/to/your-skill \
+  --mode json "Test prompt" \
+  2>debug.err | tee debug.jsonl | jq -c 'select(.type=="tool_execution_end")'
+
+# Isolate one extension
+pi --no-session --model <model> --thinking <thinking> \
+  --no-extensions -e /path/to/your-extension.ts \
+  --mode json "Test prompt" \
+  2>debug.err | tee debug.jsonl | jq -c 'select(.type=="tool_execution_end")'
+```
+
+`--no-skills` and `--no-extensions` disable auto-discovery only. Explicit `--skill` and `-e` entries still load, which is what isolation needs.
+
+Keep `debug.jsonl` and rerun `jq` filters against the saved file instead of rerunning pi unless the prompt, flags, or code changed.
+
+### Load-Order Problems
+
+When behavior changes depending on what else is loaded:
+
+1. Capture a normal run with auto-discovery enabled.
+2. Capture an isolated run with only the suspect skill or extension loaded.
+3. Compare the JSON event streams.
+4. If isolated behavior differs, check for duplicate names, overlapping descriptions, trigger conflicts, or load-order-dependent state.
+5. If isolated behavior is the same, stop chasing load order and inspect the skill, extension, or provider logic itself.
+
+Keep the prompt, model, and thinking level identical between comparison runs.
+
+### Custom Provider Debugging
+
+For custom providers, inspect both pi's JSON events and the provider subprocess's raw stdio when available.
+
+Common failure locations:
+
+- the subprocess did not receive the expected input format
+- the subprocess emitted the wrong schema, delimiter, or partial JSONL
+- buffering caused output chunks not to align with expected event or message boundaries
+- tool-call events were swallowed, delayed, or malformed
+
+Use a minimal prompt first so the event stream is small enough to read in full.
+
+### Chaining Debug Runs
+
+Default to independent reruns:
+
+```bash
+pi --no-session --model <model> --thinking <thinking> ...
+```
+
+Use `-c` only for genuine continuation from a saved session. Do not use `-c` after a `--no-session` run; there is no session to continue.
+
+For real multi-turn debugging, use `--mode rpc` instead of chained print or JSON runs.
+
+### Useful Debug Filters
+
+```bash
+# Tool calls and args
+jq -c 'select(.type=="tool_execution_start") | {tool: .toolName, args}' debug.jsonl
+
+# Failed tool calls
+jq -c 'select(.type=="tool_execution_end" and .isError==true)' debug.jsonl
+
+# Auto-retry events
+jq -c 'select(.type=="auto_retry_start" or .type=="auto_retry_end")' debug.jsonl
+
+# Compaction events
+jq -c 'select(.type=="compaction_start" or .type=="compaction_end")' debug.jsonl
+
+# Final assistant message boundaries
+jq -c 'select(.type=="message_end")' debug.jsonl
+```
+
+For the full event schema and more recipes, see [`references/json-mode-events.md`](references/json-mode-events.md).
 
 ## Common Flags
 
@@ -186,6 +271,3 @@ git log --oneline -50 \
 - **`--no-session` blocks `-c`:** if you'll need to continue a run later, don't pair it with `--no-session` — start it as a normal session instead.
 - **stdout vs stderr (JSON mode):** JSON events are on stdout; warnings/logs are on stderr. Mixed streams can break `jq`.
 
-## Debugging a skill, extension, or provider?
-
-This skill covers running pi headlessly and the two output modes. If something isn't behaving as expected — a skill/extension not loading correctly, load-order issues, or a custom provider misbehaving — see the `pi-debug` skill for the methodology; it builds on the JSON mode mechanics above.
