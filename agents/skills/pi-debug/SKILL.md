@@ -47,9 +47,7 @@ Steps:
 1. Reproduce with full auto-discovery on (the normal, non-isolated run) and capture JSON output.
 2. Reproduce again with the isolation commands above (only the suspect skill/extension loaded).
 3. Diff the two event streams. If behavior changes between the two runs, something else being auto-discovered is interfering — check for duplicate names, overlapping trigger descriptions, or load-order-dependent state.
-4. If behavior is identical in both runs, the bug is in the skill/extension itself, not a load-order conflict — stop investigating load order and inspect the skill/extension's own logic instead.
-
-Don't skip step 4's branch — it's easy to keep chasing a load-order theory after the isolated run has already ruled it out.
+4. If behavior is identical in both runs, the bug is in the skill/extension itself, not a load-order conflict — stop investigating load order and inspect the skill/extension's own logic instead, rather than continuing to chase a load-order theory the isolated run has already ruled out.
 
 ## Debugging a Custom Provider
 
@@ -68,13 +66,11 @@ Test prompts for provider debugging should be minimal (a single trivial request)
 Print and JSON modes are single-turn — pi exits after one reply. Debugging often wants several runs in sequence (tweak something, rerun), but that's a different need from genuine multi-turn continuation:
 
 - **Independent reruns** (the common case): each run is a fresh, self-contained test of a hypothesis. Keep `--no-session` on every run. Don't reach for `-c` here — there's nothing to continue, and treating these as a chain risks smuggling in implicit context the next run won't actually have outside of debugging.
-- **Genuine continuation** (you want pi to remember what it found in the previous run): drop `--no-session` on the first run so a session is saved, then use `-c` on the next. Be aware this is no longer a clean, isolated test — accumulated session state can itself become a confound. If you need real interactive back-and-forth while debugging, `--mode rpc` is the correct tool, not chained single-turn calls.
-
-When in doubt, prefer independent reruns with a fully self-contained prompt each time — it's slower per-iteration but keeps each result trustworthy on its own.
+- **Genuine continuation** (you want pi to remember what it found in the previous run): drop `--no-session` on the first run so a session is saved, then use `-c` on the next. Be aware this is no longer a clean, isolated test — accumulated session state can itself become a confound. If you need real interactive back-and-forth while debugging, `--mode rpc` is the correct tool, not chained single-turn calls. When in doubt, default to independent reruns.
 
 ## Pitfalls
 
-- **Don't trust the final answer alone.** A clean-looking reply in print mode can still hide a tool that silently failed or a provider that returned malformed data the model worked around. Always confirm via the JSON event stream, not just the text output, before concluding something works.
-- **One variable at a time.** Isolating a skill/extension only diagnoses load-order/interference issues if everything else is actually held constant — same prompt, same model, same thinking level — across the comparison runs.
+- **Don't trust the final answer alone** — confirm via the JSON event stream, not just print-mode text, per "Core Technique" above.
+- **One variable at a time** — same prompt, model, and thinking level across comparison runs, per "Diagnosing Load-Order Issues" above.
 - **stdout vs stderr still applies.** As in `pi-headless`: JSON events are on stdout, logs/warnings on stderr. Redirect stderr before piping to `jq` or you'll corrupt the stream you're trying to inspect.
 - See `pi-headless`'s JSON Mode section and its `references/json-mode-events.md` for the full event schema and additional `jq` recipes — this skill assumes that reference, it doesn't repeat it.
