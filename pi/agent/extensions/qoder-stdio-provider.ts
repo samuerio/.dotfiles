@@ -83,11 +83,22 @@ function buildPrompt(context: Context): string {
             '<pi_tool_calls>\n[\n  { "name": "<tool_name>", "arguments": { ... } },\n  { "name": "<tool_name>", "arguments": { ... } }\n]\n</pi_tool_calls>',
         );
         parts.push(
-            'Rules:\n- Each new tool call must have "name" (string) and "arguments" (JSON object).\n- For new tool calls, do not generate "id"; Pi will assign ids automatically.\n- You may include multiple tool calls in one block.\n- You may include multiple <pi_tool_calls> blocks; all will be merged.\n- Explanatory text outside the XML blocks is preserved.\n- If you do not need any tools, respond with plain text only (no XML block).',
+            'Rules:\n- Each new tool call must have "name" (string) and "arguments" (JSON object).\n- For new tool calls, do not generate "id"; Pi will assign ids automatically.\n- Valid tool names are strictly limited to the tools listed above. Entries in <available_skills> are instructions, not callable tools.\n- You may include multiple tool calls in one block.\n- You may include multiple <pi_tool_calls> blocks; all will be merged.\n- Explanatory text outside the XML blocks is preserved.\n- If you do not need any tools, respond with plain text only (no XML block).',
         );
     }
 
-    // 3. Messages: single chronological conversation log
+    // 3. Skill routing: if the system prompt lists available skills and the user
+    //    task matches one, the model must first read the skill file, not call
+    //    the skill name as if it were a tool.
+    parts.push(
+        "\nIMPORTANT: If the user's task matches a skill (listed in <available_skills> above), " +
+        "your first action MUST be to read the skill's SKILL.md file using the read tool " +
+        "(use the <location> path from its entry in <available_skills>). " +
+        "Never call the skill by name as if it were a tool. " +
+        "After reading the skill file, follow its instructions using the available tools.",
+    );
+
+    // 4. Messages: single chronological conversation log
     const messages = context.messages;
     if (messages.length > 0) {
         const convoParts: string[] = [];
@@ -137,7 +148,9 @@ function buildPrompt(context: Context): string {
             }
         }
 
-        convoParts.push("Your response:");
+        convoParts.push(
+            "Remember: if the task matches a skill, your first action MUST be read of the skill file.\n\nYour response:",
+        );
 
         parts.push(convoParts.join("\n\n"));
     }
