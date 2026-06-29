@@ -83,7 +83,7 @@ function buildPrompt(context: Context): string {
             '<pi_tool_calls>\n[\n  { "name": "<tool_name>", "arguments": { ... } },\n  { "name": "<tool_name>", "arguments": { ... } }\n]\n</pi_tool_calls>',
         );
         parts.push(
-            'Rules:\n- Each new tool call must have "name" (string) and "arguments" (JSON object).\n- For new tool calls, do not generate "id"; Pi will assign ids automatically.\n- Historical tool calls shown in the conversation may contain "id" only because they were already executed.\n- You may include multiple tool calls in one block.\n- You may include multiple <pi_tool_calls> blocks; all will be merged.\n- Explanatory text outside the XML blocks is preserved.\n- If you do not need any tools, respond with plain text only (no XML block).',
+            'Rules:\n- Each new tool call must have "name" (string) and "arguments" (JSON object).\n- For new tool calls, do not generate "id"; Pi will assign ids automatically.\n- You may include multiple tool calls in one block.\n- You may include multiple <pi_tool_calls> blocks; all will be merged.\n- Explanatory text outside the XML blocks is preserved.\n- If you do not need any tools, respond with plain text only (no XML block).',
         );
     }
 
@@ -120,7 +120,7 @@ function buildPrompt(context: Context): string {
 
                     if (historicalToolCalls.length > 0) {
                         blocks.push(
-                            `Historical assistant tool calls already executed:\n<pi_tool_calls>\n${JSON.stringify(historicalToolCalls, null, 2)}\n</pi_tool_calls>`,
+                            `<pi_tool_calls>\n${JSON.stringify(historicalToolCalls, null, 2)}\n</pi_tool_calls>`,
                         );
                     }
 
