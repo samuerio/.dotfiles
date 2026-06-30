@@ -13,7 +13,7 @@ Use interactive mode or `--mode rpc` for multi-turn workflows; print and JSON mo
 
 Always pass `--no-session` to avoid persisting a session. In headless mode, pi has no access to any prior session history — each run starts from a blank slate. The task document must therefore be fully self-contained; never rely on or reference context from a previous conversation or session.
 
-If a run genuinely needs to be followed up later — e.g. to ask a clarifying question or continue the same task — don't reach for `-c`/`--continue` against a `--no-session` run; there's no session to continue. Either start the run without `--no-session` so a session is saved, or use `--mode rpc` for a real multi-turn exchange.
+If a run needs interactive follow-up or multi-turn debugging, use the tmux skill to run pi interactively instead.
 
 Resolve the model and thinking level for the current run:
 
@@ -128,9 +128,7 @@ Default to independent reruns:
 pi --no-session --model <model> --thinking <thinking> ...
 ```
 
-Use `-c` only for genuine continuation from a saved session. Do not use `-c` after a `--no-session` run; there is no session to continue.
-
-For real multi-turn debugging, use `--mode rpc` instead of chained print or JSON runs.
+For real multi-turn debugging, use the tmux skill to run pi interactively — it gives you full control over the session without the overhead of RPC wiring.
 
 ### Useful Debug Filters
 
@@ -160,7 +158,6 @@ For the full event schema and more recipes, see [`references/json-mode-events.md
 | `--model <model>` | choose model, e.g. `openai/gpt-4o` or `sonnet:high` |
 | `--thinking <thinking>` | set reasoning effort: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` |
 | `--no-session` | avoid persisting a session |
-| `-c` / `--continue` | continue most recent session (requires a prior run that was *not* `--no-session`) |
 | `--tools <tools>` | comma-separated allowlist of tools, e.g. `read,grep,find,ls` for read-only mode |
 | `--exclude-tools <tools>` | comma-separated denylist of tools to disable |
 | `--no-tools` | disable all tools |
@@ -268,6 +265,6 @@ git log --oneline -50 \
 - **Project trust:** non-interactive mode skips the interactive trust prompt and follows global `defaultProjectTrust`. For CI, trust the project interactively first or configure trust explicitly.
 - **Single turn only:** print mode runs once and exits — the process exits after final output. It cannot receive follow-up messages or further stdin mid-run.
 - **stdin merging:** `cat file | pi -p "task"` appends stdin to the initial prompt as one user message. Large stdin can exhaust context.
-- **`--no-session` blocks `-c`:** if you'll need to continue a run later, don't pair it with `--no-session` — start it as a normal session instead.
+- **Single-shot only:** headless mode is not designed for multi-turn workflows. Use the tmux skill to run pi interactively when you need follow-up turns or mid-session input.
 - **stdout vs stderr (JSON mode):** JSON events are on stdout; warnings/logs are on stderr. Mixed streams can break `jq`.
 
