@@ -95,31 +95,6 @@ pi --no-session --model <model> --thinking <thinking> \
 
 Keep `debug.jsonl` and rerun `jq` filters against the saved file instead of rerunning pi unless the prompt, flags, or code changed.
 
-### Load-Order Problems
-
-When behavior changes depending on what else is loaded:
-
-1. Capture a normal run with auto-discovery enabled.
-2. Capture an isolated run with only the suspect skill or extension loaded.
-3. Compare the JSON event streams.
-4. If isolated behavior differs, check for duplicate names, overlapping descriptions, trigger conflicts, or load-order-dependent state.
-5. If isolated behavior is the same, stop chasing load order and inspect the skill, extension, or provider logic itself.
-
-Keep the prompt, model, and thinking level identical between comparison runs.
-
-### Custom Provider Debugging
-
-For custom providers, inspect both pi's JSON events and the provider subprocess's raw stdio when available.
-
-Common failure locations:
-
-- the subprocess did not receive the expected input format
-- the subprocess emitted the wrong schema, delimiter, or partial JSONL
-- buffering caused output chunks not to align with expected event or message boundaries
-- tool-call events were swallowed, delayed, or malformed
-
-Use a minimal prompt first so the event stream is small enough to read in full.
-
 ### Chaining Debug Runs
 
 Default to independent reruns:
