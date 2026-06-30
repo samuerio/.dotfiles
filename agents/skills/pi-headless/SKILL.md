@@ -70,12 +70,19 @@ For the full event schema (`AgentSessionEvent` / `AgentEvent` type definitions),
 
 Use JSON mode when diagnosing why a pi skill, extension, or custom provider is not behaving as expected. Do not trust print-mode final text alone; inspect the event stream for tool calls, errors, retries, and message boundaries.
 
+Two paths depending on what the debugging needs:
+
+- **Single-shot, scriptable (default, preferred)** — isolate the suspect skill/extension and capture one JSON event stream per run. Use this whenever a fresh, reproducible run is enough to see the failure.
+- **Multi-turn, interactive (only when needed)** — if the extension requires UI interaction, mid-session follow-up, or the failure only reproduces across multiple turns, headless JSON mode cannot help (single-shot only, no mid-run input). Switch to the tmux skill and run pi *without* `--mode`/`-p`, i.e. plain interactive mode, inside a tmux pane so you can send keystrokes and observe the TUI directly.
+
 ### Core Debugging Pattern
 
 Use two moves:
 
-1. **Isolate** — disable auto-discovery and explicitly load only the suspect skill or extension.
-2. **Observe** — capture JSON events and inspect tool execution, errors, retries, and message updates.
+1. **Isolate** — disable auto-discovery and explicitly load only the suspect skill or extension. This works the same way in both headless and interactive mode — only the flags below change.
+2. **Observe** — capture JSON events (headless) or watch the TUI directly via tmux (interactive), depending on which path you're on.
+
+**Headless (single-shot, scriptable):**
 
 ```bash
 # Isolate one skill
@@ -95,17 +102,19 @@ pi --no-session --model <model> --thinking <thinking> \
 
 Keep `debug.jsonl` and rerun `jq` filters against the saved file instead of rerunning pi unless the prompt, flags, or code changed.
 
-### Chaining Debug Runs
+**Interactive (multi-turn, via tmux):**
 
-Default to independent reruns:
+Use the tmux skill to host the session — see its Quickstart for socket/session setup and pane-readiness checks before sending input. The same isolation flags apply here; just drop `--mode json "Test prompt"` and start pi interactively instead:
 
 ```bash
-pi --no-session --model <model> --thinking <thinking> ...
+tmux -S <socket> new -d -s <session> -n pi
+tmux -S <socket> send-keys -t <target> -- \
+  'pi --no-session --model <model> --thinking <thinking> --no-skills --skill /path/to/your-skill' Enter
 ```
 
-For real multi-turn debugging, use the tmux skill to run pi interactively — it gives you full control over the session without the overhead of RPC wiring.
+Then use the tmux skill's capture-pane / wait-for-text workflow to drive the session and observe behavior live.
 
-### Useful Debug Filters
+### Useful Debug Filters(headless only)
 
 ```bash
 # Tool calls and args

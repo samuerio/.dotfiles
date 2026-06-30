@@ -7,4 +7,4 @@ Interview me relentlessly about every aspect of this plan until we reach a consi
 
 Ask the questions one at a time.
 
-If the topic is a coding project or software design, and a question can be answered by exploring the codebase, explore the codebase instead of asking.
+If a question can be answered by exploring the codebase, explore the codebase instead.
