@@ -36,7 +36,7 @@ Do not infer implementation permission from approval of the plan.
 
 After writing the plan file, use this exact phrasing:
 
-> Draft saved — run `code <plan-path>` to review.
+> Draft saved — run `code <plan-path> &` to review.
 
 ## finalize
 

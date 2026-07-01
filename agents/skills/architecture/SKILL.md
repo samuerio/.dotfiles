@@ -1,6 +1,6 @@
 ---
 name: architecture
-description: Use this skill to produce a structured architecture document with Mermaid diagrams and prose in Simplified Chinese. Triggers in two scenarios (1) Research — user wants to document or analyze an existing codebase or system, triggered by /research-codebase; (2) Draft — user wants to design a system architecture from a written plan, spec, or requirements, triggered by /draft-design.
+description: Use this skill to produce a structured architecture document with Mermaid diagrams and prose in Simplified Chinese. Triggers in two scenarios (1) Research — user wants to document or analyze an existing codebase or system, triggered by /research; (2) Draft — user wants to design a system architecture from a written plan, spec, or requirements, triggered by /draft-design.
 ---
 
 # Architecture
@@ -45,5 +45,9 @@ Record the reasoning behind key architectural decisions that cannot be inferred 
 
 - **Research**: `/tmp/research/[YYYYMMDD-HHMMSS]-[slug]/research.md`, where the timestamp is taken at the time `/research-codebase` is executed and the kebab-case slug is derived from the topic (e.g., `/tmp/research/20250622-143000-auth-module/research.md`)
 - **Draft**: same directory as the plan file (e.g., `spec/[slug]/design.md`); if no plan file exists, write `design.md` to the current working directory
+
+After writing the file, use this exact phrasing:
+
+> Draft saved — run `code [output-path] &` to review.
 
 > All prose in **Simplified Chinese**; file paths, section headings, Mermaid node IDs, and code identifiers in **English**.
