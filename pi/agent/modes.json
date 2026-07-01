@@ -14,7 +14,7 @@
     },
     "smart": {
       "provider": "volcengine",
-      "modelId": "kimi-k2.7-code",
+      "modelId": "deepseek-v4-pro",
       "thinkingLevel": "xhigh"
     },
     "deep": {
