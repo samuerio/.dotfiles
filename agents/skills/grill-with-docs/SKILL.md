@@ -1,5 +1,5 @@
 ---
-name: grill-me
+name: grill-with-docs
 description: Interview the user relentlessly about a document until reaching shared understanding, resolving each branch of the decision tree. Use when user wants to stress-test a document, get grilled on their spec, or mentions "grill me".
 ---
 
