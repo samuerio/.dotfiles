@@ -138,7 +138,17 @@ tmux conventions (per the tmux SKILL):
 ### /ws status [<name>] (alias: /ws st)
 
 1. If `<name>` is omitted, read it from the state file (**Current branch-workspace state**); error per that section if unset. Apply active guard. Apply pane target convention.
-2. Capture pane output (tmux SKILL **Watching output**, capture mode; `-S -200`). Do not send any keys. Report the captured text.
+2. Capture pane output (tmux SKILL **Watching output**, capture mode; `-S -200`). Do not send any keys.
+3. **Intelligent Summary**: Analyze the captured logs and report to the user using the following structured format:
+   - **Current State**: What step, command, or process is currently executing? (e.g., "running pytest", "idle at shell prompt", "compiling TypeScript").
+   - **Health Check**: Are there any visible errors, warnings, or panics? If an error is found, quote the exact failure message.
+   - **Progress**: A brief estimate of the current progress based on the logs.
+4. **Smart Snippet**: Do NOT dump the full 200 lines. Instead, include a highly relevant snippet in a collapsible block:
+   - If there is an **error/panic**, extract the error message and ~10 lines of surrounding context.
+   - If it is **running normally**, extract only the **last 10-15 lines** to show the current active output.
+   Format: `<details><summary>Relevant Log Snippet</summary>...`
+5. **Full Log Access**: Always append the tmux attach command so the user can inspect the full live session if needed:
+   `To monitor this session yourself: tmux -S <socket> attach -t <name>`
 
 ### /ws handoff-for-impl [<name>] [-m|--choose-model] (alias: /ws hfi)
 
