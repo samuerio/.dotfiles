@@ -150,6 +150,20 @@ tmux conventions (per the tmux SKILL):
 5. **Full Log Access**: Always append the tmux attach command so the user can inspect the full live session if needed:
    `To monitor this session yourself: tmux -S <socket> attach -t <name>`
 
+### /ws cancel [<name>] (alias: /ws c)
+
+1. If `<name>` is omitted, read it from the state file (**Current branch-workspace state**); error per that section if unset. Apply active guard. Apply pane target convention.
+2. **Check readiness**: Apply pane readiness check (tmux SKILL **Checking pane readiness**).
+   - If the pane is already **idle** (at a shell prompt), report to the user: "The workspace is already idle, no task is currently running." and stop.
+   - If the pane is **busy**, proceed to step 3.
+3. **Send interrupt signal**: Use the tmux SKILL **Sending input safely** to send the interrupt signal to the pane:
+   ```bash
+   tmux -S <socket> send-keys -t <target> C-c
+   ```
+   *(Note: `C-c` is sufficient for 99% of CLI processes like `pi`, `pytest`, `npm`. Do not use `C-\` unless `C-c` is explicitly caught and ignored by the process).*
+4. **Wait for recovery**: After sending `C-c`, the process will terminate and the shell should return to a prompt. Use the tmux SKILL **Watching output** (poll mode) to wait for the shell prompt pattern (e.g., `^\$\s*$` or `^%\s*$`) with a short timeout (e.g., 5 seconds).
+5. **Report**: Once the prompt is detected (or timeout occurs), report to the user that the task has been interrupted and the workspace is ready for the next command.
+
 ### /ws handoff-for-impl [<name>] [-m|--choose-model] (alias: /ws hfi)
 
 `handoff-for-impl` is a silent kickoff command for implementation work whose duration is unknown. It creates or reuses a branch-workspace, sends the implementation command into its tmux pane, and does not wait for completion or capture output.
