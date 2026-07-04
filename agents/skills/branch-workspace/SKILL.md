@@ -127,9 +127,11 @@ tmux conventions (per the tmux SKILL):
 ### /ws task [<name>] [-m|--choose-model] <task> (alias: /ws t)
 
 1. If `<name>` is omitted, read it (and its `worktreePath`) from the state file (**Current branch-workspace state**); error per that section if unset. Apply active guard. Apply pane target convention. Apply pane readiness check (tmux SKILL **Checking pane readiness**); if the pane is busy, report it and stop.
-2. Before dispatching, apply the `refine-task` SKILL to clarify the task. The dispatcher should proactively explore the worktree (using the `worktreePath` resolved in step 1) to answer questions from context rather than asking the user unnecessarily. After the task is refined and confirmed, the dispatcher reviews the worker's output once the worker signals completion.
+2. **Task Triage (Intent Classification)**: Before dispatching, evaluate the complexity and clarity of the `<task>`:
+   - **Fast Path (Direct Dispatch)**: If the task is trivial, unambiguous, and self-contained (e.g., "fix typo in README", "bump version to 2.0", "add a specific unit test for function X"), **skip the interactive Q&A of `refine-task`**. The dispatcher should internally draft a clear, self-contained task description for the worker and proceed directly to step 3. Do not ask the user for confirmation.
+   - **Standard Path (Refine & Confirm)**: If the task is ambiguous, broad, involves multiple files, or requires architectural decisions (e.g., "refactor the auth module", "implement a new caching layer"), strictly apply the `refine-task` SKILL. The dispatcher must proactively explore the worktree to answer questions from context. If critical information is still missing, ask the user targeted questions. **Wait for explicit user confirmation** of the refined task before proceeding to step 3.
 
-   After `refine-task` completes (including any clarifying exchange with the user), resume `/ws task` from step 3 using the refined task text as `<task>`.
+   After `refine-task` completes (including any clarifying exchange with the user), resume `/ws task` from step 3 using the refined task text as `<task>`. The dispatcher reviews the worker's output once the worker signals completion.
 3. The dispatcher must choose how to route the work, but it must not implement file changes itself. If the task output is expected to be code, docs, tests, review comments, or any other file modification, send it to the worker path.
 4. Determine how to dispatch:
    - **worker path** (default for any task whose output is file changes — writing code, docs, tests, or review comments):
