@@ -73,7 +73,9 @@ To resolve branch-workspace state for `<name>`:
 3. State:
    - `active`: worktree exists + session exists.
    - `idle`: worktree exists + session missing.
-   - `orphan`: worktree missing + session exists. Suggest manual cleanup; do not auto-resolve.
+   - `orphan`: worktree missing + session exists.
+     Report to the user: "Detected an orphaned tmux session for `<name>` (the git worktree is missing). Would you like me to kill the residual tmux session?"
+     If the user confirms, execute `tmux -S <socket> kill-session -t "<name>"` directly. Do not auto-resolve without explicit confirmation.
    - `missing`: neither exists.
 
 ## /ws trigger
@@ -115,7 +117,7 @@ tmux conventions (per the tmux SKILL):
 
 1. If `<name>` is omitted, read it from the state file (**Current branch-workspace state**); error per that section if unset.
 2. Resolve branch-workspace state for `<name>`.
-3. If state is `missing`, report an error and stop. If state is `orphan`, suggest manual cleanup and stop.
+3. If state is `missing`, report an error and stop. If state is `orphan`, ask the user for permission to kill the residual tmux session (same as the orphan resolution in **State** definition above). If the user declines, stop and leave the session untouched.
 4. If `dirty=yes`, ask the user to confirm before proceeding. On no or unclear answer, abort and leave the worktree and session untouched.
 5. Run `bash {baseDir}/worktree.sh clean <name>` without `--force`. On git failure, surface the error and stop.
 6. Only after the script succeeds: if a session exists, run `tmux -S <socket> kill-session -t "<name>"`; otherwise skip.
