@@ -14,7 +14,7 @@
     },
     "smart": {
       "provider": "volcengine",
-      "modelId": "deepseek-v4-pro",
+      "modelId": "glm-5.2",
       "thinkingLevel": "xhigh"
     },
     "deep": {
