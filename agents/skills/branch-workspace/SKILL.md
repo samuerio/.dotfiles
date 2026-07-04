@@ -1,6 +1,6 @@
 ---
 name: branch-workspace
-description: "manage isolated branch-scoped workspaces composed of a git worktree and matching tmux session. use this skill for /ws commands, including /ws open, /ws list, /ws close, /ws task, /ws status, and /ws handoff-for-impl."
+description: "manage isolated branch-scoped workspaces composed of a git worktree and matching tmux session. use this skill for /ws commands, including /ws open, /ws list, /ws close, /ws task, /ws status, /ws vscode, and /ws handoff-for-impl."
 ---
 
 ## Concept
@@ -168,6 +168,16 @@ tmux conventions (per the tmux SKILL):
    Format: `<details><summary>Relevant Log Snippet</summary>...`
 5. **Full Log Access**: Always append the tmux attach command so the user can inspect the full live session if needed:
    `To monitor this session yourself: tmux -S <socket> attach -t <name>`
+
+### /ws vscode [<name>] (alias: /ws vs)
+
+1. If `<name>` is omitted, read it (and its `worktreePath`) from the state file (**Current branch-workspace state**); error per that section if unset.
+2. Resolve branch-workspace state for `<name>`. If state is `missing`, report an error and stop.
+3. Launch VS Code in the background, suppressing startup logs:
+   ```bash
+   code "<worktreePath>" >/dev/null 2>&1 &
+   ```
+4. Report to the user that the editor window for `<name>` has been opened.
 
 ### /ws cancel [<name>] (alias: /ws c)
 
