@@ -1,92 +1,87 @@
 ---
 name: pseudocode
-description: "turn specifications, workflows, business rules, APIs, and algorithms into implementation-ready pseudocode."
+description: "Generate detailed pseudocode for the main components defined in an architecture document (produced by the `architecture` SKILL)."
 ---
 
 # Pseudocode
 
-Use this skill to translate specifications, feature requirements, workflows, business rules, and algorithms into clear, language-agnostic pseudocode.
+Use this skill to translate the main components from an architecture document (either `research.md` or `design.md` produced by the `architecture` SKILL) into clear, language-agnostic pseudocode.
 
 ## Core Behavior
 
-When using this skill:
+When using this skill, first identify the source of the architecture document to determine the generation mode:
 
-1. Identify the problem, inputs, outputs, constraints, and edge cases.
-2. Choose an appropriate logic structure, such as workflow steps, validation rules, state transitions, helper routines, data structures, or algorithmic patterns when relevant.
-3. Break complex logic into named subroutines.
-4. Use readable pseudocode, not language-specific syntax.
-5. Do not write production code unless the user explicitly asks for implementation.
-6. Include error handling and edge cases.
-7. Include complexity analysis when the pseudocode contains non‑trivial data processing, search, iteration, graph logic, caching, or algorithmic decisions.
+### Scenario A: Research Mode (Input: `research.md`)
+- **Goal:** Reverse-engineer the existing system.
+- **Action:** Translate the actual implementation logic of the components into pseudocode.
+- **Handling Ambiguity:** If the architecture document lacks detail on a component's internal logic, infer it from the provided codebase context. If still unclear, use placeholders (e.g., `// TODO: implementation details unclear`) or state assumptions in the `ASSUMPTIONS` section. **Do not ask the user for clarification**, as the system already exists.
 
-If essential requirements are missing, ask a concise clarifying question. If the ambiguity is minor, state reasonable assumptions and proceed.
+### Scenario B: Draft Mode (Input: `design.md`)
+- **Goal:** Forward-design the new system.
+- **Action:** Flesh out the conceptual design into concrete, executable pseudocode.
+- **Handling Ambiguity:** If the design spec is ambiguous about a component's behavior, edge cases, or data flow, **ask a concise clarifying question** before proceeding. If the ambiguity is minor, state reasonable assumptions in the `ASSUMPTIONS` section and proceed.
 
-## Output Format
+### Common Steps (For Both Modes)
+1. Read the provided architecture document.
+2. Extract the list of main components from the "Component Responsibilities" section.
+3. For each component, generate detailed pseudocode representing its core logic, internal state, data structures, and interactions.
+4. Break complex logic into named subroutines to maintain readability.
+5. Follow the pseudocode style and formatting rules defined below.
+6. Include error handling, edge cases, and complexity analysis for the component's logic.
+7. **Do not write production code (e.g., Python, Java, TS) unless the user explicitly asks for implementation.**
 
-Use this general template for business logic, workflows, validation rules, state machines, and API behavior:
+## Output Path
 
-```text
-PSEUDOCODE: Name
-PURPOSE: brief explanation
-INPUT: inputName (type), ...
-OUTPUT: result or side effect
+Save the generated pseudocode document in the **same directory** as the input architecture document, named `pseudocode.md`.
 
-ASSUMPTIONS:
-    - assumption 1
+After writing the file, use this exact phrasing:
 
-MAIN FLOW:
-BEGIN
-    step-by-step logic
-END
+> Pseudocode saved — run `code [output-path] &` to review.
 
-ERROR HANDLING:
-    - case → behavior
+## Required Sections per Component
 
-EDGE CASES:
-    - case → behavior
-```
+For each component extracted from the architecture document, provide:
 
-For algorithm‑heavy tasks (search, sort, caching, graph traversal, etc.), also include DATA STRUCTURES and Complexity sections inside the same structure. Example:
+### [Component Name]
+
+A brief description of the component's role based on the architecture document.
 
 ```text
-PSEUDOCODE: Name
+PSEUDOCODE: [ComponentName]
+PURPOSE: ...
 INPUT: ...
 OUTPUT: ...
 
-ASSUMPTIONS: ...
+ASSUMPTIONS:
+    - ...
+
 DATA STRUCTURES:
     ...
-MAIN FLOW:
+
+MAIN FLOW / LIFECYCLE:
 BEGIN
     ...
 END
+
+INTERACTIONS:
+    - How it communicates with other components (e.g., API calls, message queues, direct method calls)
+
+ERROR HANDLING:
+    - ...
+
+EDGE CASES:
+    - ...
+
 Complexity:
     Time:  O(...)
     Space: O(...)
 ```
 
-For complex systems, you may further split into:
-
-```text
-OVERVIEW
-MAIN FLOW
-HELPER ROUTINES
-ERROR HANDLING
-EDGE CASES
-COMPLEXITY (optional)
-```
-
-Adapt the template to the task. Omit sections that are not relevant, and add domain‑specific sections when they improve clarity.
-
-For specific logic types, add sections when useful:
-
-- State machines: STATES, EVENTS, TRANSITIONS
-- API behavior: REQUEST, RESPONSE, VALIDATION, SIDE EFFECTS
-- Workflows: ACTORS, TRIGGERS, STEPS, APPROVALS
-- Business rules: RULES, EXCEPTIONS, PRIORITY ORDER
-- Validation logic: FIELDS, RULES, ERROR MESSAGES
-- Permission logic: ROLES, CONDITIONS, ALLOWED ACTIONS, DENIED ACTIONS
-- Async jobs: QUEUE, RETRY POLICY, TIMEOUTS, FAILURE HANDLING
+**For specific component types, add specialized sections when useful:**
+- **State machines / Lifecycle:** `STATES`, `EVENTS`, `TRANSITIONS`
+- **API / Gateway components:** `REQUEST`, `RESPONSE`, `VALIDATION`, `SIDE EFFECTS`
+- **Workflow / Orchestration components:** `ACTORS`, `TRIGGERS`, `STEPS`, `APPROVALS`
+- **Validation / Rule components:** `FIELDS`, `RULES`, `EXCEPTIONS`, `PRIORITY ORDER`
 
 ## Pseudocode Style
 
@@ -211,91 +206,65 @@ CONTEXT: AuthContext
         RETURN selectedStrategy.authenticate(credentials)
 ```
 
-## Example Outputs
-
-Use examples that match the user's task type. Prefer workflow, business-rule, API, validation, or state-machine structure unless the request is clearly algorithm-heavy.
-
-Business workflow example:
+## Example Output
 
 ```text
-PSEUDOCODE: ApproveRefundRequest
-PURPOSE: Decide whether a refund request should be approved, rejected, or escalated
-INPUT: request (RefundRequest), user (User)
-OUTPUT: decision (approved, rejected, or escalated)
+# Component Pseudocode
+
+## 1. OrderProcessor
+
+Responsible for validating and processing incoming order requests.
+
+```text
+PSEUDOCODE: OrderProcessor
+PURPOSE: Validate order payload, check inventory, and initiate payment.
+INPUT: orderRequest (OrderRequest)
+OUTPUT: orderResult (OrderResult)
 
 ASSUMPTIONS:
-    - Refund policy rules are available from PolicyStore
-    - Managers can override standard refund limits
+    - InventoryService and PaymentService are available and healthy.
+
+DATA STRUCTURES:
+    OrderCache: LRU cache for recent order validations (Size: 1000, TTL: 5m)
 
 MAIN FLOW:
 BEGIN
-    IF request is missing orderId OR amount THEN
-        RETURN rejected("missing required refund details")
+    IF orderRequest is missing orderId OR items THEN
+        RETURN error("missing required order details")
     END IF
 
-    order ← OrderStore.findById(request.orderId)
-
-    IF order is null THEN
-        RETURN rejected("order not found")
+    cachedResult ← OrderCache.get(orderRequest.orderId)
+    IF cachedResult is not null THEN
+        RETURN cachedResult
     END IF
 
-    IF order.status is "refunded" THEN
-        RETURN rejected("order already refunded")
+    inventoryStatus ← CALL InventoryService.check(orderRequest.items)
+    IF inventoryStatus is OUT_OF_STOCK THEN
+        RETURN error("items out of stock")
     END IF
 
-    policy ← PolicyStore.getRefundPolicy(order.region, order.productType)
-
-    IF request.amount <= policy.autoApprovalLimit THEN
-        RETURN approved("within auto-approval limit")
+    paymentResult ← CALL PaymentService.charge(orderRequest.paymentInfo)
+    IF paymentResult is FAILED THEN
+        RETURN error("payment failed")
     END IF
 
-    IF user.role is "manager" AND request.amount <= policy.managerApprovalLimit THEN
-        RETURN approved("manager override allowed")
-    END IF
-
-    RETURN escalated("manual review required")
+    result ← createOrderRecord(orderRequest, paymentResult)
+    OrderCache.set(orderRequest.orderId, result)
+    RETURN result
 END
+
+INTERACTIONS:
+    - Calls InventoryService.check() via gRPC
+    - Calls PaymentService.charge() via REST API
 
 ERROR HANDLING:
-    - PolicyStore unavailable → escalated("policy unavailable")
-    - OrderStore timeout → escalated("order lookup failed")
+    - InventoryService timeout → RETURN error("inventory check timed out")
+    - PaymentService unavailable → RETURN error("payment service unavailable")
 
 EDGE CASES:
-    - Duplicate request → return existing decision
-    - Partial refund → validate remaining refundable amount
-```
-
-Algorithm-oriented example:
-
-```text
-PSEUDOCODE: AuthenticateUser
-INPUT: email (string), password (string)
-OUTPUT: session (Session) or error
-
-BEGIN
-    IF email is empty OR password is empty THEN
-        RETURN error("missing credentials")
-    END IF
-
-    user ← UserStore.findByEmail(email)
-
-    IF user is null THEN
-        SecurityLog.recordFailedLogin(email)
-        RETURN error("invalid credentials")
-    END IF
-
-    IF NOT PasswordHasher.verify(password, user.passwordHash) THEN
-        SecurityLog.recordFailedLogin(email)
-        RETURN error("invalid credentials")
-    END IF
-
-    session ← CreateSession(user.id)
-    SecurityLog.recordSuccessfulLogin(user.id)
-
-    RETURN session
-END
+    - Duplicate orderId in cache → return cached result to prevent double processing
 
 Complexity:
-    Time:  O(log n), assuming indexed user lookup
-    Space: O(1)
+    Time:  O(1) for cache lookup, O(N) for inventory check where N is number of items
+    Space: O(N) to hold order payload in memory during processing
 ```
