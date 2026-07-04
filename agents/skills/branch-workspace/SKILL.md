@@ -18,7 +18,7 @@ The dispatcher agent owns the branch-workspace lifecycle and all coordination. T
 
 - **Explore freely**: the dispatcher may read and inspect files in the branch-workspace's worktree at any point — to refine a task with the user, to review results, or to understand context. Use bash or read-only tools directly for speed and efficiency.
 - **No direct writes**: the dispatcher must never write to or modify files in the branch-workspace's worktree, even for trivial changes. All file modifications go through the worker agent.
-- **Observable tasks**: running commands, running tests, and debugging in the worktree are the dispatcher's responsibility — done directly in the branch-workspace's tmux pane for observability.
+- **Observable tasks**: running commands, running tests, and debugging in the worktree are the dispatcher's responsibility because it is the interaction layer with the user. The dispatcher may use either bash or the branch-workspace's tmux pane to execute these tasks.
 - **Review after completion**: after the worker agent signals completion, the dispatcher inspects the result and reports back to the user.
 
 The worker agent performs implementation work inside the branch-workspace. It receives a self-contained task document and runs to completion.
@@ -150,7 +150,7 @@ tmux conventions (per the tmux SKILL):
      4. Pass the task file to pi via `@/tmp/task/<filename>.md`. If `-m`/`--choose-model` was given, follow the `pi-headless` SKILL model-selection flow; otherwise use defaults.
      5. Send the command to the tmux pane via the tmux SKILL **Sending input safely** and use **Watching output** (poll mode) with pattern `DONE:<YYYY-MM-DD-HHMMSS>-<slug>` to wait for completion.
      6. **Post-Execution Review**: Once the `DONE` marker is detected, **do not parse the raw tmux pane output**. Instead, read the content of `/tmp/task/<YYYY-MM-DD-HHMMSS>-<slug>.result.md` to understand the worker's output. Present this structured summary to the user.
-   - **dispatcher path** (for tasks requiring observability — running tests, executing commands, checking runtime errors): run the command directly in the tmux pane, capturing output for the user.
+   - **dispatcher path** (for tasks requiring observability — running tests, executing commands, checking runtime errors): execute the command using either bash or the branch-workspace's tmux pane, capturing the output for the user.
 
    If a task requires both (e.g. run tests then fix failures, or fix code then verify with a command), handle the observable step via the dispatcher and the file-change step via the worker — in whichever order the task demands. Pass findings between steps in the task doc.
 
