@@ -130,7 +130,22 @@ tmux conventions (per the tmux SKILL):
    After `refine-task` completes (including any clarifying exchange with the user), resume `/ws task` from step 3 using the refined task text as `<task>`.
 3. The dispatcher must choose how to route the work, but it must not implement file changes itself. If the task output is expected to be code, docs, tests, review comments, or any other file modification, send it to the worker path.
 4. Determine how to dispatch:
-   - **worker path** (default for any task whose output is file changes — writing code, docs, tests, or review comments): construct a `pi -p` command following the `pi-headless` SKILL **Print Mode**. Use `--no-session`. Write the refined task text to `/tmp/task/<YYYY-MM-DD-HHMMSS>-<slug>.md` (create the directory with `mkdir -p /tmp/task` if needed), where `<slug>` is a short meaningful kebab-case English phrase derived from the task content. Write the refined task text in the same language as the original `<task>` input, and append the instruction `When you are done, print the marker DONE:<YYYY-MM-DD-HHMMSS>-<slug> on a line by itself.` to the task text (where `<YYYY-MM-DD-HHMMSS>-<slug>` matches the full filename stem). Then pass it to pi via `@/tmp/task/<filename>.md`. If `-m`/`--choose-model` was given, follow the `pi-headless` SKILL model-selection flow before constructing the command; otherwise use defaults. Send the command to the tmux pane via the tmux SKILL **Sending input safely** and use **Watching output** (poll mode) with pattern `DONE:<YYYY-MM-DD-HHMMSS>-<slug>` (matching the full filename stem) to wait for completion.
+   - **worker path** (default for any task whose output is file changes — writing code, docs, tests, or review comments):
+     1. Construct a `pi -p` command following the `pi-headless` SKILL **Print Mode**. Use `--no-session`.
+     2. Write the refined task text to `/tmp/task/<YYYY-MM-DD-HHMMSS>-<slug>.md` (create the directory with `mkdir -p /tmp/task` if needed), where `<slug>` is a short meaningful kebab-case English phrase derived from the task content. Write the refined task text in the same language as the original `<task>` input.
+     3. **Append the Structured Handoff Instruction** to the task text:
+        ```
+        When you have completed the task, you must do the following two things in order:
+        1. Write a concise, structured summary of your work to `/tmp/task/<YYYY-MM-DD-HHMMSS>-<slug>.result.md`. The summary must include:
+           - **Files Modified**: A list of files you created or changed.
+           - **Key Changes**: A brief description of the core logic or implementation details.
+           - **Issues/Blockers**: Any unexpected problems encountered or things the user should review.
+        2. Print the exact marker `DONE:<YYYY-MM-DD-HHMMSS>-<slug>` on a line by itself in the terminal.
+        ```
+        *(Note: Ensure the `<YYYY-MM-DD-HHMMSS>-<slug>` in the instruction exactly matches the filename stem).*
+     4. Pass the task file to pi via `@/tmp/task/<filename>.md`. If `-m`/`--choose-model` was given, follow the `pi-headless` SKILL model-selection flow; otherwise use defaults.
+     5. Send the command to the tmux pane via the tmux SKILL **Sending input safely** and use **Watching output** (poll mode) with pattern `DONE:<YYYY-MM-DD-HHMMSS>-<slug>` to wait for completion.
+     6. **Post-Execution Review**: Once the `DONE` marker is detected, **do not parse the raw tmux pane output**. Instead, read the content of `/tmp/task/<YYYY-MM-DD-HHMMSS>-<slug>.result.md` to understand the worker's output. Present this structured summary to the user.
    - **dispatcher path** (for tasks requiring observability — running tests, executing commands, checking runtime errors): run the command directly in the tmux pane, capturing output for the user.
 
    If a task requires both (e.g. run tests then fix failures, or fix code then verify with a command), handle the observable step via the dispatcher and the file-change step via the worker — in whichever order the task demands. Pass findings between steps in the task doc.
