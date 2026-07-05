@@ -50,42 +50,37 @@ After writing the file, use this exact phrasing:
 
 ## Required Sections per Component
 
-For each component extracted from the architecture document, provide:
+For each component extracted from the architecture document, provide these core sections:
 
 ### [Component Name]
 
 A brief description of the component's role based on the architecture document.
 
 ```text
-PSEUDOCODE: [ComponentName]
-PURPOSE: ...
-INPUT: ...
-OUTPUT: ...
+PSEUDOCODE: component name
+PURPOSE: brief explanation
+INPUT: inputName (type), ...
+OUTPUT: result or side effect
 
 ASSUMPTIONS:
-    - ...
+    - assumption 1
 
-DATA STRUCTURES:
-    ...
-
-MAIN FLOW / LIFECYCLE:
+MAIN FLOW:
 BEGIN
-    ...
+    step-by-step logic
 END
 
-INTERACTIONS:
-    - How it communicates with other components (e.g., API calls, message queues, direct method calls)
-
 ERROR HANDLING:
-    - ...
+    - case → behavior
 
 EDGE CASES:
-    - ...
-
-Complexity:
-    Time:  O(...)
-    Space: O(...)
+    - case → behavior
 ```
+
+**Optional Additions (Include only if highly relevant to the component):**
+- **INTERACTIONS**: Add if the component's primary role involves communicating with other components (e.g., API calls, message queues). If interactions are trivial, describe them inline within `MAIN FLOW`.
+- **DATA STRUCTURES**: Add before `MAIN FLOW` if the component relies on complex, non-obvious data structures (e.g., specific trees, graphs, custom caches).
+- **Complexity**: Add at the end if the component contains non-trivial algorithms (Time/Space complexity).
 
 **For specific component types, add specialized sections when useful:**
 - **State machines / Lifecycle:** `STATES`, `EVENTS`, `TRANSITIONS`
