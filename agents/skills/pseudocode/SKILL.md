@@ -219,6 +219,8 @@ CONTEXT: AuthContext
 
 ## Example Output
 
+> *Note: The example below assumes the input architecture document is in English.*
+
 ````markdown
 # Component Pseudocode
 
