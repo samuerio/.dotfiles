@@ -81,7 +81,7 @@ EDGE CASES:
 **Optional Additions (Include only if highly relevant to the component):**
 - **INTERACTIONS**: Add if the component's primary role involves communicating with other components (e.g., API calls, message queues). If interactions are trivial, describe them inline within `MAIN FLOW`.
 - **DATA STRUCTURES**: Add before `MAIN FLOW` if the component relies on complex, non-obvious data structures (e.g., specific trees, graphs, custom caches).
-- **Complexity**: Add at the end if the component contains non-trivial algorithms (Time/Space complexity).
+- **COMPLEXITY**: Add at the end if the component contains non-trivial algorithms (Time/Space complexity).
 
 **For specific component types, add specialized sections when useful:**
 - **State machines / Lifecycle:** `STATES`, `EVENTS`, `TRANSITIONS`
@@ -186,7 +186,7 @@ BEGIN
     RETURN false
 END
 
-Complexity:
+COMPLEXITY:
     Time:  O(1)
     Space: O(n), where n is the number of active user/action buckets
 ```
@@ -280,7 +280,7 @@ ERROR HANDLING:
 EDGE CASES:
     - Duplicate orderId in cache → return cached result to prevent double processing
 
-Complexity:
+COMPLEXITY:
     Time:  O(1) for cache lookup, O(N) for inventory check where N is number of items
     Space: O(N) to hold order payload in memory during processing
 ```
