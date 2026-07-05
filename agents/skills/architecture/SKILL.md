@@ -48,6 +48,6 @@ Record the reasoning behind key architectural decisions that cannot be inferred 
 
 After writing the file, use this exact phrasing:
 
-> Draft saved — run `code [output-path] &` to review.
+> Architecture saved — run `code [output-path] &` to review.
 
 > All prose in **Simplified Chinese**; file paths, section headings, Mermaid node IDs, and code identifiers in **English**.
