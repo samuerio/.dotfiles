@@ -25,10 +25,10 @@ When using this skill, first identify the source of the architecture document to
 1. Read the provided architecture document.
 2. **(Scenario A only)** Read the relevant source code files from the codebase to gather implementation details and context for the components described in the architecture document.
 3. Extract the list of main components from the "Component Responsibilities" section.
-4. For each component, generate detailed pseudocode representing its core logic, internal state, data structures, and interactions.
+4. For each component, generate detailed pseudocode representing its core logic, internal state, data structures, and interactions. Add separate sections for DATA STRUCTURES or INTERACTIONS only if they are complex or central to the component's role.
 5. Break complex logic into named subroutines to maintain readability.
 6. Follow the pseudocode style and formatting rules defined below.
-7. Include error handling, edge cases, and complexity analysis for the component's logic.
+7. Include error handling and edge cases. Add complexity analysis if the component contains non-trivial algorithms.
 8. **Do not write production code (e.g., Python, Java, TS) unless the user explicitly asks for implementation.**
 
 ## Document Structure
