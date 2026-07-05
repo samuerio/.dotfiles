@@ -30,6 +30,16 @@ When using this skill, first identify the source of the architecture document to
 6. Include error handling, edge cases, and complexity analysis for the component's logic.
 7. **Do not write production code (e.g., Python, Java, TS) unless the user explicitly asks for implementation.**
 
+## Document Structure
+
+The generated `pseudocode.md` must follow this overall structure:
+
+1. **Title**: Start with `# Component Pseudocode`.
+2. **Overview**: A brief introductory paragraph stating which architecture document this pseudocode is based on, and a high-level summary of the components covered.
+3. **Components**: Detailed pseudocode for each component.
+   - **Ordering**: Order components either by their appearance in the architecture document or by dependency (foundational/low-level components first).
+   - **Headings**: Use `## [Index]. [Component Name]` (e.g., `## 1. OrderProcessor`) for each component.
+
 ## Output Path
 
 Save the generated pseudocode document in the **same directory** as the input architecture document, named `pseudocode.md`.
@@ -82,6 +92,12 @@ Complexity:
 - **API / Gateway components:** `REQUEST`, `RESPONSE`, `VALIDATION`, `SIDE EFFECTS`
 - **Workflow / Orchestration components:** `ACTORS`, `TRIGGERS`, `STEPS`, `APPROVALS`
 - **Validation / Rule components:** `FIELDS`, `RULES`, `EXCEPTIONS`, `PRIORITY ORDER`
+
+## Language & Formatting
+
+- **Prose & Comments**: All natural language descriptions, explanations, and comments (e.g., text under `PURPOSE`, `ASSUMPTIONS`, `ERROR HANDLING`) must strictly **match the language of the input architecture document** (`research.md` or `design.md`).
+- **Identifiers**: Component names, variable names, function names, and data structures must remain in **English** (camelCase or PascalCase).
+- **Keywords**: Pseudocode control flow keywords (e.g., `IF`, `ELSE`, `BEGIN`, `END`, `RETURN`, `CALL`) must be in **UPPERCASE ENGLISH**.
 
 ## Pseudocode Style
 
