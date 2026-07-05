@@ -19,7 +19,7 @@ When using this skill, first identify the source of the architecture document to
 ### Scenario B: Draft Mode (Input: `design.md`)
 - **Goal:** Forward-design the new system.
 - **Action:** Flesh out the conceptual design into concrete, executable pseudocode.
-- **Handling Ambiguity:** If the design spec is ambiguous about a component's behavior, edge cases, or data flow, **ask a concise clarifying question** before proceeding. If the ambiguity is minor, state reasonable assumptions in the `ASSUMPTIONS` section and proceed.
+- **Handling Ambiguity:** If the design spec is ambiguous about a component's internal behavior, edge cases, or specific implementation details, **do not ask the user for clarification**. Instead, infer a reasonable implementation based on the overall design intent, and state your assumptions in the `ASSUMPTIONS` section. If the ambiguity completely prevents logical implementation, use placeholders (e.g., `// TODO: define specific edge case handling`).
 
 ### Common Steps (For Both Modes)
 1. Read the provided architecture document.
