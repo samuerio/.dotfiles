@@ -224,12 +224,14 @@ CONTEXT: AuthContext
 
 ## Example Output
 
-```text
+````markdown
 # Component Pseudocode
+
+[Overview: Briefly summarize the source architecture document and the components covered. Language matches the input document.]
 
 ## 1. OrderProcessor
 
-Responsible for validating and processing incoming order requests.
+[Brief description of the component's role based on the architecture document. Language matches the input document.]
 
 ```text
 PSEUDOCODE: OrderProcessor
@@ -284,3 +286,14 @@ Complexity:
     Time:  O(1) for cache lookup, O(N) for inventory check where N is number of items
     Space: O(N) to hold order payload in memory during processing
 ```
+
+## 2. InventoryService
+
+[Brief description of the component's role. Language matches the input document.]
+
+```text
+PSEUDOCODE: InventoryService
+PURPOSE: Check stock levels for specified items and deduct inventory upon order confirmation.
+...
+```
+````
