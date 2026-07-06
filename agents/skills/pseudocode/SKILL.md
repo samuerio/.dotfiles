@@ -36,10 +36,11 @@ When using this skill, first identify the source of the architecture document to
 The generated `pseudocode.md` must follow this overall structure:
 
 1. **Component Overview**: Start with `## Component Overview`. Use a `text` code block to list all extracted components and their core responsibilities in a concise, hierarchical format.
-2. **Components**: Detailed pseudocode for each component.
-   - **Ordering**: Primary ordering follows the **Primary Flow** (Section 2 of the architecture document). Components appear in the order they participate in the primary runtime flow. Components not on the primary flow (cross-cutting / infrastructure) are grouped at the end. If the Primary Flow is non-linear or unclear, fall back to dependency order (foundational/low-level first).
-   - **Headings**: Use `## [Index]. [Component Name]: [Brief Description]` (e.g., `## 1. SubagentTool: Tool Entry Point`).
-   - **Separators**: Use `---` to separate each component section for better readability.
+2. **Components**: Detailed pseudocode grouped into sections.
+   - **Ordering**: Primary ordering follows the **Primary Flow** (Section 2 of the architecture document). Sections appear in the order their components participate in the primary runtime flow. Components not on the primary flow (cross-cutting / infrastructure) are grouped at the end. If the Primary Flow is non-linear or unclear, fall back to dependency order (foundational/low-level first).
+   - **Grouping is flexible, not one-component-per-section**: A section may cover a single component, or it may combine several closely related components into one section when they share a common theme, run at the same point in the flow, or are natural variants of each other (e.g. sibling execution modes, a resource plus its lifecycle helpers, a mechanism plus its supporting utilities). Judge this the way a human architect would name chapters in a design doc — group by narrative/conceptual unit, not by rigidly mirroring the "Component Responsibilities" table row-for-row. Each grouped component still gets its own `PSEUDOCODE:` block within the section; only the heading and prose framing are shared.
+   - **Headings**: Use `## [Index]. [Section Title]`, where `[Section Title]` is a short descriptive label — either a single component name (`SubagentTool: Tool Entry Point`) or a combined label for grouped components (`Single / Parallel / Chain 三种执行模式`, `AgentDiscovery：发现命名 agent`). Prefer natural, readable phrasing over a mechanical "ComponentName: Description" template when multiple components share the section.
+   - **Separators**: Use `---` to separate each section for better readability.
 3. **Main Call Graph**: End the document with `## Main Call Graph`. Use a `text` code block with ASCII arrows to illustrate the high-level invocation sequence and data flow among the main components.
 
 ## Output Path
@@ -52,7 +53,7 @@ After writing the file, use this exact phrasing:
 
 ## Required Sections per Component
 
-For each component extracted from the architecture document, provide these core sections:
+The sections below apply **per component's pseudocode block**, regardless of whether that component has its own heading or shares a heading with sibling components in a grouped section (see Document Structure above).
 
 ### [Component Name]
 
