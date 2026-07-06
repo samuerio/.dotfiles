@@ -35,10 +35,12 @@ When using this skill, first identify the source of the architecture document to
 
 The generated `pseudocode.md` must follow this overall structure:
 
-1. **Title**: Start with `# Component Pseudocode`.
+1. **Component Overview**: Start with `## Component Overview`. Use a `text` code block to list all extracted components and their core responsibilities in a concise, hierarchical format.
 2. **Components**: Detailed pseudocode for each component.
    - **Ordering**: Primary ordering follows the **Primary Flow** (Section 2 of the architecture document). Components appear in the order they participate in the primary runtime flow. Components not on the primary flow (cross-cutting / infrastructure) are grouped at the end. If the Primary Flow is non-linear or unclear, fall back to dependency order (foundational/low-level first).
-   - **Headings**: Use `## [Index]. [Component Name]` (e.g., `## 1. OrderProcessor`) for each component.
+   - **Headings**: Use `## [Index]. [Component Name]: [Brief Description]` (e.g., `## 1. SubagentTool: Tool Entry Point`).
+   - **Separators**: Use `---` to separate each component section for better readability.
+3. **Main Call Graph**: End the document with `## Main Call Graph`. Use a `text` code block with ASCII arrows to illustrate the high-level invocation sequence and data flow among the main components.
 
 ## Output Path
 
@@ -80,6 +82,7 @@ EDGE CASES:
 **Optional Additions (Include only if highly relevant to the component):**
 - **INTERACTIONS**: Add if the component's primary role involves communicating with other components (e.g., API calls, message queues). If interactions are trivial, describe them inline within `MAIN FLOW`.
 - **DATA STRUCTURES**: Add before `MAIN FLOW` if the component relies on complex, non-obvious data structures (e.g., specific trees, graphs, custom caches).
+- **HELPER ROUTINE**: Add if the component relies on distinct, reusable subroutines. Format as `HELPER ROUTINE: RoutineName` followed by `BEGIN ... END`. You can include multiple helper routines within the same component block.
 - **COMPLEXITY**: Add at the end if the component contains non-trivial algorithms (Time/Space complexity).
 
 **For specific component types, add specialized sections when useful:**
@@ -222,73 +225,188 @@ CONTEXT: AuthContext
 > *Note: The example below assumes the input architecture document is in English.*
 
 ````markdown
-# Component Pseudocode
-
-## 1. OrderProcessor
-
-[Brief description of the component's role based on the architecture document. Language matches the input document.]
+## Component Overview
 
 ```text
-PSEUDOCODE: OrderProcessor
-PURPOSE: Validate order payload, check inventory, and initiate payment.
-INPUT: orderRequest (OrderRequest)
-OUTPUT: orderResult (OrderResult)
+COMPONENTS:
+    SubagentTool
+        - Receives task / tasks / chain / resume / listModels parameters
+        - Validates execution mode and dispatches to the corresponding flow
+
+    AgentDiscovery
+        - Loads *.md agents from user and project directories
+        - Parses frontmatter to extract configurations
+
+    ModelPolicy
+        - Loads models-allowlist.json
+        - Validates if the model is allowed
+```
+
+---
+
+## 1. SubagentTool: Tool Entry Point
+
+`index.ts` registers a tool named `subagent`, supporting single, parallel, and chain modes, along with parameters like `resume` and `timeoutMs`. The source code enforces that "only one execution mode can be selected".
+
+```text
+PSEUDOCODE: ExecuteSubagentTool
+PURPOSE: Handle the main agent's call to the subagent tool and dispatch to the corresponding execution mode
+INPUT:
+    params (SubagentParams)
+    signal (AbortSignal)
+OUTPUT:
+    toolResult (AgentToolResult)
 
 ASSUMPTIONS:
-    - InventoryService and PaymentService are available and healthy.
-
-DATA STRUCTURES:
-    OrderCache: LRU cache for recent order validations (Size: 1000, TTL: 5m)
+    - params can only contain one of task, tasks, or chain modes
+    - listModels is a query mode and will not spawn a child process
 
 MAIN FLOW:
 BEGIN
-    IF orderRequest is missing orderId OR items THEN
-        RETURN error("missing required order details")
+    agentScope ← params.agentScope OR "user"
+    discovery ← CALL DiscoverAgents(ctx.cwd, agentScope)
+    agents ← discovery.agents
+
+    modelPolicyResult ← CALL LoadModelPolicy()
+
+    IF params.listModels IS true THEN
+        RETURN BuildModelListResponse(modelPolicyResult.policy)
     END IF
 
-    cachedResult ← OrderCache.get(orderRequest.orderId)
-    IF cachedResult is not null THEN
-        RETURN cachedResult
+    hasSingle ← params.task exists
+    hasParallel ← params.tasks is not empty
+    hasChain ← params.chain is not empty
+
+    modeCount ← CountTrue(hasSingle, hasParallel, hasChain)
+
+    IF modeCount != 1 THEN
+        RETURN ErrorResult("Provide exactly one mode")
     END IF
 
-    inventoryStatus ← CALL InventoryService.check(orderRequest.items)
-    IF inventoryStatus is OUT_OF_STOCK THEN
-        RETURN error("items out of stock")
+    IF hasChain THEN
+        RETURN CALL RunChainMode(params.chain, agents, ...)
     END IF
-
-    paymentResult ← CALL PaymentService.charge(orderRequest.paymentInfo)
-    IF paymentResult is FAILED THEN
-        RETURN error("payment failed")
+    
+    IF hasParallel THEN
+        RETURN CALL RunParallelMode(params.tasks, agents, ...)
     END IF
-
-    result ← createOrderRecord(orderRequest, paymentResult)
-    OrderCache.set(orderRequest.orderId, result)
-    RETURN result
 END
 
-INTERACTIONS:
-    - Calls InventoryService.check() via gRPC
-    - Calls PaymentService.charge() via REST API
-
 ERROR HANDLING:
-    - InventoryService timeout → RETURN error("inventory check timed out")
-    - PaymentService unavailable → RETURN error("payment service unavailable")
-
-EDGE CASES:
-    - Duplicate orderId in cache → return cached result to prevent double processing
-
-COMPLEXITY:
-    Time:  O(1) for cache lookup, O(N) for inventory check where N is number of items
-    Space: O(N) to hold order payload in memory during processing
+    - Multiple modes present or all empty → return parameter error
+    - Project-level agent not confirmed → cancel execution
 ```
 
-## 2. InventoryService
+---
 
-[Brief description of the component's role. Language matches the input document.]
+## 2. AgentDiscovery: Discover Named Agents
+
+The project supports optional named agent files: user-level directory `~/.pi/agent/agents/*.md` and project-level `.pi/agents/*.md`. The source code parses markdown frontmatter.
 
 ```text
-PSEUDOCODE: InventoryService
-PURPOSE: Check stock levels for specified items and deduct inventory upon order confirmation.
-...
+PSEUDOCODE: DiscoverAgents
+PURPOSE: Discover available named agents based on agentScope
+INPUT:
+    cwd (string)
+    scope ("user" | "project" | "both")
+OUTPUT:
+    discoveryResult
+
+DATA STRUCTURES:
+    AgentConfig:
+        name, description, tools, model, systemPrompt, source
+
+MAIN FLOW:
+BEGIN
+    userDir ← AgentHomeDir + "/agents"
+    projectAgentsDir ← CALL FindNearestProjectAgentsDir(cwd)
+
+    userAgents ← empty list
+    projectAgents ← empty list
+
+    IF scope != "project" THEN
+        userAgents ← CALL LoadAgentsFromDir(userDir, "user")
+    END IF
+
+    IF scope != "user" AND projectAgentsDir exists THEN
+        projectAgents ← CALL LoadAgentsFromDir(projectAgentsDir, "project")
+    END IF
+
+    // Project-level agents can override user-level agents with the same name
+    agentMap ← empty map keyed by agent.name
+    ADD all userAgents to agentMap
+    ADD all projectAgents to agentMap
+
+    RETURN {
+        agents: Values(agentMap),
+        projectAgentsDir: projectAgentsDir
+    }
+END
+
+HELPER ROUTINE: LoadAgentsFromDir
+BEGIN
+    IF dir does not exist THEN
+        RETURN empty list
+    END IF
+
+    entries ← ReadDirectory(dir)
+    agents ← empty list
+
+    FOR EACH entry IN entries
+        IF entry is not "*.md" THEN
+            CONTINUE
+        END IF
+
+        content ← ReadFile(entry)
+        frontmatter, body ← ParseFrontmatter(content)
+
+        IF frontmatter.name missing THEN
+            CONTINUE
+        END IF
+
+        ADD AgentConfig {
+            name: frontmatter.name,
+            description: frontmatter.description,
+            systemPrompt: body
+        } to agents
+    END FOR
+
+    RETURN agents
+END
+
+COMPLEXITY:
+    Time:  O(n), where n is number of markdown files scanned
+    Space: O(n)
+```
+
+---
+
+## Main Call Graph
+
+```text
+MAIN CALL GRAPH:
+
+User / Main Agent
+    ↓
+SubagentTool.execute(params)
+    ↓
+DiscoverAgents(cwd, agentScope)
+    ↓
+LoadModelPolicy()
+    ↓
+Validate exactly one mode:
+    - task
+    - tasks
+    - chain
+    ↓
+ResolveRunPlan(...)
+    ↓
+RunSingleAgent(...)
+    ↓
+Spawn: pi --mode json -p ...
+    ↓
+BuildEnvelope(result)
+    ↓
+Return ToolResult
 ```
 ````
