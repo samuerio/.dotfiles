@@ -36,9 +36,8 @@ When using this skill, first identify the source of the architecture document to
 The generated `pseudocode.md` must follow this overall structure:
 
 1. **Title**: Start with `# Component Pseudocode`.
-2. **Overview**: A brief introductory paragraph stating which architecture document this pseudocode is based on, and a high-level summary of the components covered.
-3. **Components**: Detailed pseudocode for each component.
-   - **Ordering**: Order components either by their appearance in the architecture document or by dependency (foundational/low-level components first).
+2. **Components**: Detailed pseudocode for each component.
+   - **Ordering**: Primary ordering follows the **Primary Flow** (Section 2 of the architecture document). Components appear in the order they participate in the primary runtime flow. Components not on the primary flow (cross-cutting / infrastructure) are grouped at the end. If the Primary Flow is non-linear or unclear, fall back to dependency order (foundational/low-level first).
    - **Headings**: Use `## [Index]. [Component Name]` (e.g., `## 1. OrderProcessor`) for each component.
 
 ## Output Path
@@ -224,8 +223,6 @@ CONTEXT: AuthContext
 
 ````markdown
 # Component Pseudocode
-
-[Overview: Briefly summarize the source architecture document and the components covered. Language matches the input document.]
 
 ## 1. OrderProcessor
 
