@@ -152,6 +152,37 @@ OPERATIONS:
     evict():            O(1)
 ```
 
+Example helper routine block:
+
+```text
+HELPER ROUTINE: LoadAgentsFromDir
+PURPOSE: Load and parse all agent definition files in a directory
+INPUT: dir (string), source (string)
+OUTPUT: agents (list of AgentConfig)
+
+BEGIN
+    IF dir does not exist THEN
+        RETURN empty list
+    END IF
+
+    FOR EACH entry IN ReadDirectory(dir)
+        IF entry is not "*.md" THEN
+            CONTINUE
+        END IF
+
+        frontmatter, body ← ParseFrontmatter(ReadFile(entry))
+
+        IF frontmatter.name missing THEN
+            CONTINUE
+        END IF
+
+        ADD AgentConfig { name: frontmatter.name, source: source } to agents
+    END FOR
+
+    RETURN agents
+END
+```
+
 Example algorithm pattern block:
 
 ```text
