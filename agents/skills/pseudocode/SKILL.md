@@ -36,6 +36,7 @@ Save the generated document as `pseudocode.md` with this structure:
 
 2. Component sections
    - Use `## [Index]. [Section Title]`.
+   - `[Section Title]` must be a narrative phrase describing what the section covers (e.g. "Discovering named agents"), not a bare component name (e.g. not "AgentDiscovery") and not a component name followed by a colon and description. When a section groups multiple components, the title must describe the shared narrative or runtime relationship, not just list the component names.
    - Order by `Primary Flow`; fall back to dependency order.
    - Group components by narrative or runtime relationship, not mechanically by table rows.
    - Closely related components may share one section, but each component must still have its own `PSEUDOCODE:` block.
