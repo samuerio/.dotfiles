@@ -80,6 +80,8 @@ EDGE CASES:
     - case → behavior
 ```
 
+Use the single-line `INPUT: name (type), ...` form for short parameter lists; switch to a multi-line indented list, or nested sub-fields, once a single line would be hard to read.
+
 Use inline `RETURN error(...)` in MAIN FLOW for validation checks that are local and self-explanatory. Reserve the `ERROR HANDLING` section for cross-cutting, non-local, or externally caused failures (e.g. I/O errors, dependency failures, unexpected process states) that aren't already obvious from a single IF branch.
 
 Base template fields are a guideline, not a fixed schema: omit `ASSUMPTIONS`, `ERROR HANDLING`, or `EDGE CASES` when the component genuinely has none, rather than inventing content to fill the section.
