@@ -78,13 +78,16 @@ EDGE CASES:
     - case → behavior
 ```
 
+Use inline `RETURN error(...)` in MAIN FLOW for validation checks that are local and self-explanatory. Reserve the `ERROR HANDLING` section for cross-cutting, non-local, or externally caused failures (e.g. I/O errors, dependency failures, unexpected process states) that aren't already obvious from a single IF branch.
+
 Base template fields are a guideline, not a fixed schema: omit `ASSUMPTIONS`, `ERROR HANDLING`, or `EDGE CASES` when the component genuinely has none, rather than inventing content to fill the section.
 
 Add optional sections only when they materially improve implementation clarity:
 
 - `DATA STRUCTURE`: state, caches, queues, maps, graphs, indexes, or custom records.
 - `INTERACTIONS`: non-trivial calls to components, APIs, files, queues, or processes.
-- `HELPER ROUTINE`: reusable subroutines inside a component.
+- `HELPER ROUTINE`: reusable subroutines inside a component. Each helper must declare its own `INPUT:` and `OUTPUT:` line even when nested inside a larger component block.
+- `CONSTANTS`: fixed configuration values, thresholds, or limits referenced by the main flow.
 - `COMPLEXITY`: non-trivial algorithms or important performance constraints.
 - `STATES`, `EVENTS`, `TRANSITIONS`: lifecycle or state-machine components.
 - `REQUEST`, `RESPONSE`, `VALIDATION`, `SIDE EFFECTS`: API or gateway components.
@@ -139,7 +142,7 @@ SIZE: 10,000 entries
 TTL: 5 minutes
 PURPOSE: Reduce repeated user lookups
 
-Operations:
+OPERATIONS:
     get(userId):        O(1)
     set(userId, data):  O(1)
     evict():            O(1)
@@ -155,9 +158,11 @@ CONSTANTS:
     REFILL_RATE = 10 tokens per second
 
 PSEUDOCODE: CheckRateLimit
+PURPOSE: Limit the rate of a user's repeated actions using a token bucket
 INPUT: userId (string), action (string)
 OUTPUT: allowed (boolean)
 
+MAIN FLOW:
 BEGIN
     bucketKey ← userId + ":" + action
     bucket ← Buckets.get(bucketKey)
@@ -180,8 +185,8 @@ BEGIN
 END
 
 COMPLEXITY:
-    Time:  O(1)
-    Space: O(n), where n is the number of active user/action buckets
+    TIME:  O(1)
+    SPACE: O(n), where n is the number of active user/action buckets
 ```
 
 Example design pattern block:
