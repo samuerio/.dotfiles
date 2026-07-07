@@ -9,6 +9,8 @@ Use this skill to translate the main components from an architecture document in
 
 ## Core Behavior
 
+Pseudocode should read as the main flow of logic — the decisions, branches, and calls that matter to understanding how the component works — not a line-by-line restatement of an implementation. When in doubt, leave a step as a single descriptive line rather than expanding it into sub-steps; the reader should be able to scan a component in a few seconds and grasp what it does, not trace every field and system call.
+
 First identify the input architecture document:
 
 - `research.md`: reverse-engineer the existing system. Read relevant source code and translate actual implementation behavior. Prefer code evidence over architectural intent. If details remain unclear, infer cautiously, add placeholders, and record assumptions. Do not ask for clarification.
@@ -22,7 +24,7 @@ Then:
 2. Extract main components from `Component Responsibilities`.
 3. Order sections by `Primary Flow`; fall back to dependency order if unclear.
 4. Generate detailed pseudocode for each component or closely related component group.
-5. Include internal state, data structures, interactions, error handling, edge cases, and complexity only when relevant.
+5. Include internal state, data structures, interactions, error handling, edge cases, and complexity only when the main flow would be genuinely unclear without them — default to leaving them out.
 6. End with a high-level ASCII call graph.
 7. Do not write production code unless explicitly asked.
 
@@ -115,6 +117,8 @@ RETURN
 CALL FunctionName(...)
 value ← expression
 ```
+
+Use `CALL` when invoking something defined elsewhere in this document; omit it for built-in or external operations like `ReadFile(path)`.
 
 Avoid language-specific syntax such as Python, JavaScript, Java, or SQL unless explicitly requested.
 
