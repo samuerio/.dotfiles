@@ -48,6 +48,8 @@ Save the generated document as `pseudocode.md` with this structure:
 3. `## Main Call Graph`
    - Use a `text` code block.
    - Keep it high-level: show entry point, main components, and major data/control-flow direction. Name an external call or side effect (e.g. "spawns child process") without expanding its specific arguments or flags.
+   - When the graph involves branching, conditional dispatch, parallel execution, or an independent offline/async path, brief inline annotations (a few words, not full sentences) may be added next to the arrow or branch to clarify the trigger or condition. Keep annotations terse — this is a scannable diagram, not a flow description.
+   - Use `├─►` / `└─►` style branching when multiple paths diverge from one component; plain `↓` remains the default for linear flow.
 
 ## Output Path
 
@@ -317,4 +319,31 @@ Worker
     ↓
 Response
 ```
+
+### Complex Example
+
+For architectures with branching dispatch, parallel execution, or independent offline/async paths, use `├─►`/`└─►` branching and brief inline annotations:
+
+```text
+Entry
+    │
+    ▼
+Dispatcher
+    │
+    ├─► ModeA ──► Worker (serial, passes previous result forward)
+    ├─► ModeB ──► Worker ×N (parallel, concurrency-limited)
+    └─► ModeC ──► Worker (single run)
+                     │
+                     ▼
+                  ResultAggregator
+                     │
+                     ├─► on timeout/abort → partial result, status flagged
+                     ▼
+                  Output ──► caller
+
+[Offline]
+BackgroundSync ──► External API ──► updates local config
+```
+
+Annotations stay terse — a few words, not full sentences. The `[Offline]` label marks a path independent of the main request lifecycle.
 ````
