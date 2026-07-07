@@ -122,7 +122,7 @@ Use `CALL` when invoking something defined elsewhere in this document; omit it f
 
 Avoid language-specific syntax such as Python, JavaScript, Java, or SQL unless explicitly requested.
 
-Avoid vague steps that cannot be implemented; convert them into explicit branches, loops, validations, helper routines, or state transitions.
+Avoid steps so vague that a reader cannot tell what decision or action is happening (e.g. "handle the data"). A step is fine as a single line as long as it names the actual action or condition — it does not need to be broken into branches, loops, or helper routines unless that structure is genuinely part of the logic.
 
 ## Logic Design Guidance
 
