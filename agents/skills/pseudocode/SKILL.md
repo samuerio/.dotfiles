@@ -43,7 +43,6 @@ Save the generated document as `pseudocode.md` with this structure:
    - Group components by narrative or runtime relationship, not mechanically by table rows.
    - Immediately below the section title, add a short 1-3 sentence intro paragraph explaining what this section's components do and why they matter to the overall flow, before the first `PSEUDOCODE:` block.
    - Closely related components may share one section, but each component must still have its own `PSEUDOCODE:` block.
-   - Use `---` between sections.
 
 3. `## Main Call Graph`
    - Use a `text` code block.
@@ -275,8 +274,6 @@ COMPONENTS:
     Worker
         - Executes the selected task
 ```
-
----
 
 ## 1. Routing and executing a request
 
