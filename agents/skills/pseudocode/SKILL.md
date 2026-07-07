@@ -47,7 +47,7 @@ Save the generated document as `pseudocode.md` with this structure:
 
 3. `## Main Call Graph`
    - Use a `text` code block.
-   - Show entry point, main components, major data/control-flow direction, and external calls or side effects when important.
+   - Keep it high-level: show entry point, main components, and major data/control-flow direction. Name an external call or side effect (e.g. "spawns child process") without expanding its specific arguments or flags.
 
 ## Output Path
 
