@@ -1,6 +1,6 @@
 ---
 name: pseudocode
-description: "Generate language-matched, implementation-oriented pseudocode from architecture research.md or design.md documents produced by the architecture skill, including component overview, grouped component logic, assumptions, error handling, and main call graph."
+description: "Generate language-matched pseudocode from architecture research.md or design.md documents produced by the architecture skill, including component overview, grouped component logic, assumptions, error handling, and main call graph."
 ---
 
 # Pseudocode
@@ -23,7 +23,7 @@ Then:
 1. Read the architecture document.
 2. Extract main components from `Component Responsibilities`.
 3. Order sections by `Primary Flow`; fall back to dependency order if unclear.
-4. Generate detailed pseudocode for each component or closely related component group.
+4. Generate pseudocode for each component or closely related component group.
 5. Include internal state, data structures, interactions, error handling, edge cases, and complexity only when the main flow would be genuinely unclear without them — default to leaving them out.
 6. End with a high-level ASCII call graph.
 7. Do not write production code unless explicitly asked.
