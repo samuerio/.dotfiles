@@ -239,7 +239,9 @@ COMPONENTS:
 
 ---
 
-## 1. RequestRouter and Worker
+## 1. Routing and executing a request
+
+RequestRouter validates the incoming request and dispatches it to a Worker for execution.
 
 ```text
 PSEUDOCODE: RequestRouter
