@@ -32,11 +32,14 @@ Then:
 
 Save the generated document as `pseudocode.md` with this structure:
 
-1. `## Component Overview`
+1. `# [System Name] Pseudocode` (title and prose in the same language as the input architecture document)
+   - A 2-4 sentence intro stating: which architecture document this was translated from (with path), the source system/module name, whether it reflects actual implementation (`research.md`) or proposed design (`design.md`), and the section ordering basis (Primary Flow or dependency order).
+
+2. `## Component Overview`
    - Use a `text` code block.
    - List extracted components and concise responsibilities.
 
-2. Component sections
+3. Component sections
    - Use `## [Index]. [Section Title]`.
    - `[Section Title]` must be a narrative phrase, in the same language as the rest of the document's prose, describing what the section covers (English example: "Discovering named agents"), not a bare component name (e.g. not "AgentDiscovery") and not a component name followed by a colon and description. When a section groups multiple components, the title must describe the shared narrative or runtime relationship, not just list the component names.
    - Order by `Primary Flow`; fall back to dependency order.
@@ -44,7 +47,7 @@ Save the generated document as `pseudocode.md` with this structure:
    - Immediately below the section title, add a short 1-3 sentence intro paragraph explaining what this section's components do and why they matter to the overall flow, before the first `PSEUDOCODE:` block.
    - Closely related components may share one section, but each component must still have its own `PSEUDOCODE:` block.
 
-3. `## Main Call Graph`
+4. `## Main Call Graph`
    - Use a `text` code block.
    - Keep it high-level: show entry point, main components, and major data/control-flow direction. Name an external call or side effect (e.g. "spawns child process") without expanding its specific arguments or flags.
    - When the graph involves branching, conditional dispatch, parallel execution, or an independent offline/async path, brief inline annotations (a few words, not full sentences) may be added next to the arrow or branch to clarify the trigger or condition. Keep annotations terse — this is a scannable diagram, not a flow description.
@@ -265,6 +268,10 @@ CONTEXT: AuthContext
 ## Minimal Example
 
 ````markdown
+# RequestRouter Pseudocode
+
+This document translates the main components from `research.md` into language-agnostic pseudocode. Source system: example request routing service. Derived from actual implementation behavior, sections ordered by Primary Flow.
+
 ## Component Overview
 
 ```text
