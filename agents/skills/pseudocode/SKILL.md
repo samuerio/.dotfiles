@@ -263,7 +263,7 @@ BEGIN
 END
 
 ERROR HANDLING:
-    - unknown request type → return validation error
+    - Worker.Execute fails or times out → return internal error, do not leak request payload
 
 EDGE CASES:
     - empty payload → continue only if worker allows it
