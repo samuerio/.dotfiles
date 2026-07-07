@@ -32,7 +32,7 @@ Then:
 
 Save the generated document as `pseudocode.md` with this structure:
 
-1. `# [System Name] Pseudocode` (title and prose in the same language as the input architecture document)
+1. `# [System Name] Pseudocode`
    - A 2-4 sentence intro stating: which architecture document this was translated from (with path), the source system/module name, whether it reflects actual implementation (`research.md`) or proposed design (`design.md`), and the section ordering basis (Primary Flow or dependency order).
 
 2. `## Component Overview`
