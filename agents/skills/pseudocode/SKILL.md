@@ -13,20 +13,15 @@ Pseudocode should read as the main flow of logic — the decisions, branches, an
 
 First identify the input architecture document:
 
-- `research.md`: reverse-engineer the existing system. Read relevant source code and translate actual implementation behavior. Prefer code evidence over architectural intent. If details remain unclear, infer cautiously, add placeholders, and record assumptions. Do not ask for clarification.
+- `research.md`: reverse-engineer the existing system. Read relevant source code and translate actual implementation behavior. Prefer code evidence over architectural intent. If details remain unclear, infer cautiously, add placeholders, and record assumptions.
 - `design.md`: forward-design the proposed system. Expand conceptual architecture into concrete pseudocode. Infer reasonable behavior from design intent, record assumptions, and use placeholders only when implementation cannot be logically derived.
 
 Do not ask the user for clarification in either mode. Resolve ambiguity through the architecture document, source code context, design intent, assumptions, or explicit TODO placeholders.
 
-Then:
+When generating pseudocode:
 
-1. Read the architecture document.
-2. Extract main components from `Component Responsibilities`.
-3. Order sections by `Primary Flow`; fall back to dependency order if unclear.
-4. Generate pseudocode for each component or closely related component group.
-5. Include internal state, data structures, interactions, error handling, edge cases, and complexity only when the main flow would be genuinely unclear without them — default to leaving them out.
-6. End with a high-level ASCII call graph.
-7. Do not write production code unless explicitly asked.
+- Include internal state, data structures, interactions, error handling, edge cases, and complexity only when the main flow would be genuinely unclear without them — default to leaving them out.
+- Do not write production code unless explicitly asked.
 
 ## Document Structure
 
@@ -324,9 +319,9 @@ Worker
 Response
 ```
 
-### Complex Example
+### Main Call Graph — Branching Example
 
-For architectures with branching dispatch, parallel execution, or independent offline/async paths, use `├─►`/`└─►` branching and brief inline annotations:
+The Main Call Graph above shows the linear case. For architectures with branching dispatch, parallel execution, or independent offline/async paths, use `├─►`/`└─►` branching and brief inline annotations:
 
 ```text
 Entry
