@@ -78,9 +78,11 @@ EDGE CASES:
     - case → behavior
 ```
 
+Base template fields are a guideline, not a fixed schema: omit `ASSUMPTIONS`, `ERROR HANDLING`, or `EDGE CASES` when the component genuinely has none, rather than inventing content to fill the section.
+
 Add optional sections only when they materially improve implementation clarity:
 
-- `DATA STRUCTURES`: state, caches, queues, maps, graphs, indexes, or custom records.
+- `DATA STRUCTURE`: state, caches, queues, maps, graphs, indexes, or custom records.
 - `INTERACTIONS`: non-trivial calls to components, APIs, files, queues, or processes.
 - `HELPER ROUTINE`: reusable subroutines inside a component.
 - `COMPLEXITY`: non-trivial algorithms or important performance constraints.
@@ -132,10 +134,10 @@ Example data structure block:
 
 ```text
 DATA STRUCTURE: UserCache
-Type: LRU cache with TTL
-Size: 10,000 entries
+TYPE: LRU cache with TTL
+SIZE: 10,000 entries
 TTL: 5 minutes
-Purpose: Reduce repeated user lookups
+PURPOSE: Reduce repeated user lookups
 
 Operations:
     get(userId):        O(1)
@@ -177,7 +179,7 @@ BEGIN
     RETURN false
 END
 
-Complexity:
+COMPLEXITY:
     Time:  O(1)
     Space: O(n), where n is the number of active user/action buckets
 ```
@@ -188,25 +190,31 @@ Example design pattern block:
 PATTERN: Strategy — Authentication
 
 INTERFACE: AuthStrategy
-    authenticate(credentials) → User or Error
+    AUTHENTICATE(credentials) → User or Error
 
 STRATEGY: EmailPasswordAuth
-    authenticate(credentials):
-        validate email and password
-        verify password hash
-        return user or error
+    AUTHENTICATE(credentials):
+    BEGIN
+        CALL ValidateEmailAndPassword(credentials)
+        CALL VerifyPasswordHash(credentials)
+        RETURN user or error
+    END
 
 STRATEGY: OAuthAuth
-    authenticate(credentials):
-        exchange OAuth token
-        validate provider response
-        return user or error
+    AUTHENTICATE(credentials):
+    BEGIN
+        CALL ExchangeOAuthToken(credentials)
+        CALL ValidateProviderResponse(credentials)
+        RETURN user or error
+    END
 
 CONTEXT: AuthContext
     selectedStrategy: AuthStrategy
 
-    execute(credentials):
-        RETURN selectedStrategy.authenticate(credentials)
+    EXECUTE(credentials):
+    BEGIN
+        RETURN selectedStrategy.AUTHENTICATE(credentials)
+    END
 ```
 
 ## Minimal Example
