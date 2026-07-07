@@ -133,47 +133,80 @@ Example data structure block:
 ```text
 DATA STRUCTURE: UserCache
 Type: LRU cache with TTL
-Purpose: Reduce repeated lookups
+Size: 10,000 entries
+TTL: 5 minutes
+Purpose: Reduce repeated user lookups
+
 Operations:
-    get(key): O(1)
-    set(key, value): O(1)
+    get(userId):        O(1)
+    set(userId, data):  O(1)
+    evict():            O(1)
 ```
 
 Example algorithm pattern block:
 
 ```text
 PATTERN: Rate Limiting — Token Bucket
+
 CONSTANTS:
     BUCKET_SIZE = 100
     REFILL_RATE = 10 tokens per second
 
 PSEUDOCODE: CheckRateLimit
+INPUT: userId (string), action (string)
+OUTPUT: allowed (boolean)
+
 BEGIN
-    bucket ← GetOrCreateBucket(userId, action)
-    CALL RefillTokens(bucket)
+    bucketKey ← userId + ":" + action
+    bucket ← Buckets.get(bucketKey)
+
+    IF bucket is null THEN
+        bucket ← {tokens: BUCKET_SIZE, lastRefill: Now()}
+        Buckets.set(bucketKey, bucket)
+    END IF
+
+    elapsed ← Now() - bucket.lastRefill
+    bucket.tokens ← MIN(bucket.tokens + elapsed * REFILL_RATE, BUCKET_SIZE)
+    bucket.lastRefill ← Now()
+
     IF bucket.tokens >= 1 THEN
         bucket.tokens ← bucket.tokens - 1
         RETURN true
     END IF
+
     RETURN false
 END
+
+Complexity:
+    Time:  O(1)
+    Space: O(n), where n is the number of active user/action buckets
 ```
 
 Example design pattern block:
 
 ```text
 PATTERN: Strategy — Authentication
+
 INTERFACE: AuthStrategy
     authenticate(credentials) → User or Error
 
 STRATEGY: EmailPasswordAuth
-    validate credentials and verify password hash
+    authenticate(credentials):
+        validate email and password
+        verify password hash
+        return user or error
 
 STRATEGY: OAuthAuth
-    exchange token and validate provider response
+    authenticate(credentials):
+        exchange OAuth token
+        validate provider response
+        return user or error
 
 CONTEXT: AuthContext
-    execute(credentials) using selectedStrategy
+    selectedStrategy: AuthStrategy
+
+    execute(credentials):
+        RETURN selectedStrategy.authenticate(credentials)
 ```
 
 ## Minimal Example
