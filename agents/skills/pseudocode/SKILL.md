@@ -255,7 +255,7 @@ ASSUMPTIONS:
 MAIN FLOW:
 BEGIN
     IF request.type is missing THEN
-        RETURN validation error
+        RETURN error("request.type is required")
     END IF
 
     selectedWorker ← CALL ResolveWorker(request.type)
