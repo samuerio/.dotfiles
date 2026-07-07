@@ -9,7 +9,7 @@ Use this skill to translate the main components from an architecture document in
 
 ## Core Behavior
 
-Pseudocode should read as the main flow of logic — the decisions, branches, and calls that matter to understanding how the component works — not a line-by-line restatement of an implementation. When in doubt, leave a step as a single descriptive line rather than expanding it into sub-steps; the reader should be able to scan a component in a few seconds and grasp what it does, not trace every field and system call.
+Pseudocode should read as the main flow of logic — the decisions, branches, and calls that matter to understanding how the component works — not a line-by-line restatement of an implementation. The reader should be able to scan a component in a few seconds and grasp what it does, not trace every field and system call. (See "Pseudocode Style" for guidance on step granularity.)
 
 First identify the input architecture document:
 
@@ -97,6 +97,7 @@ Add optional sections only when they materially improve implementation clarity:
 - `STATES`, `EVENTS`, `TRANSITIONS`: lifecycle or state-machine components.
 - `REQUEST`, `RESPONSE`, `VALIDATION`, `SIDE EFFECTS`: API or gateway components.
 - `FIELDS`, `RULES`, `EXCEPTIONS`, `PRIORITY ORDER`: validation or rule components.
+- `PATTERN`: a named implementation pattern (e.g. rate limiting, strategy) that structures the whole component — see Logic Design Guidance.
 
 ## Language & Formatting
 
