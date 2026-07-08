@@ -1,0 +1,12 @@
+{
+    "enabled": true,
+    "allowed": [
+        {
+            "id": "volcengine/kimi-k2.7-code",
+            "thinkingLevels": ["low", "medium", "high", "xhigh"],
+            "coding_index": 53.1,
+            "description": "Great default for most coding tasks"
+        }
+    ],
+    "default": "volcengine/kimi-k2.7-code"
+}
