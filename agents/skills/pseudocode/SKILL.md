@@ -18,10 +18,47 @@ First identify the input architecture document:
 
 Do not ask the user for clarification in either mode. Resolve ambiguity through the architecture document, source code context, design intent, assumptions, or explicit TODO placeholders.
 
-When generating pseudocode:
+When generating pseudocode, include internal state, data structures, interactions, error handling, edge cases, and complexity only when they meet the criteria in **"Deciding What to Include"** below — default to leaving them out otherwise.
 
-- Include internal state, data structures, interactions, error handling, edge cases, and complexity only when the main flow would be genuinely unclear without them — default to leaving them out.
-- Do not write production code unless explicitly asked.
+Do not write production code unless explicitly asked.
+
+## Deciding What to Include (Error Handling & Edge Cases)
+
+Error handling and edge cases are the most common source of bloat in pseudocode — but they are sometimes the entire point of a component. Use this two-step test, in order, for every candidate error/edge case:
+
+```text
+STEP 1 — Is it part of the component's core responsibility or control flow?
+    Does this error/edge case change which path execution takes,
+    or represent a guarantee the component exists to provide
+    (failover, retry, rollback, a valid state transition, a business
+    validation rule)?
+        → YES: include it. It IS the main flow, not an add-on.
+        → NO:  go to Step 2.
+
+STEP 2 — Would omitting it mislead or confuse the reader about
+          what this component does?
+        → YES: include it.
+        → NO:  omit it.
+```
+
+**Include (this is main flow, not decoration):**
+- Failover / degradation — e.g. primary fails → fall back to secondary
+- Retry with backoff, when retry logic is a core responsibility of the component
+- Rollback or transactional guarantees across multiple steps
+- Error as a valid state transition (e.g. `payment_failed` in an order lifecycle)
+- Business validation rules where each check reflects a distinct requirement
+- Any failure path that a caller must know about to use the component correctly
+
+**Omit (generic, non-local fallback — safe to leave out):**
+- Logging or metrics emitted on failure
+- Generic/default error codes with no distinguishing behavior
+- Transient external errors with no special handling beyond "propagate"
+- Defensive checks for states that should never occur
+- Restating language/runtime exceptions that don't change the component's logic
+
+When in doubt, prefer inclusion for anything a caller or maintainer would need to know to use or trust the component — and omission for anything that only protects against incidental failure.
+
+Do not invent error handling or edge cases to fill out the template — omit the section entirely when the component genuinely has none that pass the test above.
 
 ## Document Structure
 
@@ -83,9 +120,9 @@ EDGE CASES:
 
 Use the single-line `INPUT: name (type), ...` form for short parameter lists; switch to a multi-line indented list, or nested sub-fields, once a single line would be hard to read.
 
-Use inline `RETURN error(...)` in MAIN FLOW for validation checks that are local and self-explanatory. Reserve the `ERROR HANDLING` section for cross-cutting, non-local, or externally caused failures (e.g. I/O errors, dependency failures, unexpected process states) that aren't already obvious from a single IF branch.
+Use inline `RETURN error(...)` in MAIN FLOW for validation checks that are local and self-explanatory. Reserve the `ERROR HANDLING` section for cross-cutting, non-local, or externally caused failures (e.g. I/O errors, dependency failures, unexpected process states) that pass the test in "Deciding What to Include" and aren't already obvious from a single IF branch.
 
-Base template fields are a guideline, not a fixed schema: omit `ASSUMPTIONS`, `ERROR HANDLING`, or `EDGE CASES` when the component genuinely has none, rather than inventing content to fill the section.
+Base template fields are a guideline, not a fixed schema: omit `ASSUMPTIONS`, `ERROR HANDLING`, or `EDGE CASES` when the component genuinely has none that pass the inclusion test above, rather than inventing content to fill the section.
 
 Add optional sections only when they materially improve implementation clarity:
 
@@ -347,3 +384,31 @@ BackgroundSync ──► External API ──► updates local config
 
 Annotations stay terse — a few words, not full sentences. The `[Offline]` label marks a path independent of the main request lifecycle.
 ````
+
+## Example: Error Handling as Main Flow
+
+Not all error handling is peripheral. When a component's core responsibility is resilience itself, the "error path" is the main flow, not a footnote:
+
+```text
+PSEUDOCODE: UserLookupService
+PURPOSE: Resolve a user record, tolerating primary datastore failure
+INPUT: userId (string)
+OUTPUT: user (User) or error
+
+MAIN FLOW:
+BEGIN
+    result ← CALL PrimaryDB.Query(userId)
+
+    IF result is failure THEN
+        result ← CALL SecondaryDB.Query(userId)
+
+        IF result is failure THEN
+            RETURN error("user lookup unavailable")
+        END IF
+    END IF
+
+    RETURN result
+END
+```
+
+Here, the failover to `SecondaryDB` is not "error handling" tucked away in a separate section — it IS what this component does, so it belongs directly in `MAIN FLOW`. Compare this to a component where a failed external call simply propagates an error with no distinguishing behavior; in that case, a one-line entry under `ERROR HANDLING` (or omitting it entirely) is enough.
