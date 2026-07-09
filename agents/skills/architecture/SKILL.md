@@ -13,24 +13,35 @@ Ask about any ambiguities in scope, responsibilities, data flow, or design inten
 
 ## Required Sections
 
-### 1. Architecture Diagram
+````markdown
+
+# <Architecture Title>
+
+<2-4 sentence overview: system purpose, business domain, and the scope/boundaries this document covers>
+
+> In Research mode, if the target project is outside the current working directory, append one line immediately after the overview:
+> `Source: <absolute-path-to-project>`
+
+## 1. Architecture Diagram
 
 Mermaid diagram showing major components, external systems, and dependency direction.
 
-### 2. Primary Flow
+## 2. Primary Flow
 
 Choose the single most appropriate diagram type for the core runtime behavior: `sequenceDiagram` for request/response or inter-service calls, `flowchart` for branching logic or pipelines, `stateDiagram-v2` for lifecycle or state machines.
 
-### 3. Component Responsibilities
+## 3. Component Responsibilities
 
 Include only units that own control flow, enforce an error boundary, or can be replaced/tested in isolation. Utility functions and helpers belong inside their parent module's row.
 
 |Component|Responsibility|
 |---------|--------------|
 
-### 4. Design Notes
+## 4. Design Notes
 
 Record the reasoning behind key architectural decisions that cannot be inferred from the diagrams. Tables preferred.
+
+````
 
 ## Diagram Rules
 
