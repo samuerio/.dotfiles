@@ -7,8 +7,6 @@ description: Use this skill to produce a structured architecture document with M
 
 Produce a structured architecture document from either an existing codebase (Research) or a written plan (Draft), with Mermaid diagrams and prose in Simplified Chinese.
 
-When referenced file paths appear in the document content, load and follow the `ref-path` SKILL to normalize them and copy its output verbatim.
-
 ## Step 0 - Clarify if Needed (Draft mode only)
 
 Ask about any ambiguities in scope, responsibilities, data flow, or design intent that cannot be inferred from the plan before proceeding.
@@ -43,7 +41,7 @@ Record the reasoning behind key architectural decisions that cannot be inferred 
 
 ## Output Path
 
-- **Research**: `/tmp/research/[YYYYMMDD-HHMMSS]-[slug]/research.md`, where the timestamp is taken at the time `/research` is executed and the kebab-case slug is derived from the topic (e.g., `/tmp/research/20250622-143000-auth-module/research.md`)
+- **Research**: `.pi/research/[YYYYMMDD-HHMMSS]-[slug]/research.md`, where the timestamp is taken at the time `/research` is executed and the kebab-case slug is derived from the topic (e.g., `.pi/research/20250622-143000-auth-module/research.md`)
 - **Draft**: same directory as the plan file (e.g., `spec/[slug]/design.md`); if no plan file exists, write `design.md` to the current working directory
 
 After writing the file, use this exact phrasing:
