@@ -24,13 +24,11 @@ Do not modify any files. Discuss the topic with the user instead.
 
 ## draft
 
-Write our discussion as a plan in `/tmp/spec/[YYYYMMDD-HHMMSS]-[slug]/plan.md`, where the timestamp is taken at the time `/draft` is executed.
+Write our discussion as a plan in `.pi/spec/[YYYYMMDD-HHMMSS]-[slug]/plan.md`, where the timestamp is taken at the time `/draft` is executed.
 
-Derive a concise kebab-case slug from the topic, e.g. `implement-auth`, `fix-issue-42`. Full directory example: `/tmp/spec/20250622-143000-implement-auth/`.
+Derive a concise kebab-case slug from the topic, e.g. `implement-auth`, `fix-issue-42`. Full directory example: `.pi/spec/20250622-143000-implement-auth/`.
 
 All explanatory prose in Simplified Chinese. Headings, paths, module names, identifiers in English.
-
-When referenced file paths appear in the document content, load and follow the `ref-path` SKILL to normalize them and copy its output verbatim.
 
 Do not infer implementation permission from approval of the plan.
 
@@ -42,4 +40,4 @@ After writing the plan file, use this exact phrasing:
 
 Update the plan to instruct yourself which files to read in full so you get up to speed in a new session immediately.
 
-Automatically infer relevant files from the discussion (source files, entry points, types, tests) ordered by importance. Append a **Session Continuity** section -- do not rewrite the rest of the plan. Normalize all file paths using the ref-path skill before writing them into Session Continuity. If no plan file exists yet, notify the user to run draft first.
+Automatically infer relevant files from the discussion (source files, entry points, types, tests) ordered by importance. Append a **Session Continuity** section -- do not rewrite the rest of the plan. If no plan file exists yet, notify the user to run draft first.
