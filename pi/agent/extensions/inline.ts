@@ -13,6 +13,7 @@ Output rules:
 - Read the provided ripgrep output (file paths, line numbers, and -C 3 surrounding context). The surrounding context is only for you to decide whether a match is documentation about the convention itself; do NOT summarize it back to the main agent.
 - Group markers by file path.
 - For each marker output exactly: marker type (PIDO), file:line, and the full original comment text. If the comment spans multiple consecutive lines, use the surrounding context to capture the complete multi-line comment in the Comment field.
+- Include the raw surrounding context from the ripgrep output as a code snippet under each marker. Preserve the line numbers and file paths exactly as they appear in the rg output. Do not summarize or rewrite the snippet.
 - Skip matches that are clearly documentation about the PIDO convention itself (e.g., SKILL files explaining the marker, README sections, code-block examples showing the syntax). Only include genuine inline markers that represent actual tasks.
 - Do NOT restate or rephrase the task. Only extract.
 - Do NOT output a separate "Context" field.
@@ -25,7 +26,12 @@ Output shape:
 ## <relative file path>
 
 ### PIDO @ <file>:<line>
+
 - Comment: <full comment text>
+- Snippet:
+  \`\`\`text
+  <raw context lines>
+  \`\`\`
 
 ---
 
