@@ -7,19 +7,19 @@ import { BorderedLoader } from "@earendil-works/pi-coding-agent";
 import { relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const SYSTEM_PROMPT = `You are an inline marker extractor. You receive ripgrep output that scanned a codebase for PIDO comments. Your job is to extract and format them faithfully. Do NOT implement changes, answer questions, or interpret what the marker asks for.
+const SYSTEM_PROMPT = `You are an inline marker extractor. You receive ripgrep output that scanned a codebase for PIDO and PIASK comments. Your job is to extract and format them faithfully. Do NOT implement changes, answer questions, or interpret what the marker asks for.
 
 Output rules:
 - Read the provided ripgrep output (file paths, line numbers, and -C 3 surrounding context). The surrounding context is only for you to decide whether a match is documentation about the convention itself; do NOT summarize it back to the main agent.
 - Group markers by file path.
-- For each marker output exactly: marker type (PIDO), file:line, and the full original comment text. If the comment spans multiple consecutive lines, use the surrounding context to capture the complete multi-line comment in the Comment field.
+- For each marker output exactly: marker type (PIDO or PIASK), file:line, and the full original comment text. If the comment spans multiple consecutive lines, use the surrounding context to capture the complete multi-line comment in the Comment field.
 - Include the raw surrounding context from the ripgrep output as a code snippet under each marker. Preserve the line numbers and file paths exactly as they appear in the rg output. Do not summarize or rewrite the snippet.
-- Skip matches that are clearly documentation about the PIDO convention itself (e.g., SKILL files explaining the marker, README sections, code-block examples showing the syntax). Only include genuine inline markers that represent actual tasks.
+- Skip matches that are clearly documentation about the PIDO/PIASK convention itself (e.g., SKILL files explaining the markers, README sections, code-block examples showing the syntax). Only include genuine inline markers that represent actual tasks or questions.
 - Do NOT restate or rephrase the task. Only extract.
 - Do NOT output a separate "Context" field.
 - Do NOT output resolution rules, output format instructions, or any other meta commentary.
 - Use English for all prose. Output as Markdown.
-- End with a summary line exactly like: "Summary: N PIDO."
+- End with a summary line exactly like: "Summary: N PIDO, M PIASK."
 
 Output shape:
 
@@ -33,24 +33,36 @@ Output shape:
   <raw context lines>
   \`\`\`
 
+### PIASK @ <file>:<line>
+
+- Comment: <full comment text>
+- Snippet:
+  \`\`\`text
+  <raw context lines>
+  \`\`\`
+
 ---
 
-Summary: N PIDO.
+Summary: N PIDO, M PIASK.
 
 Output ONLY the formatted listing above. No markdown wrappers, no explanations.`;
 
-const FRAMING_HEADER = `Found inline PIDO markers in the codebase. Treat each marker as a task and carry it out.
+const FRAMING_HEADER = `Found inline markers (PIDO/PIASK) in the codebase. Handle each one per the resolution rules:
 
-PIDO comments (tasks):
-- Treat the comment content as a task and carry it out
+PIASK comments (questions):
+- Investigate as needed and provide a direct answer; do not make code or doc changes in order to answer
+- If answered, remove the comment; if context is insufficient, leave the comment unchanged
+
+PIDO comments (change requests):
+- Understand the request and implement the corresponding code changes
 - Remove or update the comment once addressed`;
 
 const OUTPUT_FORMAT_FOOTER = `Output format:
 - Group by file path
 - For each item include:
-  - marker type (PIDO)
+  - marker type (PIASK / PIDO)
   - line numbers and full context for each marker type comment
-  - action taken (change implemented)
+  - action taken (answer given, or change implemented)
   - marker action (removed or kept)
 - End with a summary of all changes made and any unresolved blockers`;
 
@@ -78,7 +90,7 @@ export default function (pi: ExtensionAPI) {
             ctx.cwd,
             fileURLToPath(import.meta.url),
         ).replace(/\\/g, "/");
-        const rgArgs = ["PIDO:", "-C", "3", "-n", "-H"];
+        const rgArgs = ["PIDO:|PIASK:", "-C", "3", "-n", "-H"];
         if (!extensionRelPath.startsWith("..")) {
             rgArgs.push("-g", `!${extensionRelPath}`);
         }
@@ -93,7 +105,7 @@ export default function (pi: ExtensionAPI) {
         const scanOutput = rg.stdout.trim();
         if (!scanOutput) {
             if (ctx.hasUI) {
-                ctx.ui.notify("No PIDO markers found", "info");
+                ctx.ui.notify("No PIDO/PIASK markers found", "info");
             }
             return;
         }
@@ -195,7 +207,7 @@ export default function (pi: ExtensionAPI) {
 
     pi.registerCommand("inline", {
         description:
-            "Scan inline PIDO markers and generate a structured task list",
+            "Scan inline PIDO and PIASK markers and generate a structured task list",
         handler: (args, ctx) => handler(args, ctx),
     });
 }
