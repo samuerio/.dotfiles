@@ -1,6 +1,6 @@
 ---
 name: explain
-description: Explain a target, providing 9 independently-triggered subcommands for different explanation angles. Triggers: /exp-what, /exp-13y, /exp-ascii, /exp-hist, /exp-impl, /exp-prac, /exp-shape, /exp-ind, /exp-aes, each optionally followed by <target>; also supports the <target> /exp-xxx form. These commands are independent of each other and are not meant to be combined.
+description: "Explain a target, providing 9 independently-triggered subcommands for different explanation angles. Triggers: /exp-what, /exp-13y, /exp-ascii, /exp-hist, /exp-impl, /exp-prac, /exp-shape, /exp-ind, /exp-aes, each optionally followed by <target>; also supports the <target> /exp-xxx form. These commands are independent of each other and are not meant to be combined."
 ---
 
 # Explain Commands

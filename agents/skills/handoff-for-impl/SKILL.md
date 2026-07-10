@@ -1,5 +1,5 @@
 ---
-name: draft-impl-handoff
+name: handoff-for-impl
 description: Generate a self-contained context-transfer prompt for handing off a finalized plan to a new thread for implementation. Use when user invokes /handoff-for-impl and a clear plan exists in the current conversation.
 ---
 
