@@ -507,15 +507,15 @@ export default function (pi: ExtensionAPI): void {
 				ctx.ui.notify(`LLM analysis failed: ${msg}`, "warning");
 			}
 
+			const monitorCmd = `Monitor: tmux -S ${socket} attach -t ${name}`;
 			if (analysis) {
-				ctx.ui.notify(`Status for "${name}":\n\n${analysis}`, "info");
+				const lines = analysis.split("\n").concat("", monitorCmd);
+				ctx.ui.setWidget("ws-status", lines, { position: "above" });
 			} else {
 				const lines = paneOutput.trim().split("\n");
 				const tail = lines.slice(-15).join("\n");
 				ctx.ui.notify(`Status for "${name}" (raw output):\n${tail}`, "info");
 			}
-
-			ctx.ui.notify(`Monitor: tmux -S ${socket} attach -t ${name}`, "info");
 		},
 	});
 
