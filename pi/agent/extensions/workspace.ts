@@ -1,6 +1,7 @@
+import { completeSimple, type ThinkingLevel, type UserMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { completeSimple, type UserMessage } from "@earendil-works/pi-ai";
-import { existsSync, promises as fs } from "node:fs";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { existsSync, readFileSync, promises as fs } from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -214,28 +215,77 @@ function isPaneIdle(output: string): boolean {
 	return /^[\$%>❯]\s*$/.test(last);
 }
 
+// ─── Rush Mode Resolution ─────────────────────────────────────────
+
+type ModeSpec = {
+	provider?: string;
+	modelId?: string;
+	thinkingLevel?: string;
+};
+
+const RUSH_MODE = "rush";
+
+function loadRushModeSpec(cwd: string): ModeSpec | null {
+	const candidates = [path.join(cwd, ".pi", "modes.json"), path.join(getAgentDir(), "modes.json")];
+	for (const p of candidates) {
+		if (!existsSync(p)) continue;
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(readFileSync(p, "utf8"));
+		} catch {
+			continue;
+		}
+		const modes = parsed && typeof parsed === "object" ? (parsed as { modes?: unknown }).modes : undefined;
+		if (!modes || typeof modes !== "object") continue;
+		const spec = (modes as Record<string, unknown>)[RUSH_MODE];
+		if (!spec || typeof spec !== "object") continue;
+		const obj = spec as Record<string, unknown>;
+		const provider = typeof obj.provider === "string" ? obj.provider : undefined;
+		const modelId = typeof obj.modelId === "string" ? obj.modelId : undefined;
+		const thinkingLevel = typeof obj.thinkingLevel === "string" ? obj.thinkingLevel : undefined;
+		if (!provider || !modelId) continue;
+		return { provider, modelId, thinkingLevel };
+	}
+	return null;
+}
+
 // ─── LLM Status Analysis ─────────────────────────────────────────
 
-const STATUS_SYSTEM_PROMPT = `You are a workspace status analyzer. Given terminal pane output from a coding workspace, provide a concise structured summary:
+const STATUS_SYSTEM_PROMPT = `You are a workspace status analyzer. Given terminal pane output from a coding workspace, provide a concise structured summary in Simplified Chinese:
 
-1. **Current State**: What is currently happening (e.g., running tests, compiling, idle, editing files).
-2. **Health Check**: Any visible errors, warnings, or panics. Quote exact error messages if found.
-3. **Progress**: Brief progress estimate.
-4. **Relevant Snippet**: If there's an error, extract it with ~10 lines of context. Otherwise show the last 10-15 lines.
+1. **当前状态**: 当前正在发生什么（例如：运行测试、编译中、空闲、编辑文件）。
+2. **健康检查**: 任何可见的错误、警告或 panic。如有请引用确切的错误信息。
+3. **进度**: 简要进度估计。
+4. **相关片段**: 如有错误，提取约 10 行上下文。否则展示最后 10-15 行。
 
-Keep the response under 200 words. Be direct, no filler.`;
+回复控制在 200 字以内。直接了当，不要废话。`;
 
 async function analyzeStatus(
 	pi: ExtensionAPI,
 	ctx: ExtensionCommandContext,
 	paneOutput: string,
 ): Promise<string | null> {
-	const model = ctx.model;
+	const rushSpec = loadRushModeSpec(ctx.cwd);
+	if (!rushSpec) {
+		return null;
+	}
+
+	const model = ctx.modelRegistry.find(rushSpec.provider!, rushSpec.modelId!);
 	if (!model) {
 		return null;
 	}
 
-	const credentials = ctx.modelRegistry.getApiKeyAndHeaders(model);
+	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+	if (!auth.ok) {
+		return null;
+	}
+
+	const thinkingLevels: readonly ThinkingLevel[] = ["minimal", "low", "medium", "high", "xhigh"];
+	const reasoning: ThinkingLevel | undefined =
+		rushSpec.thinkingLevel && thinkingLevels.includes(rushSpec.thinkingLevel as ThinkingLevel)
+			? (rushSpec.thinkingLevel as ThinkingLevel)
+			: undefined;
+
 	const userMessage: UserMessage = {
 		role: "user",
 		content: [{ type: "text", text: paneOutput }],
@@ -249,9 +299,10 @@ async function analyzeStatus(
 			messages: [userMessage],
 		},
 		{
-			apiKey: credentials.apiKey,
-			headers: credentials.headers,
+			apiKey: auth.apiKey,
+			headers: auth.headers,
 			signal: ctx.signal,
+			...(reasoning ? { reasoning } : {}),
 		},
 	);
 
@@ -454,11 +505,14 @@ export default function (pi: ExtensionAPI): void {
 		},
 	});
 
-	// ── /ws-status [name] ──
+	// ── /ws-status [name] [--analyze] ──
 	pi.registerCommand("ws-status", {
-		description: "Show intelligent status of a branch-workspace. Usage: /ws-status [name]",
+		description: "Show workspace status. Usage: /ws-status [name] [--analyze]",
 		handler: async (args, ctx) => {
-			const resolved = await resolveName(args, ctx.cwd, ctx);
+			const analyze = args.includes("--analyze");
+			const nameArgs = args.replace(/--analyze/g, "").trim();
+
+			const resolved = await resolveName(nameArgs, ctx.cwd, ctx);
 			if (!resolved) return;
 			const { name } = resolved;
 
@@ -493,25 +547,39 @@ export default function (pi: ExtensionAPI): void {
 				return;
 			}
 
-			const paneOutput = await capturePaneOutput(pi, socket, paneTarget);
+			const captureLines = analyze ? 200 : 30;
+			const paneOutput = await capturePaneOutput(pi, socket, paneTarget, captureLines);
 			if (!paneOutput.trim()) {
 				ctx.ui.notify(`Pane output is empty for "${name}".`, "warning");
 				return;
 			}
+
+			const monitorCmd = `Monitor: tmux -S ${socket} attach -t ${name}`;
+
+			if (!analyze) {
+				const lines = paneOutput.trim().split("\n").concat("", monitorCmd);
+				ctx.ui.setWidget("ws-status", lines, { position: "above", maxHeight: 100 });
+				return;
+			}
+
+			ctx.ui.setWidget("ws-status", [`Analyzing status for "${name}"...`], { position: "above" });
 
 			let analysis: string | null = null;
 			try {
 				analysis = await analyzeStatus(pi, ctx, paneOutput);
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
+				ctx.ui.setWidget("ws-status", undefined);
 				ctx.ui.notify(`LLM analysis failed: ${msg}`, "warning");
+				return;
 			}
 
-			const monitorCmd = `Monitor: tmux -S ${socket} attach -t ${name}`;
 			if (analysis) {
 				const lines = analysis.split("\n").concat("", monitorCmd);
-				ctx.ui.setWidget("ws-status", lines, { position: "above" });
+				ctx.ui.setWidget("ws-status", lines, { position: "above", maxHeight: 100 });
 			} else {
+				ctx.ui.setWidget("ws-status", undefined);
+				ctx.ui.notify(`No rush mode configured in modes.json. Showing raw output.`, "warning");
 				const lines = paneOutput.trim().split("\n");
 				const tail = lines.slice(-15).join("\n");
 				ctx.ui.notify(`Status for "${name}" (raw output):\n${tail}`, "info");
