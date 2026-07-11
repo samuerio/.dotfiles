@@ -15,6 +15,17 @@ const FIND_SESSIONS_SH = path.join(WORKSPACE_DIR, "find-sessions.sh");
 const STATE_FILE = ".branch-workspace-current.json";
 const TMUX_SOCKET_DIR = "/tmp/claude-tmux-sockets";
 
+async function copyToClipboard(pi: ExtensionAPI, text: string): Promise<boolean> {
+	for (const cmd of ["xclip -selection clipboard", "pbcopy"]) {
+		const bin = cmd.split(" ")[0];
+		const check = await pi.exec("which", [bin]);
+		if (check.code !== 0) continue;
+		const result = await pi.exec("bash", ["-c", `${cmd} <<< ${JSON.stringify(text)}`]);
+		if (result.code === 0) return true;
+	}
+	return false;
+}
+
 function buildWidget(lines: string[], footer?: string) {
 	return (tui: { width: number }, theme: { fg: (color: string, text: string) => string }) => {
 		const container = new Container();
@@ -392,8 +403,10 @@ export default function (pi: ExtensionAPI): void {
 				`Workspace "${name}" opened. Worktree: ${output.worktreePath}`,
 				"info",
 			);
+			const monitorCmd = `tmux -S ${socket} attach -t ${name}`;
+			const copied = await copyToClipboard(pi, monitorCmd);
 			ctx.ui.notify(
-				`Monitor: tmux -S ${socket} attach -t ${name}`,
+				`Monitor: ${monitorCmd}${copied ? " (copied)" : ""}`,
 				"info",
 			);
 		},
@@ -571,7 +584,9 @@ export default function (pi: ExtensionAPI): void {
 				return;
 			}
 
-			const monitorCmd = `Monitor: tmux -S ${socket} attach -t ${name}`;
+			const rawCmd = `tmux -S ${socket} attach -t ${name}`;
+			const copied = await copyToClipboard(pi, rawCmd);
+			const monitorCmd = `Monitor: ${rawCmd}${copied ? " (copied)" : ""}`;
 
 			if (!analyze) {
 				const lines = paneOutput.trim().split("\n");
