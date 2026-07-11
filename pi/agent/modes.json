@@ -8,12 +8,12 @@
       "thinkingLevel": "medium"
     },
     "rush": {
-      "provider": "volcengine",
+      "provider": "opencode-go",
       "modelId": "deepseek-v4-flash",
-      "thinkingLevel": "xhigh"
+      "thinkingLevel": "high"
     },
     "smart": {
-      "provider": "volcengine",
+      "provider": "opencode-go",
       "modelId": "glm-5.2",
       "thinkingLevel": "xhigh"
     },

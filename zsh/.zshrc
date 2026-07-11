@@ -235,6 +235,12 @@ elif [[ $(uname) == "Linux" ]]; then
     export AIDER_CACHE_PROMPTS=true
     export CACHE_KEEPALIVE_PINGS=6
 
+    # >>> grok installer >>>
+    export PATH="$HOME/.grok/bin:$PATH"
+    fpath=(~/.grok/completions/zsh $fpath)
+    autoload -Uz compinit && compinit -C
+    # <<< grok installer <<<
+
 else
 fi
 
@@ -260,3 +266,4 @@ export TERM=xterm-256color
 
 # OpenClaw Completion
 #source "/home/zhe/.openclaw/completions/openclaw.zsh"
+
