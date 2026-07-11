@@ -262,6 +262,26 @@ async function analyzeStatus(
 		.trim();
 }
 
+// ─── Session Management ───────────────────────────────────────────
+
+async function ensureSession(
+	pi: ExtensionAPI,
+	socket: string,
+	name: string,
+	worktreePath: string,
+): Promise<boolean> {
+	const hasSession = await pi.exec("tmux", ["-S", socket, "has-session", "-t", name]);
+	if (hasSession.code === 0) return true;
+
+	await fs.mkdir(path.dirname(socket), { recursive: true });
+	const result = await pi.exec("tmux", [
+		"-S", socket,
+		"new-session", "-d", "-s", name,
+		"-c", worktreePath,
+	]);
+	return result.code === 0;
+}
+
 // ─── Commands ─────────────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI): void {
@@ -293,16 +313,9 @@ export default function (pi: ExtensionAPI): void {
 				return;
 			}
 
-			const hasSession = await pi.exec("tmux", ["-S", socket, "has-session", "-t", name]);
-			if (hasSession.code !== 0) {
-				const newSession = await pi.exec("tmux", [
-					"-S", socket,
-					"new-session", "-d", "-s", name,
-					"-c", output.worktreePath,
-				]);
-				if (newSession.code !== 0) {
-					ctx.ui.notify(`Worktree created but failed to start tmux session: ${newSession.stderr.trim()}`, "warning");
-				}
+			const sessionOk = await ensureSession(pi, socket, name, output.worktreePath);
+			if (!sessionOk) {
+				ctx.ui.notify(`Worktree created but failed to start tmux session for "${name}".`, "warning");
 			}
 
 			await writeCurrentState(ctx.cwd, name, output.worktreePath);
@@ -450,8 +463,12 @@ export default function (pi: ExtensionAPI): void {
 			const { name } = resolved;
 
 			const ws = await resolveWorkspaceState(pi, name);
-			if (ws.status !== "active") {
-				ctx.ui.notify(`Workspace "${name}" is ${ws.status}, not active.`, "error");
+			if (ws.status === "missing") {
+				ctx.ui.notify(`Workspace "${name}" does not exist.`, "error");
+				return;
+			}
+			if (ws.status === "orphan") {
+				ctx.ui.notify(`Workspace "${name}" has no worktree (orphan session).`, "error");
 				return;
 			}
 
@@ -459,6 +476,15 @@ export default function (pi: ExtensionAPI): void {
 			if (!socket) {
 				ctx.ui.notify("Failed to resolve tmux socket.", "error");
 				return;
+			}
+
+			if (ws.status === "idle") {
+				const ok = await ensureSession(pi, socket, name, ws.worktreePath!);
+				if (!ok) {
+					ctx.ui.notify(`Failed to recreate tmux session for "${name}".`, "error");
+					return;
+				}
+				ctx.ui.notify(`Recreated tmux session for "${name}".`, "info");
 			}
 
 			const paneTarget = await discoverPaneTarget(pi, socket, name);
@@ -524,8 +550,12 @@ export default function (pi: ExtensionAPI): void {
 			const { name } = resolved;
 
 			const ws = await resolveWorkspaceState(pi, name);
-			if (ws.status !== "active") {
-				ctx.ui.notify(`Workspace "${name}" is ${ws.status}, not active.`, "error");
+			if (ws.status === "missing") {
+				ctx.ui.notify(`Workspace "${name}" does not exist.`, "error");
+				return;
+			}
+			if (ws.status === "orphan") {
+				ctx.ui.notify(`Workspace "${name}" has no worktree (orphan session).`, "error");
 				return;
 			}
 
@@ -533,6 +563,15 @@ export default function (pi: ExtensionAPI): void {
 			if (!socket) {
 				ctx.ui.notify("Failed to resolve tmux socket.", "error");
 				return;
+			}
+
+			if (ws.status === "idle") {
+				const ok = await ensureSession(pi, socket, name, ws.worktreePath!);
+				if (!ok) {
+					ctx.ui.notify(`Failed to recreate tmux session for "${name}".`, "error");
+					return;
+				}
+				ctx.ui.notify(`Recreated tmux session for "${name}".`, "info");
 			}
 
 			const paneTarget = await discoverPaneTarget(pi, socket, name);
