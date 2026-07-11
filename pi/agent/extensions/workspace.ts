@@ -499,14 +499,20 @@ export default function (pi: ExtensionAPI): void {
 				return;
 			}
 
-			const analysis = await analyzeStatus(pi, ctx, paneOutput);
+			let analysis: string | null = null;
+			try {
+				analysis = await analyzeStatus(pi, ctx, paneOutput);
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				ctx.ui.notify(`LLM analysis failed: ${msg}`, "warning");
+			}
+
 			if (analysis) {
 				ctx.ui.notify(`Status for "${name}":\n\n${analysis}`, "info");
 			} else {
-				// Fallback: show raw last 15 lines
 				const lines = paneOutput.trim().split("\n");
 				const tail = lines.slice(-15).join("\n");
-				ctx.ui.notify(`Status for "${name}" (no LLM available, raw output):\n${tail}`, "info");
+				ctx.ui.notify(`Status for "${name}" (raw output):\n${tail}`, "info");
 			}
 
 			ctx.ui.notify(`Monitor: tmux -S ${socket} attach -t ${name}`, "info");
