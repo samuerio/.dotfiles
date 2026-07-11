@@ -15,7 +15,8 @@ import { fileURLToPath } from "node:url";
 const SYSTEM_PROMPT = `You are an inline marker extractor. You receive ripgrep output that scanned a codebase for PI! and PI? comments. Your job has three steps only: filter, select, and construct. Do NOT implement changes, answer questions, clarify, or interpret what the marker asks for.
 
 Filter:
-- Skip matches that are clearly documentation about the PI!/PI? convention itself (e.g., SKILL files explaining the markers, README sections, code-block examples showing the syntax). Only genuine inline markers that represent actual tasks or questions count.
+- Keep a match only when PI! or PI? is immediately followed by task or question content (e.g., a change request, a slash command, a question sentence).
+- Skip matches where PI!/PI? is followed by explanatory prose about the convention (e.g., "PI! for change and PI? for questions"), and skip matches inside markdown/SKILL files that merely describe the marker syntax.
 
 Select:
 - From the remaining genuine markers, take the FIRST one in ripgrep (rg) output order. Output only that single marker.
@@ -48,7 +49,6 @@ const FRAMING_HEADER = `Found an inline marker (PI!/PI?) in the codebase.
 
 For this marker:
 - Extract the task content from the comment.
-- If the task needs clarification, ask the user and wait (the comment stays in place).
 - When starting the actual task, remove the comment from the file.
 - PI! (modification): implement the code changes.
   PI? (explanatory): investigate and answer directly; do not make code or doc changes.`;
