@@ -17,12 +17,15 @@ If a run needs interactive follow-up or multi-turn debugging, use the tmux skill
 
 Resolve the model and thinking level for the current run:
 
-1. If the user explicitly wants to choose a model, run `pi --list-models` and show the available models.
-2. Show the allowed thinking levels — `off`, `minimal`, `low`, `medium`, `high`, `xhigh` — and let the user choose one.
-3. Otherwise, use the values from `DEFAULT_WORKER_MODEL` and `DEFAULT_WORKER_THINKING` if set.
-4. If either value is still unresolved, ask the user before proceeding. Never substitute hardcoded values.
+1. If the user explicitly wants to choose a model, run `pi --list-models` and show the available models, then show the allowed thinking levels — `off`, `minimal`, `low`, `medium`, `high`, `xhigh` — and let the user choose one. Only do this when the user asks to pick.
+2. Otherwise, resolve defaults by running the bundled helper:
+   ```bash
+   python scripts/resolve-default.py
+   ```
+   Line 1 is `<model>` and line 2 is `<thinking>` (the thinking line may be empty).
+3. If both lines from the helper are empty, run pi without `--model` and `--thinking` so pi uses its own defaults.
 
-After resolving, use the model and thinking level directly as `<model>` and `<thinking>` in all commands below.
+After resolving, use the model and thinking level directly as `<model>` and `<thinking>` in all commands below. When the helper returned empty values, omit both flags instead of substituting placeholders.
 
 ## Choose the Mode
 
