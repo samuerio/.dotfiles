@@ -1,8 +1,4 @@
-import {
-    completeSimple,
-    type ThinkingLevel,
-    type UserMessage,
-} from "@earendil-works/pi-ai";
+import { completeSimple, type UserMessage } from "@earendil-works/pi-ai";
 import type {
     ExtensionAPI,
     ExtensionCommandContext,
@@ -177,20 +173,6 @@ export default function (pi: ExtensionAPI) {
         }
         const { apiKey, headers } = auth;
 
-        const thinkingLevels: readonly ThinkingLevel[] = [
-            "minimal",
-            "low",
-            "medium",
-            "high",
-            "xhigh",
-        ];
-        const reasoning: ThinkingLevel | undefined =
-            rushSpec.thinkingLevel &&
-            thinkingLevels.includes(rushSpec.thinkingLevel as ThinkingLevel)
-                ? (rushSpec.thinkingLevel as ThinkingLevel)
-                : undefined;
-
-        // 3. Format markers with an independent LLM call.
         const describe = async (signal?: AbortSignal): Promise<string | null> => {
             const userMessage: UserMessage = {
                 role: "user",
@@ -208,7 +190,7 @@ export default function (pi: ExtensionAPI) {
                     apiKey,
                     headers,
                     signal,
-                    ...(reasoning ? { reasoning } : {}),
+                    reasoning: "off",
                 },
             );
 
