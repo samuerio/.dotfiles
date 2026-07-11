@@ -13,7 +13,7 @@ The task comes from the message (for discuss) or from the prior discussion (for 
 
 1. `/discuss`: clarify the topic and explore the approach. Do not modify files.
 2. `/draft`: convert the discussion into `spec/[slug]/plan.md`. Only write or update the plan file.
-3. `/finalize`: append a **Session Continuity** section to the existing plan. Do not rewrite the rest of the plan.
+3. `/finalize` (optional): append a **Session Continuity** section to the existing plan. Do not rewrite the rest of the plan. Only needed for cross-session continuity or handoff to a new session; skip it if implementing in the same session.
 4. Implementation begins only when the user explicitly asks to implement, code, modify source files, or make the planned changes.
 
 Do not edit source code, tests, configuration, or project files during `/discuss`, `/draft`, or `/finalize`, except for the allowed plan file changes described above.
