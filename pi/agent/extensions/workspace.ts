@@ -1,6 +1,7 @@
 import { completeSimple, type ThinkingLevel, type UserMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { Container, Text } from "@mariozechner/pi-tui";
 import { existsSync, readFileSync, promises as fs } from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,6 +14,20 @@ const WORKTREE_SH = path.join(WORKSPACE_DIR, "worktree.sh");
 const FIND_SESSIONS_SH = path.join(WORKSPACE_DIR, "find-sessions.sh");
 const STATE_FILE = ".branch-workspace-current.json";
 const TMUX_SOCKET_DIR = "/tmp/claude-tmux-sockets";
+
+function buildWidget(lines: string[], footer?: string) {
+	return (tui: { width: number }, theme: { fg: (color: string, text: string) => string }) => {
+		const container = new Container();
+		const w = tui.width || 80;
+		for (const line of lines) {
+			container.addChild(new Text(line.length > w ? line.slice(0, w - 1) + "…" : line, 1, 0));
+		}
+		if (footer) {
+			container.addChild(new Text(theme.fg("muted", footer), 1, 0));
+		}
+		return container;
+	};
+}
 
 // ─── tmux Socket ──────────────────────────────────────────────────
 
@@ -203,9 +218,11 @@ async function capturePaneOutput(
 ): Promise<string> {
 	const result = await pi.exec("tmux", [
 		"-S", socket,
-		"capture-pane", "-S", `-${lines}`, "-p", "-t", paneTarget,
+		"capture-pane", "-S", `-${lines}`, "-J", "-p", "-t", paneTarget,
 	]);
-	return result.code === 0 ? result.stdout : "";
+	if (result.code !== 0) return "";
+	const allLines = result.stdout.split("\n");
+	return allLines.slice(-lines).join("\n");
 }
 
 function isPaneIdle(output: string): boolean {
@@ -547,7 +564,7 @@ export default function (pi: ExtensionAPI): void {
 				return;
 			}
 
-			const captureLines = analyze ? 200 : 30;
+			const captureLines = analyze ? 200 : 15;
 			const paneOutput = await capturePaneOutput(pi, socket, paneTarget, captureLines);
 			if (!paneOutput.trim()) {
 				ctx.ui.notify(`Pane output is empty for "${name}".`, "warning");
@@ -557,12 +574,12 @@ export default function (pi: ExtensionAPI): void {
 			const monitorCmd = `Monitor: tmux -S ${socket} attach -t ${name}`;
 
 			if (!analyze) {
-				const lines = paneOutput.trim().split("\n").concat("", monitorCmd);
-				ctx.ui.setWidget("ws-status", lines, { position: "above", maxHeight: 100 });
+				const lines = paneOutput.trim().split("\n");
+				ctx.ui.setWidget("ws-status", buildWidget(lines, monitorCmd), { placement: "aboveEditor" });
 				return;
 			}
 
-			ctx.ui.setWidget("ws-status", [`Analyzing status for "${name}"...`], { position: "above" });
+			ctx.ui.setWidget("ws-status", buildWidget([`Analyzing status for "${name}"...`]), { placement: "aboveEditor" });
 
 			let analysis: string | null = null;
 			try {
@@ -575,8 +592,8 @@ export default function (pi: ExtensionAPI): void {
 			}
 
 			if (analysis) {
-				const lines = analysis.split("\n").concat("", monitorCmd);
-				ctx.ui.setWidget("ws-status", lines, { position: "above", maxHeight: 100 });
+				const lines = analysis.split("\n");
+				ctx.ui.setWidget("ws-status", buildWidget(lines, monitorCmd), { placement: "aboveEditor" });
 			} else {
 				ctx.ui.setWidget("ws-status", undefined);
 				ctx.ui.notify(`No rush mode configured in modes.json. Showing raw output.`, "warning");
