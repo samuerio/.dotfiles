@@ -82,19 +82,85 @@ async function clearCurrentState(cwd: string, name: string): Promise<void> {
 	}
 }
 
-async function resolveName(
+// ─── UI Select Helpers ────────────────────────────────────────────
+
+async function listAllWorkspaces(pi: ExtensionAPI): Promise<ResolvedWorkspace[]> {
+	const wtResult = await pi.exec("bash", [WORKTREE_SH, "list", "--json"]);
+	const worktrees = wtResult.code === 0 ? parseWorktreeOutput(wtResult.stdout) : [];
+
+	const socket = await getTmuxSocket(pi);
+	let sessions: SessionEntry[] = [];
+	if (socket) {
+		const sessResult = await pi.exec("bash", [FIND_SESSIONS_SH, "-S", socket, "--json"]);
+		if (sessResult.code === 0) {
+			sessions = parseSessionsOutput(sessResult.stdout);
+		}
+	}
+
+	const names = new Set<string>();
+	for (const wt of worktrees) names.add(wt.branch);
+	for (const s of sessions) names.add(s.session_name);
+
+	const result: ResolvedWorkspace[] = [];
+	for (const name of [...names].sort()) {
+		const wt = worktrees.find((w) => w.branch === name);
+		const sess = sessions.find((s) => s.session_name === name);
+
+		let status: WorkspaceStatus;
+		if (wt && sess) status = "active";
+		else if (wt) status = "idle";
+		else if (sess) status = "orphan";
+		else status = "missing";
+
+		result.push({ name, status, worktreePath: wt?.path, dirty: wt?.dirty });
+	}
+	return result;
+}
+
+async function selectWorkspace(
+	pi: ExtensionAPI,
+	ctx: ExtensionCommandContext,
+	title: string,
+): Promise<ResolvedWorkspace | null> {
+	const workspaces = await listAllWorkspaces(pi);
+	if (workspaces.length === 0) {
+		ctx.ui.notify("No workspaces available.", "error");
+		return null;
+	}
+	const options = workspaces.map((ws) => `${ws.name} [${ws.status}]`);
+	const choice = await ctx.ui.select(title, options);
+	if (!choice) return null;
+	const name = choice.replace(/ \[.*\]$/, "");
+	return workspaces.find((ws) => ws.name === name) ?? null;
+}
+
+type WorkspaceAction = "status" | "vscode" | "cancel" | "close";
+
+function getAvailableActions(status: WorkspaceStatus): WorkspaceAction[] {
+	switch (status) {
+		case "active": return ["status", "vscode", "cancel", "close"];
+		case "idle": return ["vscode", "close"];
+		case "orphan": return ["close"];
+		default: return [];
+	}
+}
+
+async function resolveNameOrSelect(
+	pi: ExtensionAPI,
 	args: string,
 	cwd: string,
 	ctx: ExtensionCommandContext,
+	selectFlag: boolean,
 ): Promise<{ name: string; worktreePath?: string } | null> {
-	const trimmed = args.trim();
-	if (trimmed) return { name: trimmed };
+	const nameArgs = args.trim();
+	if (nameArgs && !selectFlag) return { name: nameArgs };
 
-	const state = await readCurrentState(cwd);
-	if (state) return state;
+	if (!selectFlag) {
+		const state = await readCurrentState(cwd);
+		if (state) return state;
+	}
 
-	ctx.ui.notify("No name specified and no current workspace set. Run /ws-open <name> first.", "error");
-	return null;
+	return selectWorkspace(pi, ctx, "Select workspace");
 }
 
 // ─── Script Output Types ──────────────────────────────────────────
@@ -366,12 +432,25 @@ async function ensureSession(
 export default function (pi: ExtensionAPI): void {
 	// ── /ws-open <name> ──
 	pi.registerCommand("ws-open", {
-		description: "Open a branch-workspace (git worktree + tmux session). Usage: /ws-open <name>",
+		description: "Open a branch-workspace (git worktree + tmux session). Usage: /ws-open [name]",
 		handler: async (args, ctx) => {
-			const name = args.trim();
+			let name = args.trim();
 			if (!name) {
-				ctx.ui.notify("Usage: /ws-open <name>", "error");
-				return;
+				const branchResult = await pi.exec("git", ["branch", "--format=%(refname:short)"]);
+				if (branchResult.code !== 0) {
+					ctx.ui.notify("Failed to list git branches.", "error");
+					return;
+				}
+				const headResult = await pi.exec("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
+				const currentBranch = headResult.code === 0 ? headResult.stdout.trim() : "";
+				const branches = branchResult.stdout.trim().split("\n").filter((b) => b && b !== currentBranch);
+				if (branches.length === 0) {
+					ctx.ui.notify("No other branches found.", "error");
+					return;
+				}
+				const choice = await ctx.ui.select("Select branch to open", branches);
+				if (!choice) return;
+				name = choice;
 			}
 
 			const result = await pi.exec("bash", [WORKTREE_SH, "open", name, "--json"]);
@@ -414,56 +493,51 @@ export default function (pi: ExtensionAPI): void {
 
 	// ── /ws-list ──
 	pi.registerCommand("ws-list", {
-		description: "List all branch-workspaces with status (active/idle/orphan).",
+		description: "List all branch-workspaces and optionally run an action.",
 		handler: async (_args, ctx) => {
-			const wtResult = await pi.exec("bash", [WORKTREE_SH, "list", "--json"]);
-			const worktrees = wtResult.code === 0 ? parseWorktreeOutput(wtResult.stdout) : [];
+			const workspaces = await listAllWorkspaces(pi);
 
-			const socket = await getTmuxSocket(pi);
-			let sessions: SessionEntry[] = [];
-			if (socket) {
-				const sessResult = await pi.exec("bash", [FIND_SESSIONS_SH, "-S", socket, "--json"]);
-				if (sessResult.code === 0) {
-					sessions = parseSessionsOutput(sessResult.stdout);
-				}
-			}
-
-			const currentState = await readCurrentState(ctx.cwd);
-
-			// Build workspace map: merge worktrees and sessions by name
-			const names = new Set<string>();
-			for (const wt of worktrees) names.add(wt.branch);
-			for (const s of sessions) names.add(s.session_name);
-
-			if (names.size === 0) {
+			if (workspaces.length === 0) {
 				ctx.ui.notify("No branch-workspaces found.", "info");
 				return;
 			}
 
+			const currentState = await readCurrentState(ctx.cwd);
 			const lines: string[] = [];
-			for (const name of [...names].sort()) {
-				const wt = worktrees.find((w) => w.branch === name);
-				const sess = sessions.find((s) => s.session_name === name);
+			for (const ws of workspaces) {
+				const dirtyMark = ws.dirty ? " (dirty)" : "";
+				const currentMark = currentState?.name === ws.name ? " (current)" : "";
+				lines.push(`  ${ws.name} [${ws.status}]${dirtyMark}${currentMark}`);
+			}
+			ctx.ui.notify(`Branch-workspaces:\n${lines.join("\n")}`, "info");
 
-				let status: string;
-				if (wt && sess) status = "active";
-				else if (wt) status = "idle";
-				else status = "orphan";
+			// Select workspace
+			const selected = await selectWorkspace(pi, ctx, "Select workspace");
+			if (!selected) return;
 
-				const dirtyMark = wt?.dirty ? " (dirty)" : "";
-				const currentMark = currentState?.name === name ? " (current)" : "";
-				lines.push(`  ${name} [${status}]${dirtyMark}${currentMark}`);
+			// Select action based on status
+			const actions = getAvailableActions(selected.status);
+			if (actions.length === 0) {
+				ctx.ui.notify(`Workspace "${selected.name}" has no available actions.`, "error");
+				return;
 			}
 
-			ctx.ui.notify(`Branch-workspaces:\n${lines.join("\n")}`, "info");
+			const action = await ctx.ui.select(`Action for "${selected.name}"`, actions) as WorkspaceAction | undefined;
+			if (!action) return;
+
+			const cmd = `/ws-${action} ${selected.name}`;
+			ctx.ui.pasteToEditor(cmd);
 		},
 	});
 
-	// ── /ws-close [name] ──
+	// ── /ws-close [name] [-s] ──
 	pi.registerCommand("ws-close", {
-		description: "Close a branch-workspace (remove worktree + kill tmux session). Usage: /ws-close [name]",
+		description: "Close a branch-workspace (remove worktree + kill tmux session). Usage: /ws-close [name] [-s]",
 		handler: async (args, ctx) => {
-			const resolved = await resolveName(args, ctx.cwd, ctx);
+			const selectFlag = /(^|\s)-s\b/.test(args);
+			const nameArgs = args.replace(/(^|\s)-s\b/g, "").trim();
+
+			const resolved = await resolveNameOrSelect(pi, nameArgs, ctx.cwd, ctx, selectFlag);
 			if (!resolved) return;
 			const { name } = resolved;
 
@@ -535,24 +609,21 @@ export default function (pi: ExtensionAPI): void {
 		},
 	});
 
-	// ── /ws-status [name] [--analyze] ──
+	// ── /ws-status [name] [-s] [--analyze] ──
 	pi.registerCommand("ws-status", {
-		description: "Show workspace status. Usage: /ws-status [name] [--analyze]",
+		description: "Show workspace status. Usage: /ws-status [name] [-s] [--analyze]",
 		handler: async (args, ctx) => {
 			const analyze = args.includes("--analyze");
-			const nameArgs = args.replace(/--analyze/g, "").trim();
+			const selectFlag = /(^|\s)-s\b/.test(args);
+			const nameArgs = args.replace(/--analyze/g, "").replace(/(^|\s)-s\b/g, "").trim();
 
-			const resolved = await resolveName(nameArgs, ctx.cwd, ctx);
+			const resolved = await resolveNameOrSelect(pi, nameArgs, ctx.cwd, ctx, selectFlag);
 			if (!resolved) return;
 			const { name } = resolved;
 
 			const ws = await resolveWorkspaceState(pi, name);
-			if (ws.status === "missing") {
-				ctx.ui.notify(`Workspace "${name}" does not exist.`, "error");
-				return;
-			}
-			if (ws.status === "orphan") {
-				ctx.ui.notify(`Workspace "${name}" has no worktree (orphan session).`, "error");
+			if (ws.status !== "active") {
+				ctx.ui.notify(`Workspace "${name}" is not active (${ws.status}). Status requires a running tmux session.`, "error");
 				return;
 			}
 
@@ -560,15 +631,6 @@ export default function (pi: ExtensionAPI): void {
 			if (!socket) {
 				ctx.ui.notify("Failed to resolve tmux socket.", "error");
 				return;
-			}
-
-			if (ws.status === "idle") {
-				const ok = await ensureSession(pi, socket, name, ws.worktreePath!);
-				if (!ok) {
-					ctx.ui.notify(`Failed to recreate tmux session for "${name}".`, "error");
-					return;
-				}
-				ctx.ui.notify(`Recreated tmux session for "${name}".`, "info");
 			}
 
 			const paneTarget = await discoverPaneTarget(pi, socket, name);
@@ -619,11 +681,14 @@ export default function (pi: ExtensionAPI): void {
 		},
 	});
 
-	// ── /ws-vscode [name] ──
+	// ── /ws-vscode [name] [-s] ──
 	pi.registerCommand("ws-vscode", {
-		description: "Open a branch-workspace in VS Code. Usage: /ws-vscode [name]",
+		description: "Open a branch-workspace in VS Code. Usage: /ws-vscode [name] [-s]",
 		handler: async (args, ctx) => {
-			const resolved = await resolveName(args, ctx.cwd, ctx);
+			const selectFlag = /(^|\s)-s\b/.test(args);
+			const nameArgs = args.replace(/(^|\s)-s\b/g, "").trim();
+
+			const resolved = await resolveNameOrSelect(pi, nameArgs, ctx.cwd, ctx, selectFlag);
 			if (!resolved) return;
 			const { name, worktreePath: stateWorktreePath } = resolved;
 
@@ -647,21 +712,20 @@ export default function (pi: ExtensionAPI): void {
 		},
 	});
 
-	// ── /ws-cancel [name] ──
+	// ── /ws-cancel [name] [-s] ──
 	pi.registerCommand("ws-cancel", {
-		description: "Interrupt the running process in a workspace's tmux pane. Usage: /ws-cancel [name]",
+		description: "Interrupt the running process in a workspace's tmux pane. Usage: /ws-cancel [name] [-s]",
 		handler: async (args, ctx) => {
-			const resolved = await resolveName(args, ctx.cwd, ctx);
+			const selectFlag = /(^|\s)-s\b/.test(args);
+			const nameArgs = args.replace(/(^|\s)-s\b/g, "").trim();
+
+			const resolved = await resolveNameOrSelect(pi, nameArgs, ctx.cwd, ctx, selectFlag);
 			if (!resolved) return;
 			const { name } = resolved;
 
 			const ws = await resolveWorkspaceState(pi, name);
-			if (ws.status === "missing") {
-				ctx.ui.notify(`Workspace "${name}" does not exist.`, "error");
-				return;
-			}
-			if (ws.status === "orphan") {
-				ctx.ui.notify(`Workspace "${name}" has no worktree (orphan session).`, "error");
+			if (ws.status !== "active") {
+				ctx.ui.notify(`Workspace "${name}" is not active (${ws.status}). Cancel requires a running tmux session.`, "error");
 				return;
 			}
 
@@ -669,15 +733,6 @@ export default function (pi: ExtensionAPI): void {
 			if (!socket) {
 				ctx.ui.notify("Failed to resolve tmux socket.", "error");
 				return;
-			}
-
-			if (ws.status === "idle") {
-				const ok = await ensureSession(pi, socket, name, ws.worktreePath!);
-				if (!ok) {
-					ctx.ui.notify(`Failed to recreate tmux session for "${name}".`, "error");
-					return;
-				}
-				ctx.ui.notify(`Recreated tmux session for "${name}".`, "info");
 			}
 
 			const paneTarget = await discoverPaneTarget(pi, socket, name);
@@ -690,6 +745,15 @@ export default function (pi: ExtensionAPI): void {
 			const currentOutput = await capturePaneOutput(pi, socket, paneTarget, 20);
 			if (isPaneIdle(currentOutput)) {
 				ctx.ui.notify(`Workspace "${name}" is already idle.`, "info");
+				return;
+			}
+
+			const proceed = await ctx.ui.confirm(
+				"Interrupt Process",
+				`Send C-c to workspace "${name}"?`,
+			);
+			if (!proceed) {
+				ctx.ui.notify("Cancelled.", "info");
 				return;
 			}
 
