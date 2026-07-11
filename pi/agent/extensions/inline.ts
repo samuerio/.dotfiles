@@ -1,70 +1,115 @@
-import { complete, type UserMessage } from "@earendil-works/pi-ai";
+import {
+    completeSimple,
+    type ThinkingLevel,
+    type UserMessage,
+} from "@earendil-works/pi-ai";
 import type {
     ExtensionAPI,
     ExtensionCommandContext,
 } from "@earendil-works/pi-coding-agent";
-import { BorderedLoader } from "@earendil-works/pi-coding-agent";
-import { relative } from "node:path";
+import { BorderedLoader, getAgentDir } from "@earendil-works/pi-coding-agent";
+import { existsSync, readFileSync } from "node:fs";
+import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const SYSTEM_PROMPT = `You are an inline marker extractor. You receive ripgrep output that scanned a codebase for PI! and PI? comments. Your job is to extract and format them faithfully. Do NOT implement changes, answer questions, or interpret what the marker asks for.
+const SYSTEM_PROMPT = `You are an inline marker extractor. You receive ripgrep output that scanned a codebase for PI! and PI? comments. Your job has three steps only: filter, select, and construct. Do NOT implement changes, answer questions, clarify, or interpret what the marker asks for.
 
-Output rules:
-- Read the provided ripgrep output (file paths, line numbers, and -C 3 surrounding context). The surrounding context is only for you to decide whether a match is documentation about the convention itself; do NOT summarize it back to the main agent.
-- Group markers by file path.
-- For each marker output exactly: marker type (PI! or PI?), file:line, and the full original comment text. If the comment spans multiple consecutive lines, use the surrounding context to capture the complete multi-line comment in the Comment field.
-- Include the raw surrounding context from the ripgrep output as a code snippet under each marker. Preserve the line numbers and file paths exactly as they appear in the rg output. Do not summarize or rewrite the snippet.
-- Skip matches that are clearly documentation about the PI!/PI? convention itself (e.g., SKILL files explaining the markers, README sections, code-block examples showing the syntax). Only include genuine inline markers that represent actual tasks or questions.
-- Do NOT restate or rephrase the task. Only extract.
-- Do NOT output a separate "Context" field.
-- Do NOT output resolution rules, output format instructions, or any other meta commentary.
-- Use English for all prose. Output as Markdown.
-- End with a summary line exactly like: "Summary: N PI!, M PI?."
+Filter:
+- Skip matches that are clearly documentation about the PI!/PI? convention itself (e.g., SKILL files explaining the markers, README sections, code-block examples showing the syntax). Only genuine inline markers that represent actual tasks or questions count.
 
-Output shape:
+Select:
+- From the remaining genuine markers, take the FIRST one in ripgrep (rg) output order. Output only that single marker.
 
-## <relative file path>
+Construct:
+- Emit one <pi-task> element for the selected marker. The element body is the raw rg context (the path:line:content lines surrounding the match, preserved exactly as they appear in the rg output, including the path:line prefix). Do not summarize, rewrite, or trim the snippet.
+- Use type="change" for PI! and type="question" for PI?.
+- The file attribute is the relative file path from the rg output. The line attribute is the line number of the match line from the rg output (the scan-time line number).
+- Do NOT emit a separate comment field. The matching line in the snippet already carries the comment text.
+- Do NOT group by file. Do NOT use Markdown headings. Output exactly one <pi-task> element.
+- Do NOT XML-escape the snippet. The output is read as text, not parsed.
+- Do NOT output a summary line.
 
-### PI! @ <file>:<line>
+If, after filtering, there are no genuine markers (rg matched but all matches are documentation about the convention), output exactly the token:
 
-- Comment: <full comment text>
-- Snippet:
-  \`\`\`text
-  <raw context lines>
-  \`\`\`
+NO_GENUINE_MARKERS
 
-### PI? @ <file>:<line>
+and nothing else.
 
-- Comment: <full comment text>
-- Snippet:
-  \`\`\`text
-  <raw context lines>
-  \`\`\`
+Output shape (single marker):
 
----
+<pi-task type="change" file="<relative path>" line="<n>">
+<path>:<line>: <raw rg context line>
+<path>:<line>: <raw rg context line>
+</pi-task>
 
-Summary: N PI!, M PI?.
+Use English for any prose. Do NOT output meta commentary, resolution rules, or output format instructions. Output ONLY the <pi-task> element (or the NO_GENUINE_MARKERS token).`;
 
-Output ONLY the formatted listing above. No markdown wrappers, no explanations.`;
+const FRAMING_HEADER = `Found an inline marker (PI!/PI?) in the codebase.
 
-const FRAMING_HEADER = `Found inline markers (PI!/PI?) in the codebase. Handle each one per the resolution rules:
+For this marker:
+- Extract the task content from the comment.
+- If the task needs clarification, ask the user and wait (the comment stays in place).
+- When starting the actual task, remove the comment from the file.
+- PI! (modification): implement the code changes.
+  PI? (explanatory): investigate and answer directly; do not make code or doc changes.`;
 
-PI? comments (questions):
-- Investigate as needed and provide a direct answer; do not make code or doc changes in order to answer
-- If answered, remove the comment; if context is insufficient, leave the comment unchanged
+const NO_GENUINE_MARKERS = "NO_GENUINE_MARKERS";
 
-PI! comments (change requests):
-- Understand the request and implement the corresponding code changes
-- Remove or update the comment once addressed`;
+type ModeName = string;
 
-const OUTPUT_FORMAT_FOOTER = `Output format:
-- Group by file path
-- For each item include:
-  - marker type (PI? / PI!)
-  - line numbers and full context for each marker type comment
-  - action taken (answer given, or change implemented)
-  - marker action (removed or kept)
-- End with a summary of all changes made and any unresolved blockers`;
+type ModeSpec = {
+    provider?: string;
+    modelId?: string;
+    thinkingLevel?: string;
+};
+
+type ModesFile = {
+    version: 1;
+    currentMode: ModeName;
+    modes: Record<ModeName, ModeSpec>;
+};
+
+const RUSH_MODE = "rush";
+
+function getProjectModesPath(cwd: string): string {
+    return join(cwd, ".pi", "modes.json");
+}
+
+function getGlobalModesPath(): string {
+    return join(getAgentDir(), "modes.json");
+}
+
+function loadRushModeSpec(cwd: string): ModeSpec | null {
+    const candidates = [getProjectModesPath(cwd), getGlobalModesPath()];
+    for (const p of candidates) {
+        if (!existsSync(p)) continue;
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(readFileSync(p, "utf8"));
+        } catch {
+            continue;
+        }
+        const modes =
+            parsed && typeof parsed === "object"
+                ? (parsed as { modes?: unknown }).modes
+                : undefined;
+        if (!modes || typeof modes !== "object") continue;
+        const spec = (modes as Record<string, unknown>)[RUSH_MODE];
+        if (!spec || typeof spec !== "object") continue;
+        const obj = spec as Record<string, unknown>;
+        const provider =
+            typeof obj.provider === "string" ? obj.provider : undefined;
+        const modelId =
+            typeof obj.modelId === "string" ? obj.modelId : undefined;
+        const thinkingLevel =
+            typeof obj.thinkingLevel === "string"
+                ? obj.thinkingLevel
+                : undefined;
+        if (!provider || !modelId) continue;
+        return { provider, modelId, thinkingLevel };
+    }
+    return null;
+}
 
 function extractText(response: Awaited<ReturnType<typeof complete>>): string {
     return response.content
@@ -110,10 +155,20 @@ export default function (pi: ExtensionAPI) {
             return;
         }
 
-        // 2. Resolve model and auth.
-        const model = ctx.model;
+        // 2. Resolve the rush mode model and auth.
+        const rushSpec = loadRushModeSpec(ctx.cwd);
+        if (!rushSpec) {
+            return fail(`No '${RUSH_MODE}' mode in modes.json`);
+        }
+
+        const model = ctx.modelRegistry.find(
+            rushSpec.provider!,
+            rushSpec.modelId!,
+        );
         if (!model) {
-            return fail("No model selected");
+            return fail(
+                `Mode '${RUSH_MODE}' references unknown model ${rushSpec.provider}/${rushSpec.modelId}`,
+            );
         }
 
         const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
@@ -121,6 +176,19 @@ export default function (pi: ExtensionAPI) {
             return fail(`Auth failed: ${auth.error}`);
         }
         const { apiKey, headers } = auth;
+
+        const thinkingLevels: readonly ThinkingLevel[] = [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+        ];
+        const reasoning: ThinkingLevel | undefined =
+            rushSpec.thinkingLevel &&
+            thinkingLevels.includes(rushSpec.thinkingLevel as ThinkingLevel)
+                ? (rushSpec.thinkingLevel as ThinkingLevel)
+                : undefined;
 
         // 3. Format markers with an independent LLM call.
         const describe = async (signal?: AbortSignal): Promise<string | null> => {
@@ -130,7 +198,7 @@ export default function (pi: ExtensionAPI) {
                 timestamp: Date.now(),
             };
 
-            const response = await complete(
+            const response = await completeSimple(
                 model,
                 {
                     systemPrompt: SYSTEM_PROMPT,
@@ -140,6 +208,7 @@ export default function (pi: ExtensionAPI) {
                     apiKey,
                     headers,
                     signal,
+                    ...(reasoning ? { reasoning } : {}),
                 },
             );
 
@@ -160,6 +229,10 @@ export default function (pi: ExtensionAPI) {
             const formatted = await describe();
             if (!formatted) {
                 throw new Error("Empty inline result");
+            }
+            if (formatted === NO_GENUINE_MARKERS) {
+                process.stdout.write("No genuine markers (all matches are docs)\n");
+                return;
             }
             process.stdout.write(`${formatted}\n`);
             return;
@@ -198,7 +271,12 @@ export default function (pi: ExtensionAPI) {
             return;
         }
 
-        const content = `${FRAMING_HEADER}\n\n${formatted}\n\n${OUTPUT_FORMAT_FOOTER}`;
+        if (formatted === NO_GENUINE_MARKERS) {
+            ctx.ui.notify("No genuine markers (all matches are docs)", "info");
+            return;
+        }
+
+        const content = `${FRAMING_HEADER}\n\n${formatted}`;
         pi.sendMessage(
             { customType: "inline", content, display: true },
             { triggerTurn: true },
