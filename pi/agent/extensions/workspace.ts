@@ -353,10 +353,10 @@ function loadRushModeSpec(cwd: string): ModeSpec | null {
 
 // ─── LLM Status Analysis ─────────────────────────────────────────
 
-const STATUS_SYSTEM_PROMPT = `You are a workspace status analyzer. Given terminal pane output from a coding workspace, provide a brief summary in Simplified Chinese:
+const STATUS_SYSTEM_PROMPT = `You are a workspace status analyzer. Given terminal pane output from a coding workspace:
 
-1. Describe the most recent command and its result status (success, failure, still running, or idle).
-2. Show the relevant log snippet inside a markdown code block (\`\`\`). If there's an error, extract ~10 lines of context around it. Otherwise show the last 5-10 lines. Do NOT truncate or abbreviate the log with "..." — show the lines in full.
+1. Identify the last executed command and briefly describe what happened in Simplified Chinese — what it did, whether it succeeded or failed, and any notable output.
+2. Show the last command and its output inside a markdown code block (\`\`\`). If the output is 15 lines or fewer, show it in full. If it exceeds 15 lines, extract only the key content (must include the command line and the final result), keeping the snippet within 15 lines. Do NOT truncate with "..." — show selected lines in full.
 
 Keep response under 200 words. Be direct, no filler.`;
 
