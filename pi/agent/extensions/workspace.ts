@@ -356,28 +356,30 @@ function loadRushModeSpec(cwd: string): ModeSpec | null {
 const STATUS_SYSTEM_PROMPT = `You are a workspace status analyzer. Given terminal pane output from a coding workspace, provide a brief summary in Simplified Chinese:
 
 1. Describe the most recent command and its result status (success, failure, still running, or idle).
-2. If there's an error, quote the exact message and ~5 lines of context. Otherwise show the last 5-10 lines.
+2. Show the relevant log snippet inside a markdown code block (\`\`\`). If there's an error, extract ~10 lines of context around it. Otherwise show the last 5-10 lines. Do NOT truncate or abbreviate the log with "..." — show the lines in full.
 
-Keep response under 150 words. Be direct, no filler.`;
+Keep response under 200 words. Be direct, no filler.`;
+
+type AnalysisResult = { analysis: string } | { error: string };
 
 async function analyzeStatus(
 	pi: ExtensionAPI,
 	ctx: ExtensionCommandContext,
 	paneOutput: string,
-): Promise<string | null> {
+): Promise<AnalysisResult> {
 	const rushSpec = loadRushModeSpec(ctx.cwd);
 	if (!rushSpec) {
-		return null;
+		return { error: "No rush mode configured in modes.json." };
 	}
 
 	const model = ctx.modelRegistry.find(rushSpec.provider!, rushSpec.modelId!);
 	if (!model) {
-		return null;
+		return { error: `Rush model ${rushSpec.provider}/${rushSpec.modelId} not found in registry.` };
 	}
 
 	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
 	if (!auth.ok) {
-		return null;
+		return { error: `API key missing for provider ${rushSpec.provider}.` };
 	}
 
 	const thinkingLevels: readonly ThinkingLevel[] = ["minimal", "low", "medium", "high", "xhigh"];
@@ -406,11 +408,12 @@ async function analyzeStatus(
 		},
 	);
 
-	return response.content
+	const text = response.content
 		.filter((c): c is { type: "text"; text: string } => c.type === "text")
 		.map((c) => c.text)
 		.join("\n")
 		.trim();
+	return { analysis: text };
 }
 
 // ─── Session Management ───────────────────────────────────────────
@@ -663,9 +666,9 @@ export default function (pi: ExtensionAPI): void {
 
 			ctx.ui.setWidget("ws-status", buildWidget([`Analyzing status for "${name}"...`]), { placement: "aboveEditor" });
 
-			let analysis: string | null = null;
+			let result: AnalysisResult;
 			try {
-				analysis = await analyzeStatus(pi, ctx, paneOutput);
+				result = await analyzeStatus(pi, ctx, paneOutput);
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
 				ctx.ui.setWidget("ws-status", undefined);
@@ -673,15 +676,15 @@ export default function (pi: ExtensionAPI): void {
 				return;
 			}
 
-			if (analysis) {
-				const lines = analysis.split("\n");
+			if ("analysis" in result) {
+				const lines = result.analysis.split("\n");
 				ctx.ui.setWidget("ws-status", buildWidget(lines, monitorCmd), { placement: "aboveEditor" });
 			} else {
 				ctx.ui.setWidget("ws-status", undefined);
 				const lines = paneOutput.trim().split("\n");
 				const tail = lines.slice(-15).join("\n");
 				ctx.ui.notify(
-					`No rush mode configured in modes.json. Raw output for "${name}":\n${tail}`,
+					`${result.error} Raw output for "${name}":\n${tail}`,
 					"warning",
 				);
 			}
