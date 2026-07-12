@@ -294,8 +294,6 @@ A **branch-workspace** is an isolated execution environment bound to a single br
 - a **\`git worktree\`**: a writable, branch-scoped filesystem where the worker agent edits code without disturbing the main checkout.
 - a **\`tmux\` session**: an observable, persistent execution environment for that branch. The pane is shared — the worker agent runs implementation commands there, and the dispatcher agent runs observable tasks (tests, debugging, runtime checks) there directly. The user or dispatcher can attach to watch either.
 
-Each branch-workspace is identified by \`<name>\`. The git branch name and the tmux session name both equal \`<name>\`. The two components share this identity and must be managed together. This skill owns their joint lifecycle.
-
 ## Role Boundaries
 
 The dispatcher agent owns the branch-workspace lifecycle and all coordination. The tmux pane is a shared execution environment — both agents may run commands there, but only the worker agent may write files:
@@ -307,7 +305,7 @@ The dispatcher agent owns the branch-workspace lifecycle and all coordination. T
 
 The worker agent performs implementation work inside the branch-workspace. It receives a self-contained task document and runs to completion.
 
-\`worktree.sh\` owns the git worktree side. tmux operations must follow the tmux SKILL. \`<name>\` always means the complete branch-workspace identifier and must be matched exactly; never fuzzy-match or shorten it.
+tmux operations must follow the tmux SKILL.
 
 ## Task Execution
 
@@ -348,7 +346,7 @@ async function discoverPaneTarget(
 	const result = await pi.exec("tmux", [
 		"-S", socket,
 		"list-panes", "-s", "-t", name,
-		"-F", "#{pane_id}",
+		"-F", "#{session_name}:#{window_index}.#{pane_index}",
 	]);
 	if (result.code !== 0) return null;
 	const first = result.stdout.trim().split("\n")[0]?.trim();
@@ -374,7 +372,7 @@ function isPaneIdle(output: string): boolean {
 	const lines = output.trim().split("\n").filter((l) => l.trim().length > 0);
 	if (lines.length === 0) return true;
 	const last = lines[lines.length - 1];
-	return /^[\$%>❯]\s*$/.test(last);
+	return /[\$%>❯]\s*$/.test(last);
 }
 
 // ─── Rush Mode Resolution ─────────────────────────────────────────
@@ -897,19 +895,23 @@ export default function (pi: ExtensionAPI): void {
 				return;
 			}
 
-			const headerParts = [
-				`[branch-workspace task]`,
+			const headerLines = [
+				"[branch-workspace]",
 				`name: ${name}`,
+				`branch: ${name}`,
 				`worktreePath: ${ws.worktreePath}`,
 				`socket: ${socket}`,
+				`session: ${name}`,
 				`paneTarget: ${paneTarget}`,
+				"",
+				"note: Verified: state=active, socket resolved, pane=idle. Skip re-checks.",
 			];
-			if (chooseModel) headerParts.push("choose-model: yes");
+			if (chooseModel) headerLines.push("choose-model: yes");
 
 			const content = [
-				headerParts.join("\n"),
+				headerLines.join("\n"),
+				`[Task]\n${task}`,
 				TASK_SKILL_CONTEXT,
-				`Task:\n${task}`,
 			].join("\n\n---\n\n");
 
 			pi.sendMessage(
