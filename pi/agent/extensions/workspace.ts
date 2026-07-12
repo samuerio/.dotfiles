@@ -904,7 +904,7 @@ export default function (pi: ExtensionAPI): void {
 				`session: ${name}`,
 				`paneTarget: ${paneTarget}`,
 				"",
-				"note: Verified: state=active, socket resolved, pane=idle. Skip re-checks.",
+				"note: DO NOT verify worktree, session, or pane — all pre-validated.",
 			];
 			if (chooseModel) headerLines.push("choose-model: yes");
 
