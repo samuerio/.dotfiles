@@ -1,4 +1,4 @@
-import { completeSimple, type ThinkingLevel, type UserMessage } from "@earendil-works/pi-ai";
+import { completeSimple, type UserMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Container, Text } from "@mariozechner/pi-tui";
@@ -382,12 +382,6 @@ async function analyzeStatus(
 		return { error: `API key missing for provider ${rushSpec.provider}.` };
 	}
 
-	const thinkingLevels: readonly ThinkingLevel[] = ["minimal", "low", "medium", "high", "xhigh"];
-	const reasoning: ThinkingLevel | undefined =
-		rushSpec.thinkingLevel && thinkingLevels.includes(rushSpec.thinkingLevel as ThinkingLevel)
-			? (rushSpec.thinkingLevel as ThinkingLevel)
-			: undefined;
-
 	const userMessage: UserMessage = {
 		role: "user",
 		content: [{ type: "text", text: paneOutput }],
@@ -404,7 +398,7 @@ async function analyzeStatus(
 			apiKey: auth.apiKey,
 			headers: auth.headers,
 			signal: ctx.signal,
-			...(reasoning ? { reasoning } : {}),
+			reasoning: "off",
 		},
 	);
 
