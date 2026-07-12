@@ -142,12 +142,12 @@ async function selectWorkspace(
 	return workspaces.find((ws) => ws.name === name) ?? null;
 }
 
-type WorkspaceAction = "status" | "vscode" | "cancel" | "close";
+type WorkspaceAction = "open" | "status" | "vscode" | "cancel" | "close";
 
 function getAvailableActions(status: WorkspaceStatus): WorkspaceAction[] {
 	switch (status) {
-		case "active": return ["status", "vscode", "cancel", "close"];
-		case "idle": return ["vscode", "close"];
+		case "active": return ["open", "status", "vscode", "cancel", "close"];
+		case "idle": return ["open", "vscode", "close"];
 		case "orphan": return ["close"];
 		default: return [];
 	}
@@ -460,23 +460,22 @@ export default function (pi: ExtensionAPI): void {
 	pi.registerCommand("ws-open", {
 		description: "Open a branch-workspace (git worktree + tmux session). Usage: /ws-open [name]",
 		handler: async (args, ctx) => {
-			let name = args.trim();
+			const name = args.trim();
 			if (!name) {
-				const branchResult = await pi.exec("git", ["branch", "--format=%(refname:short)"]);
-				if (branchResult.code !== 0) {
-					ctx.ui.notify("Failed to list git branches.", "error");
+				const selected = await selectWorkspace(pi, ctx, "Select workspace", ctx.cwd);
+				if (!selected) return;
+
+				const actions = getAvailableActions(selected.status);
+				if (actions.length === 0) {
+					ctx.ui.notify(`Workspace "${selected.name}" has no available actions.`, "error");
 					return;
 				}
-				const headResult = await pi.exec("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
-				const currentBranch = headResult.code === 0 ? headResult.stdout.trim() : "";
-				const branches = branchResult.stdout.trim().split("\n").filter((b) => b && b !== currentBranch);
-				if (branches.length === 0) {
-					ctx.ui.notify("No other branches found.", "error");
-					return;
-				}
-				const choice = await ctx.ui.select("Select branch to open", branches);
-				if (!choice) return;
-				name = choice;
+
+				const action = await ctx.ui.select(`Action for "${selected.name}"`, actions) as WorkspaceAction | undefined;
+				if (!action) return;
+
+				ctx.ui.pasteToEditor(`/ws-${action} ${selected.name}`);
+				return;
 			}
 
 			const result = await pi.exec("bash", [WORKTREE_SH, "open", name, "--json"]);
