@@ -121,16 +121,24 @@ async function selectWorkspace(
 	pi: ExtensionAPI,
 	ctx: ExtensionCommandContext,
 	title: string,
+	cwd?: string,
 ): Promise<ResolvedWorkspace | null> {
 	const workspaces = await listAllWorkspaces(pi);
 	if (workspaces.length === 0) {
 		ctx.ui.notify("No workspaces available.", "error");
 		return null;
 	}
-	const options = workspaces.map((ws) => `${ws.name} [${ws.status}]`);
+	const currentName = cwd ? (await readCurrentState(cwd))?.name : undefined;
+	const options = workspaces.map((ws) => {
+		const marks: string[] = [];
+		if (ws.dirty) marks.push("dirty");
+		if (ws.name === currentName) marks.push("current");
+		const mark = marks.length > 0 ? ` (${marks.join(", ")})` : "";
+		return `${ws.name} [${ws.status}]${mark}`;
+	});
 	const choice = await ctx.ui.select(title, options);
 	if (!choice) return null;
-	const name = choice.replace(/ \[.*\]$/, "");
+	const name = choice.replace(/ \[.*\]$/, "").replace(/ \(.*\)$/, "");
 	return workspaces.find((ws) => ws.name === name) ?? null;
 }
 
@@ -160,7 +168,7 @@ async function resolveNameOrSelect(
 		if (state) return state;
 	}
 
-	return selectWorkspace(pi, ctx, "Select workspace");
+	return selectWorkspace(pi, ctx, "Select workspace", cwd);
 }
 
 // ─── Script Output Types ──────────────────────────────────────────
@@ -478,14 +486,10 @@ export default function (pi: ExtensionAPI): void {
 
 			await writeCurrentState(ctx.cwd, name, output.worktreePath);
 
-			ctx.ui.notify(
-				`Workspace "${name}" opened. Worktree: ${output.worktreePath}`,
-				"info",
-			);
 			const monitorCmd = `tmux -S ${socket} attach -t ${name}`;
 			const copied = await copyToClipboard(pi, monitorCmd);
 			ctx.ui.notify(
-				`Monitor: ${monitorCmd}${copied ? " (copied)" : ""}`,
+				`Workspace "${name}" opened. Worktree: ${output.worktreePath}\nMonitor: ${monitorCmd}${copied ? " (copied)" : ""}`,
 				"info",
 			);
 		},
@@ -495,24 +499,8 @@ export default function (pi: ExtensionAPI): void {
 	pi.registerCommand("ws-list", {
 		description: "List all branch-workspaces and optionally run an action.",
 		handler: async (_args, ctx) => {
-			const workspaces = await listAllWorkspaces(pi);
-
-			if (workspaces.length === 0) {
-				ctx.ui.notify("No branch-workspaces found.", "info");
-				return;
-			}
-
-			const currentState = await readCurrentState(ctx.cwd);
-			const lines: string[] = [];
-			for (const ws of workspaces) {
-				const dirtyMark = ws.dirty ? " (dirty)" : "";
-				const currentMark = currentState?.name === ws.name ? " (current)" : "";
-				lines.push(`  ${ws.name} [${ws.status}]${dirtyMark}${currentMark}`);
-			}
-			ctx.ui.notify(`Branch-workspaces:\n${lines.join("\n")}`, "info");
-
 			// Select workspace
-			const selected = await selectWorkspace(pi, ctx, "Select workspace");
+			const selected = await selectWorkspace(pi, ctx, "Select workspace", ctx.cwd);
 			if (!selected) return;
 
 			// Select action based on status
@@ -673,10 +661,12 @@ export default function (pi: ExtensionAPI): void {
 				ctx.ui.setWidget("ws-status", buildWidget(lines, monitorCmd), { placement: "aboveEditor" });
 			} else {
 				ctx.ui.setWidget("ws-status", undefined);
-				ctx.ui.notify(`No rush mode configured in modes.json. Showing raw output.`, "warning");
 				const lines = paneOutput.trim().split("\n");
 				const tail = lines.slice(-15).join("\n");
-				ctx.ui.notify(`Status for "${name}" (raw output):\n${tail}`, "info");
+				ctx.ui.notify(
+					`No rush mode configured in modes.json. Raw output for "${name}":\n${tail}`,
+					"warning",
+				);
 			}
 		},
 	});
