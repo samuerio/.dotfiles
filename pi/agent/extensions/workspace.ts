@@ -435,9 +435,27 @@ async function ensureSession(
 	return result.code === 0;
 }
 
+// ─── Status Bar ────────────────────────────────────────────────────
+
+type ExtensionUI = ExtensionCommandContext["ui"];
+
+function updateWorkspaceStatus(ui: ExtensionUI, name: string | undefined): void {
+	if (!name) {
+		ui.setStatus("branch-workspace", undefined);
+		return;
+	}
+	const label = ui.theme.fg("accent", "branch-workspace");
+	ui.setStatus("branch-workspace", `${label} ${name}`);
+}
+
 // ─── Commands ─────────────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI): void {
+	pi.on("session_start", async (_event, ctx) => {
+		const state = await readCurrentState(ctx.cwd);
+		if (state) updateWorkspaceStatus(ctx.ui, state.name);
+	});
+
 	// ── /ws-open <name> ──
 	pi.registerCommand("ws-open", {
 		description: "Open a branch-workspace (git worktree + tmux session). Usage: /ws-open [name]",
@@ -485,6 +503,7 @@ export default function (pi: ExtensionAPI): void {
 			}
 
 			await writeCurrentState(ctx.cwd, name, output.worktreePath);
+			updateWorkspaceStatus(ctx.ui, name);
 
 			const monitorCmd = `tmux -S ${socket} attach -t ${name}`;
 			const copied = await copyToClipboard(pi, monitorCmd);
@@ -588,6 +607,7 @@ export default function (pi: ExtensionAPI): void {
 			}
 
 			await clearCurrentState(ctx.cwd, name);
+			updateWorkspaceStatus(ctx.ui, undefined);
 
 			let msg = `Workspace "${name}" closed.`;
 			if (cleanOutput && cleanOutput.leftoverCount > 0) {
