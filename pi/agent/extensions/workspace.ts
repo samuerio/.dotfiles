@@ -153,15 +153,22 @@ function getAvailableActions(status: WorkspaceStatus): WorkspaceAction[] {
 	}
 }
 
+function parseBranchFlag(args: string): { name: string | undefined; rest: string } {
+	const match = args.match(/(?:^|\s)(?:-b|--branch-workspace)\s+(\S+)/);
+	if (!match) return { name: undefined, rest: args };
+	const name = match[1];
+	const rest = args.replace(match[0], "").trim();
+	return { name, rest };
+}
+
 async function resolveNameOrSelect(
 	pi: ExtensionAPI,
-	args: string,
+	name: string | undefined,
 	cwd: string,
 	ctx: ExtensionCommandContext,
 	selectFlag: boolean,
 ): Promise<{ name: string; worktreePath?: string } | null> {
-	const nameArgs = args.trim();
-	if (nameArgs && !selectFlag) return { name: nameArgs };
+	if (name && !selectFlag) return { name };
 
 	if (!selectFlag) {
 		const state = await readCurrentState(cwd);
@@ -277,6 +284,59 @@ async function resolveWorkspaceState(
 		dirty: worktree?.dirty,
 	};
 }
+
+// ─── Task SKILL Context ───────────────────────────────────────────
+
+const TASK_SKILL_CONTEXT = `## Concept
+
+A **branch-workspace** is an isolated execution environment bound to a single branch. It is composed of two coupled components:
+
+- a **\`git worktree\`**: a writable, branch-scoped filesystem where the worker agent edits code without disturbing the main checkout.
+- a **\`tmux\` session**: an observable, persistent execution environment for that branch. The pane is shared — the worker agent runs implementation commands there, and the dispatcher agent runs observable tasks (tests, debugging, runtime checks) there directly. The user or dispatcher can attach to watch either.
+
+Each branch-workspace is identified by \`<name>\`. The git branch name and the tmux session name both equal \`<name>\`. The two components share this identity and must be managed together. This skill owns their joint lifecycle.
+
+## Role Boundaries
+
+The dispatcher agent owns the branch-workspace lifecycle and all coordination. The tmux pane is a shared execution environment — both agents may run commands there, but only the worker agent may write files:
+
+- **Explore freely**: the dispatcher may read and inspect files in the branch-workspace's worktree at any point — to refine a task with the user, to review results, or to understand context. Use bash or read-only tools directly for speed and efficiency.
+- **No direct writes**: the dispatcher must never write to or modify files in the branch-workspace's worktree, even for trivial changes. All file modifications go through the worker agent.
+- **Observable tasks**: running commands, running tests, and debugging in the worktree are the dispatcher's responsibility because it is the interaction layer with the user. The dispatcher may use either bash or the branch-workspace's tmux pane to execute these tasks.
+- **Review after completion**: after the worker agent signals completion, the dispatcher inspects the result and reports back to the user.
+
+The worker agent performs implementation work inside the branch-workspace. It receives a self-contained task document and runs to completion.
+
+\`worktree.sh\` owns the git worktree side. tmux operations must follow the tmux SKILL. \`<name>\` always means the complete branch-workspace identifier and must be matched exactly; never fuzzy-match or shorten it.
+
+## Task Execution
+
+2. **Task Triage (Intent Classification)**: Before dispatching, evaluate the complexity and clarity of the \`<task>\`:
+   - **Fast Path (Direct Dispatch)**: If the task is trivial, unambiguous, and self-contained (e.g., "fix typo in README", "bump version to 2.0", "add a specific unit test for function X"), **skip the interactive Q&A of \`refine-task\`**. The dispatcher should internally draft a clear, self-contained task description for the worker and proceed directly to step 3. Do not ask the user for confirmation.
+   - **Standard Path (Refine & Confirm)**: If the task is ambiguous, broad, involves multiple files, or requires architectural decisions (e.g., "refactor the auth module", "implement a new caching layer"), strictly apply the \`refine-task\` SKILL. The dispatcher must proactively explore the worktree to answer questions from context. If critical information is still missing, ask the user targeted questions. **Wait for explicit user confirmation** of the refined task before proceeding to step 3.
+
+   After \`refine-task\` completes (including any clarifying exchange with the user), resume from step 3 using the refined task text as \`<task>\`. The dispatcher reviews the worker's output once the worker signals completion.
+3. The dispatcher must choose how to route the work, but it must not implement file changes itself. If the task output is expected to be code, docs, tests, review comments, or any other file modification, send it to the worker path.
+4. Determine how to dispatch:
+   - **worker path** (default for any task whose output is file changes — writing code, docs, tests, or review comments):
+     1. Construct a \`pi -p\` command following the \`pi-headless\` SKILL **Print Mode**. Use \`--no-session\`.
+     2. Write the refined task text to \`/tmp/task/<YYYY-MM-DD-HHMMSS>-<slug>.md\` (create the directory with \`mkdir -p /tmp/task\` if needed), where \`<slug>\` is a short meaningful kebab-case English phrase derived from the task content. Write the refined task text in the same language as the original \`<task>\` input.
+     3. **Append the Structured Handoff Instruction** to the task text:
+        \`\`\`
+        When you have completed the task, you must do the following two things in order:
+        1. Write a concise, structured summary of your work to \`/tmp/task/<YYYY-MM-DD-HHMMSS>-<slug>.result.md\`. The summary must include:
+           - **Files Modified**: A list of files you created or changed.
+           - **Key Changes**: A brief description of the core logic or implementation details.
+           - **Issues/Blockers**: Any unexpected problems encountered or things the user should review.
+        2. Print the exact marker \`DONE:<YYYY-MM-DD-HHMMSS>-<slug>\` on a line by itself in the terminal.
+        \`\`\`
+        *(Note: Ensure the \`<YYYY-MM-DD-HHMMSS>-<slug>\` in the instruction exactly matches the filename stem).*
+     4. Pass the task file to pi via \`@/tmp/task/<filename>.md\`. If \`choose-model: yes\` was given, follow the \`pi-headless\` SKILL model-selection flow; otherwise use defaults.
+     5. Send the command to the tmux pane via the tmux SKILL **Sending input safely** and use **Watching output** (poll mode) with pattern \`DONE:<YYYY-MM-DD-HHMMSS>-<slug>\` to wait for completion.
+     6. **Post-Execution Review**: Once the \`DONE\` marker is detected, **do not parse the raw tmux pane output**. Instead, read the content of \`/tmp/task/<YYYY-MM-DD-HHMMSS>-<slug>.result.md\` to understand the worker's output. Present this structured summary to the user.
+   - **dispatcher path** (for tasks requiring observability — running tests, executing commands, checking runtime errors): execute the command using either bash or the branch-workspace's tmux pane, capturing the output for the user.
+
+   If a task requires both (e.g. run tests then fix failures, or fix code then verify with a command), handle the observable step via the dispatcher and the file-change step via the worker — in whichever order the task demands. Pass findings between steps in the task doc.`;
 
 // ─── tmux Helpers ─────────────────────────────────────────────────
 
@@ -451,11 +511,11 @@ export default function (pi: ExtensionAPI): void {
 		if (state) updateWorkspaceStatus(ctx.ui, state.name);
 	});
 
-	// ── /ws-open <name> ──
+	// ── /ws-open [-b name] ──
 	pi.registerCommand("ws-open", {
-		description: "Open a branch-workspace (git worktree + tmux session). Usage: /ws-open [name]",
+		description: "Open a branch-workspace (git worktree + tmux session). Usage: /ws-open [-b name]",
 		handler: async (args, ctx) => {
-			const name = args.trim();
+			const { name } = parseBranchFlag(args);
 			if (!name) {
 				const selected = await selectWorkspace(pi, ctx, "Select workspace", ctx.cwd);
 				if (!selected) return;
@@ -469,7 +529,7 @@ export default function (pi: ExtensionAPI): void {
 				const action = await ctx.ui.select(`Action for "${selected.name}"`, actions) as WorkspaceAction | undefined;
 				if (!action) return;
 
-				ctx.ui.pasteToEditor(`/ws-${action} ${selected.name}`);
+				ctx.ui.pasteToEditor(`/ws-${action} -b ${selected.name}`);
 				return;
 			}
 
@@ -526,19 +586,19 @@ export default function (pi: ExtensionAPI): void {
 			const action = await ctx.ui.select(`Action for "${selected.name}"`, actions) as WorkspaceAction | undefined;
 			if (!action) return;
 
-			const cmd = `/ws-${action} ${selected.name}`;
+			const cmd = `/ws-${action} -b ${selected.name}`;
 			ctx.ui.pasteToEditor(cmd);
 		},
 	});
 
-	// ── /ws-close [name] [-s] ──
+	// ── /ws-close [-b name] [-s] ──
 	pi.registerCommand("ws-close", {
-		description: "Close a branch-workspace (remove worktree + kill tmux session). Usage: /ws-close [name] [-s]",
+		description: "Close a branch-workspace (remove worktree + kill tmux session). Usage: /ws-close [-b name] [-s]",
 		handler: async (args, ctx) => {
 			const selectFlag = /(^|\s)-s\b/.test(args);
-			const nameArgs = args.replace(/(^|\s)-s\b/g, "").trim();
+			const { name: branchName, rest } = parseBranchFlag(args.replace(/(^|\s)-s\b/g, ""));
 
-			const resolved = await resolveNameOrSelect(pi, nameArgs, ctx.cwd, ctx, selectFlag);
+			const resolved = await resolveNameOrSelect(pi, branchName, ctx.cwd, ctx, selectFlag);
 			if (!resolved) return;
 			const { name } = resolved;
 
@@ -611,15 +671,15 @@ export default function (pi: ExtensionAPI): void {
 		},
 	});
 
-	// ── /ws-status [name] [-s] [-a|--analyze] ──
+	// ── /ws-status [-b name] [-s] [-a|--analyze] ──
 	pi.registerCommand("ws-status", {
-		description: "Show workspace status. Usage: /ws-status [name] [-s] [-a|--analyze]",
+		description: "Show workspace status. Usage: /ws-status [-b name] [-s] [-a|--analyze]",
 		handler: async (args, ctx) => {
 			const analyze = /(^|\s)(--analyze|-a)\b/.test(args);
 			const selectFlag = /(^|\s)-s\b/.test(args);
-			const nameArgs = args.replace(/(^|\s)(--analyze|-a)\b/g, "").replace(/(^|\s)-s\b/g, "").trim();
+			const { name: branchName } = parseBranchFlag(args.replace(/(^|\s)(--analyze|-a)\b/g, "").replace(/(^|\s)-s\b/g, ""));
 
-			const resolved = await resolveNameOrSelect(pi, nameArgs, ctx.cwd, ctx, selectFlag);
+			const resolved = await resolveNameOrSelect(pi, branchName, ctx.cwd, ctx, selectFlag);
 			if (!resolved) return;
 			const { name } = resolved;
 
@@ -685,14 +745,14 @@ export default function (pi: ExtensionAPI): void {
 		},
 	});
 
-	// ── /ws-vscode [name] [-s] ──
+	// ── /ws-vscode [-b name] [-s] ──
 	pi.registerCommand("ws-vscode", {
-		description: "Open a branch-workspace in VS Code. Usage: /ws-vscode [name] [-s]",
+		description: "Open a branch-workspace in VS Code. Usage: /ws-vscode [-b name] [-s]",
 		handler: async (args, ctx) => {
 			const selectFlag = /(^|\s)-s\b/.test(args);
-			const nameArgs = args.replace(/(^|\s)-s\b/g, "").trim();
+			const { name: branchName } = parseBranchFlag(args.replace(/(^|\s)-s\b/g, ""));
 
-			const resolved = await resolveNameOrSelect(pi, nameArgs, ctx.cwd, ctx, selectFlag);
+			const resolved = await resolveNameOrSelect(pi, branchName, ctx.cwd, ctx, selectFlag);
 			if (!resolved) return;
 			const { name, worktreePath: stateWorktreePath } = resolved;
 
@@ -716,14 +776,14 @@ export default function (pi: ExtensionAPI): void {
 		},
 	});
 
-	// ── /ws-cancel [name] [-s] ──
+	// ── /ws-cancel [-b name] [-s] ──
 	pi.registerCommand("ws-cancel", {
-		description: "Interrupt the running process in a workspace's tmux pane. Usage: /ws-cancel [name] [-s]",
+		description: "Interrupt the running process in a workspace's tmux pane. Usage: /ws-cancel [-b name] [-s]",
 		handler: async (args, ctx) => {
 			const selectFlag = /(^|\s)-s\b/.test(args);
-			const nameArgs = args.replace(/(^|\s)-s\b/g, "").trim();
+			const { name: branchName } = parseBranchFlag(args.replace(/(^|\s)-s\b/g, ""));
 
-			const resolved = await resolveNameOrSelect(pi, nameArgs, ctx.cwd, ctx, selectFlag);
+			const resolved = await resolveNameOrSelect(pi, branchName, ctx.cwd, ctx, selectFlag);
 			if (!resolved) return;
 			const { name } = resolved;
 
@@ -783,6 +843,79 @@ export default function (pi: ExtensionAPI): void {
 					"warning",
 				);
 			}
+		},
+	});
+
+	// ── /ws-task [-b name] [-m|--choose-model] <task> ──
+	pi.registerCommand("ws-task", {
+		description: "Dispatch a task to a branch-workspace. Usage: /ws-task [-b name] [-m|--choose-model] <task>",
+		handler: async (args, ctx) => {
+			const chooseModel = /(^|\s)(-m|--choose-model)\b/.test(args);
+			const { name: branchName, rest: taskArgs } = parseBranchFlag(
+				args.replace(/(^|\s)(-m|--choose-model)\b/g, ""),
+			);
+			const task = taskArgs.trim();
+
+			let name = branchName;
+			if (!name) {
+				const state = await readCurrentState(ctx.cwd);
+				if (state) name = state.name;
+			}
+
+			if (!name) {
+				const selected = await selectWorkspace(pi, ctx, "Select workspace", ctx.cwd);
+				if (!selected) return;
+				name = selected.name;
+			}
+
+			if (!task) {
+				ctx.ui.notify("No task specified.", "error");
+				return;
+			}
+
+			const ws = await resolveWorkspaceState(pi, name);
+			if (ws.status !== "active") {
+				ctx.ui.notify(`Workspace "${name}" is not active (${ws.status}). Task requires a running tmux session.`, "error");
+				return;
+			}
+
+			const socket = await getTmuxSocket(pi);
+			if (!socket) {
+				ctx.ui.notify("Failed to resolve tmux socket.", "error");
+				return;
+			}
+
+			const paneTarget = await discoverPaneTarget(pi, socket, name);
+			if (!paneTarget) {
+				ctx.ui.notify(`No pane found for session "${name}".`, "error");
+				return;
+			}
+
+			const currentOutput = await capturePaneOutput(pi, socket, paneTarget, 20);
+			if (!isPaneIdle(currentOutput)) {
+				ctx.ui.notify(`Pane in "${name}" is busy. Cancel the running process first or wait for it to finish.`, "error");
+				return;
+			}
+
+			const headerParts = [
+				`[branch-workspace task]`,
+				`name: ${name}`,
+				`worktreePath: ${ws.worktreePath}`,
+				`socket: ${socket}`,
+				`paneTarget: ${paneTarget}`,
+			];
+			if (chooseModel) headerParts.push("choose-model: yes");
+
+			const content = [
+				headerParts.join("\n"),
+				TASK_SKILL_CONTEXT,
+				`Task:\n${task}`,
+			].join("\n\n---\n\n");
+
+			pi.sendMessage(
+				{ customType: "branch-workspace-task", content, display: true },
+				{ triggerTurn: true },
+			);
 		},
 	});
 }
