@@ -353,14 +353,12 @@ function loadRushModeSpec(cwd: string): ModeSpec | null {
 
 // ─── LLM Status Analysis ─────────────────────────────────────────
 
-const STATUS_SYSTEM_PROMPT = `You are a workspace status analyzer. Given terminal pane output from a coding workspace, provide a concise structured summary in Simplified Chinese:
+const STATUS_SYSTEM_PROMPT = `You are a workspace status analyzer. Given terminal pane output from a coding workspace:
 
-1. **当前状态**: 当前正在发生什么（例如：运行测试、编译中、空闲、编辑文件）。
-2. **健康检查**: 任何可见的错误、警告或 panic。如有请引用确切的错误信息。
-3. **进度**: 简要进度估计。
-4. **相关片段**: 如有错误，提取约 10 行上下文。否则展示最后 10-15 行。
+1. Provide a brief summary in Simplified Chinese describing the pane's current state — what's running, any errors or warnings, and overall progress. If there's an error, quote the exact message.
+2. Append the most relevant log snippet: if there's an error, extract ~10 lines of context around it; otherwise show the last 10-15 lines.
 
-回复控制在 200 字以内。直接了当，不要废话。`;
+Keep response under 200 words. Be direct, no filler.`;
 
 async function analyzeStatus(
 	pi: ExtensionAPI,
@@ -616,13 +614,13 @@ export default function (pi: ExtensionAPI): void {
 		},
 	});
 
-	// ── /ws-status [name] [-s] [--analyze] ──
+	// ── /ws-status [name] [-s] [-a|--analyze] ──
 	pi.registerCommand("ws-status", {
-		description: "Show workspace status. Usage: /ws-status [name] [-s] [--analyze]",
+		description: "Show workspace status. Usage: /ws-status [name] [-s] [-a|--analyze]",
 		handler: async (args, ctx) => {
-			const analyze = args.includes("--analyze");
+			const analyze = /(^|\s)(--analyze|-a)\b/.test(args);
 			const selectFlag = /(^|\s)-s\b/.test(args);
-			const nameArgs = args.replace(/--analyze/g, "").replace(/(^|\s)-s\b/g, "").trim();
+			const nameArgs = args.replace(/(^|\s)(--analyze|-a)\b/g, "").replace(/(^|\s)-s\b/g, "").trim();
 
 			const resolved = await resolveNameOrSelect(pi, nameArgs, ctx.cwd, ctx, selectFlag);
 			if (!resolved) return;
