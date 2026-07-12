@@ -1,7 +1,5 @@
 [Unit]
 Description=Battery low notify
-After=graphical-session.target
-PartOf=graphical-session.target
 
 [Service]
 Type=simple
@@ -11,4 +9,4 @@ Restart=on-failure
 RestartSec=5
 
 [Install]
-WantedBy=graphical-session.target
+WantedBy=default.target
