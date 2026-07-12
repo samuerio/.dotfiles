@@ -353,12 +353,12 @@ function loadRushModeSpec(cwd: string): ModeSpec | null {
 
 // ─── LLM Status Analysis ─────────────────────────────────────────
 
-const STATUS_SYSTEM_PROMPT = `You are a workspace status analyzer. Given terminal pane output from a coding workspace:
+const STATUS_SYSTEM_PROMPT = `You are a workspace status analyzer. Given terminal pane output from a coding workspace, provide a brief summary in Simplified Chinese:
 
-1. Provide a brief summary in Simplified Chinese describing the pane's current state — what's running, any errors or warnings, and overall progress. If there's an error, quote the exact message.
-2. Append the most relevant log snippet: if there's an error, extract ~10 lines of context around it; otherwise show the last 10-15 lines.
+1. Describe the most recent command and its result status (success, failure, still running, or idle).
+2. If there's an error, quote the exact message and ~5 lines of context. Otherwise show the last 5-10 lines.
 
-Keep response under 200 words. Be direct, no filler.`;
+Keep response under 150 words. Be direct, no filler.`;
 
 async function analyzeStatus(
 	pi: ExtensionAPI,
