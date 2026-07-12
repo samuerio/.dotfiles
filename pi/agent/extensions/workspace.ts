@@ -753,7 +753,7 @@ export default function (pi: ExtensionAPI): void {
 			// Check if already idle
 			const currentOutput = await capturePaneOutput(pi, socket, paneTarget, 20);
 			if (isPaneIdle(currentOutput)) {
-				ctx.ui.notify(`Workspace "${name}" is already idle.`, "info");
+				ctx.ui.notify(`No running process in workspace "${name}".`, "info");
 				return;
 			}
 
@@ -781,7 +781,7 @@ export default function (pi: ExtensionAPI): void {
 			const afterOutput = await capturePaneOutput(pi, socket, paneTarget, 5);
 
 			if (isPaneIdle(afterOutput)) {
-				ctx.ui.notify(`Process in "${name}" interrupted. Workspace is idle.`, "info");
+				ctx.ui.notify(`Process in "${name}" interrupted.`, "info");
 			} else {
 				ctx.ui.notify(
 					`Sent C-c to "${name}". Process may still be terminating; check with /ws-status.`,
