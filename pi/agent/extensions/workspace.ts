@@ -1078,12 +1078,12 @@ export default function (pi: ExtensionAPI): void {
 					.join("")
 					.trim();
 
-				if (!inferredName || !/^[\w-]+\/[\w-]+$/.test(inferredName)) {
-					ctx.ui.notify(`Invalid branch name inferred: "${inferredName}". Use -b <name>.`, "error");
+				if (!inferredName) {
+					ctx.ui.notify(`Failed to infer branch name. Use -b <name>.`, "error");
 					return;
 				}
 
-				name = inferredName;
+				name = inferredName.includes("/") ? inferredName : `feat/${inferredName}`;
 				ctx.ui.notify(`Inferred branch name: ${name}`, "info");
 			}
 
