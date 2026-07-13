@@ -2,7 +2,7 @@ import { completeSimple, type UserMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { getAgentDir, convertToLlm, serializeConversation } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { Container, Text } from "@mariozechner/pi-tui";
+import { Container, Text } from "@earendil-works/pi-tui";
 import { existsSync, readFileSync, promises as fs } from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";

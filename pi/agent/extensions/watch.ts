@@ -4,7 +4,7 @@
 import {
     type ExtensionAPI,
     SessionManager,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import { watch } from "node:fs";
 import process from "node:process";
 
