@@ -613,22 +613,11 @@ export default function (pi: ExtensionAPI): void {
 	pi.registerCommand("ws-open", {
 		description: "Open a branch-workspace (git worktree + tmux session). Usage: /ws-open [-b name]",
 		handler: async (args, ctx) => {
-			const { name } = parseBranchFlag(args);
+			let { name } = parseBranchFlag(args);
 			if (!name) {
 				const selected = await selectWorkspace(pi, ctx, "Select workspace", ctx.cwd);
 				if (!selected) return;
-
-				const actions = getAvailableActions(selected.status);
-				if (actions.length === 0) {
-					ctx.ui.notify(`Workspace "${selected.name}" has no available actions.`, "error");
-					return;
-				}
-
-				const action = await ctx.ui.select(`Action for "${selected.name}"`, actions) as WorkspaceAction | undefined;
-				if (!action) return;
-
-				ctx.ui.pasteToEditor(`/ws-${action} -b ${selected.name}`);
-				return;
+				name = selected.name;
 			}
 
 			const result = await pi.exec("bash", [WORKTREE_SH, "open", name, "--json"]);
