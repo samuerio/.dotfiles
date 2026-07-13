@@ -169,7 +169,7 @@ async function resolveNameOrSelect(
 	ctx: ExtensionCommandContext,
 	selectFlag: boolean,
 ): Promise<{ name: string; worktreePath?: string } | null> {
-	if (name && !selectFlag) return { name };
+	if (name) return { name };
 
 	if (!selectFlag) {
 		const state = await readCurrentState(cwd);
