@@ -159,6 +159,16 @@ function parseBranchFlag(args: string): { name: string | undefined; rest: string
 	return { name, rest };
 }
 
+function parsePositionalName(args: string, flagPatterns: RegExp[] = []): { name: string | undefined; rest: string } {
+	let stripped = args;
+	for (const re of flagPatterns) {
+		stripped = stripped.replace(re, "");
+	}
+	const tokens = stripped.trim().split(/\s+/).filter(Boolean);
+	if (tokens.length === 0) return { name: undefined, rest: "" };
+	return { name: tokens[0], rest: tokens.slice(1).join(" ") };
+}
+
 async function resolveNameOrSelect(
 	pi: ExtensionAPI,
 	name: string | undefined,
@@ -608,9 +618,9 @@ export default function (pi: ExtensionAPI): void {
 
 	// ── /ws-open [-b name] ──
 	pi.registerCommand("ws-open", {
-		description: "Open a branch-workspace (git worktree + tmux session). Usage: /ws-open [-b name]",
+		description: "Open a branch-workspace (git worktree + tmux session). Usage: /ws-open [name]",
 		handler: async (args, ctx) => {
-			let { name } = parseBranchFlag(args);
+			let { name } = parsePositionalName(args);
 			if (!name) {
 				const selected = await selectWorkspace(pi, ctx, "Select workspace", ctx.cwd);
 				if (!selected) return;
@@ -677,10 +687,10 @@ export default function (pi: ExtensionAPI): void {
 
 	// ── /ws-close [-b name] [-s] ──
 	pi.registerCommand("ws-close", {
-		description: "Close a branch-workspace (remove worktree + kill tmux session). Usage: /ws-close [-b name] [-s]",
+		description: "Close a branch-workspace (remove worktree + kill tmux session). Usage: /ws-close [name] [-s]",
 		handler: async (args, ctx) => {
 			const selectFlag = /(^|\s)-s\b/.test(args);
-			const { name: branchName, rest } = parseBranchFlag(args.replace(/(^|\s)-s\b/g, ""));
+			const { name: branchName, rest } = parsePositionalName(args, [/(^|\s)-s\b/g]);
 
 			const resolved = await resolveNameOrSelect(pi, branchName, ctx.cwd, ctx, selectFlag);
 			if (!resolved) return;
@@ -767,11 +777,11 @@ export default function (pi: ExtensionAPI): void {
 
 	// ── /ws-status [-b name] [-s] [-a|--analyze] ──
 	pi.registerCommand("ws-status", {
-		description: "Show workspace status. Usage: /ws-status [-b name] [-s] [-a|--analyze]",
+		description: "Show workspace status. Usage: /ws-status [name] [-s] [-a|--analyze]",
 		handler: async (args, ctx) => {
 			const analyze = /(^|\s)(--analyze|-a)\b/.test(args);
 			const selectFlag = /(^|\s)-s\b/.test(args);
-			const { name: branchName } = parseBranchFlag(args.replace(/(^|\s)(--analyze|-a)\b/g, "").replace(/(^|\s)-s\b/g, ""));
+			const { name: branchName } = parsePositionalName(args, [/(^|\s)(--analyze|-a)\b/g, /(^|\s)-s\b/g]);
 
 			const resolved = await resolveNameOrSelect(pi, branchName, ctx.cwd, ctx, selectFlag);
 			if (!resolved) return;
@@ -841,10 +851,10 @@ export default function (pi: ExtensionAPI): void {
 
 	// ── /ws-vscode [-b name] [-s] ──
 	pi.registerCommand("ws-vscode", {
-		description: "Open a branch-workspace in VS Code. Usage: /ws-vscode [-b name] [-s]",
+		description: "Open a branch-workspace in VS Code. Usage: /ws-vscode [name] [-s]",
 		handler: async (args, ctx) => {
 			const selectFlag = /(^|\s)-s\b/.test(args);
-			const { name: branchName } = parseBranchFlag(args.replace(/(^|\s)-s\b/g, ""));
+			const { name: branchName } = parsePositionalName(args, [/(^|\s)-s\b/g]);
 
 			const resolved = await resolveNameOrSelect(pi, branchName, ctx.cwd, ctx, selectFlag);
 			if (!resolved) return;
@@ -872,10 +882,10 @@ export default function (pi: ExtensionAPI): void {
 
 	// ── /ws-cancel [-b name] [-s] ──
 	pi.registerCommand("ws-cancel", {
-		description: "Interrupt the running process in a workspace's tmux pane. Usage: /ws-cancel [-b name] [-s]",
+		description: "Interrupt the running process in a workspace's tmux pane. Usage: /ws-cancel [name] [-s]",
 		handler: async (args, ctx) => {
 			const selectFlag = /(^|\s)-s\b/.test(args);
-			const { name: branchName } = parseBranchFlag(args.replace(/(^|\s)-s\b/g, ""));
+			const { name: branchName } = parsePositionalName(args, [/(^|\s)-s\b/g]);
 
 			const resolved = await resolveNameOrSelect(pi, branchName, ctx.cwd, ctx, selectFlag);
 			if (!resolved) return;
