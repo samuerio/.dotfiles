@@ -347,6 +347,8 @@ ${WS_TASK_SKILL_TEXT}`;
 
 const WS_HFI_SKILL_TEXT = `3. Choose the implementation command:
 
+   If \`choose-model: yes\` is present in the header, follow the \`pi-headless\` SKILL model-selection flow before constructing any \`pi\` command.
+
    **Ralph path** — if the \`ralph\` SKILL has been used in the current conversation and \`task.json\` exists on disk with a corresponding Ralph execution command:
 
    - Send that Ralph command to the workspace pane via the tmux SKILL **Sending input safely** convention.
