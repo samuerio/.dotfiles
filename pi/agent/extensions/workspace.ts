@@ -72,14 +72,11 @@ async function writeCurrentState(cwd: string, name: string, worktreePath: string
 	await fs.writeFile(path.join(cwd, STATE_FILE), JSON.stringify({ name, worktreePath }), "utf8");
 }
 
-async function clearCurrentState(cwd: string, name: string): Promise<void> {
-	const state = await readCurrentState(cwd);
-	if (state?.name === name) {
-		try {
-			await fs.unlink(path.join(cwd, STATE_FILE));
-		} catch {
-			// already gone
-		}
+async function clearCurrentState(cwd: string): Promise<void> {
+	try {
+		await fs.unlink(path.join(cwd, STATE_FILE));
+	} catch {
+		// already gone
 	}
 }
 
@@ -710,7 +707,11 @@ export default function (pi: ExtensionAPI): void {
 					await pi.exec("tmux", ["-S", socket, "kill-session", "-t", name]);
 				}
 				ctx.ui.notify(`Orphaned tmux session "${name}" killed.`, "info");
-				await clearCurrentState(ctx.cwd, name);
+				const currentState = await readCurrentState(ctx.cwd);
+				if (currentState?.name === name) {
+					await clearCurrentState(ctx.cwd);
+					updateWorkspaceStatus(ctx.ui, undefined);
+				}
 				return;
 			}
 
@@ -747,8 +748,11 @@ export default function (pi: ExtensionAPI): void {
 				}
 			}
 
-			await clearCurrentState(ctx.cwd, name);
-			updateWorkspaceStatus(ctx.ui, undefined);
+			const currentState = await readCurrentState(ctx.cwd);
+			if (currentState?.name === name) {
+				await clearCurrentState(ctx.cwd);
+				updateWorkspaceStatus(ctx.ui, undefined);
+			}
 
 			let msg = `Workspace "${name}" closed.`;
 			if (cleanOutput && cleanOutput.leftoverCount > 0) {
