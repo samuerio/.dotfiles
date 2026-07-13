@@ -13,3 +13,5 @@ To update it, use the `mental-map` SKILL.
 When debugging or verifying a pi coding agent extension (`pi/agent/extensions/*.ts`) or SKILL, load and follow the `pi-headless` SKILL first. Use it as the default path for single-shot, reproducible, scriptable diagnosis.
 
 Use the `tmux` SKILL only when headless mode cannot cover the case, such as TUI-specific behavior, multi-turn follow-up, slash-command interaction, cancel/Esc behavior, or failures that require mid-session input.
+
+When you do use the `tmux` SKILL for interactive verification, print the attach command for the user right after the session starts and again when reporting results, so they can observe live. Never run interactive tests in a detached session the user cannot attach to.
