@@ -139,7 +139,7 @@ async function selectWorkspace(
 	});
 	const choice = await ctx.ui.select(title, options);
 	if (!choice) return null;
-	const name = choice.replace(/ \[.*\]$/, "").replace(/ \(.*\)$/, "");
+	const name = choice.replace(/ \[[^\]]*\]/g, "").replace(/ \([^)]*\)/g, "");
 	return workspaces.find((ws) => ws.name === name) ?? null;
 }
 
