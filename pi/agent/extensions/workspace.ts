@@ -574,7 +574,7 @@ function getHandoffMessages(branch: ConversationEntry[]): AgentMessage[] {
 	return compactedBranch.map(entryToMessage).filter((message) => message !== undefined);
 }
 
-const NAME_INFERENCE_PROMPT = `Based on the conversation above, generate a short kebab-case branch name for the implementation work being described.
+const NAME_INFERENCE_SYSTEM_PROMPT = `You are a branch name generator. Given a conversation history, generate a short kebab-case branch name for the implementation work being described.
 
 Rules:
 - Default format: feat/<feature-name>
@@ -583,6 +583,8 @@ Rules:
 - If it's a chore or experiment: chore/<name> or exp/<name>
 - Use short, descriptive kebab-case names (2-4 words max)
 - Return ONLY the branch name, nothing else`;
+
+const NAME_INFERENCE_USER_PROMPT = `Based on the conversation above, generate a short kebab-case branch name for the implementation work being described. Return ONLY the branch name, nothing else.`;
 
 // ─── Status Bar ────────────────────────────────────────────────────
 
@@ -1046,7 +1048,7 @@ export default function (pi: ExtensionAPI): void {
 
 				const userMessage: UserMessage = {
 					role: "user",
-					content: [{ type: "text", text: NAME_INFERENCE_PROMPT }],
+					content: [{ type: "text", text: NAME_INFERENCE_USER_PROMPT }],
 					timestamp: Date.now(),
 				};
 
