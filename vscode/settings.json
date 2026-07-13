@@ -261,7 +261,7 @@
     "editor.cursorSurroundingLines": 8,
     "editor.selectionHighlight": false,
     "editor.parameterHints.enabled": false,
-    "editor.fontFamily": "'Fira Code'",
+    "editor.fontFamily": "Monaco",
     "editor.fontSize": 18,
     "java.jdt.ls.java.home": "/usr/lib/jvm/java-8-openjdk",
     "java.jdt.ls.vmargs": "-javaagent:/home/zhe/github/.dotfiles/lombok/lombok-1.18.32.jar",
