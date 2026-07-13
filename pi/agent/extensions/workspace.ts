@@ -726,7 +726,10 @@ export default function (pi: ExtensionAPI): void {
 				}
 			}
 
-			const cleanResult = await pi.exec("bash", [WORKTREE_SH, "clean", name, "--json"]);
+			const cleanArgs = [WORKTREE_SH, "clean", name];
+			if (ws.dirty) cleanArgs.push("--force");
+			cleanArgs.push("--json");
+			const cleanResult = await pi.exec("bash", cleanArgs);
 			if (cleanResult.code !== 0) {
 				ctx.ui.notify(cleanResult.stderr.trim() || "Failed to remove worktree.", "error");
 				return;
