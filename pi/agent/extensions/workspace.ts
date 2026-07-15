@@ -37,6 +37,10 @@ async function copyToClipboard(pi: ExtensionAPI, text: string): Promise<boolean>
  */
 const BLANK_ROW = "\u200B";
 
+/** Programmatic pane log tail density: batch overview vs single drill-down. */
+const BATCH_ANALYZE_RAW_TAIL = 5;
+const SINGLE_ANALYZE_RAW_TAIL = 15;
+
 function buildWidget(lines: string[], footer?: string) {
 	return (_tui: { width: number }, theme: { fg: (color: string, text: string) => string }) => {
 		const container = new Container();
@@ -476,12 +480,12 @@ function formatBatchRawLines(captures: Array<{ name: string; output: string }>):
 	captures.forEach((c, i) => {
 		if (i > 0) lines.push(BLANK_ROW);
 		const { tag } = classifyRawPane(c.output);
-		lines.push(`── ${c.name} · ${tag} ──`);
+		lines.push(formatBatchNameHeader(c.name, tag));
 		if (!c.output.trim() || c.output === "(empty)" || c.output === "(no pane)") {
 			lines.push(c.output.trim() || "(no output)");
 			return;
 		}
-		const tail = c.output.split("\n").slice(-5);
+		const tail = c.output.split("\n").slice(-BATCH_ANALYZE_RAW_TAIL);
 		for (const row of tail) {
 			lines.push(row.length === 0 ? BLANK_ROW : row);
 		}
@@ -525,11 +529,9 @@ function loadRushModeSpec(cwd: string): ModeSpec | null {
 
 // ─── LLM Status Analysis ─────────────────────────────────────────
 
-/** Lines of pane log appended under single-workspace analyze (programmatic, not LLM). */
-const SINGLE_ANALYZE_RAW_TAIL = 15;
-
 /**
- * Single-workspace -a: structured fields only. Raw pane tail is attached in code.
+ * Shared -a analyzer: structured fields only. Raw pane tail is attached in code.
+ * Used by single /ws-status -a and by batch /ws-status -b -a (N parallel calls).
  */
 const STATUS_SYSTEM_PROMPT = `You are a workspace status analyzer for a single coding workspace TUI widget.
 
@@ -554,11 +556,13 @@ Rules for each field:
 - No markdown, no code fences, no bullets, no blank lines, no extra lines.
 - Do NOT paste raw pane log — the UI attaches that separately.`;
 
+type AnalyzeFields = { status: string; cmd: string; summary: string };
+
 /**
- * Normalize LLM single-analyze text into status/cmd/summary lines.
+ * Normalize LLM analyze text into status/cmd/summary.
  * Tolerates missing prefixes when the model returns bare 3-line shape.
  */
-function formatSingleAnalyzeFields(analysis: string): string[] {
+function parseAnalyzeFields(analysis: string): AnalyzeFields {
 	const raw = analysis
 		.trim()
 		.split("\n")
@@ -593,57 +597,92 @@ function formatSingleAnalyzeFields(analysis: string): string[] {
 	if (status === "idle") status = "done";
 	if (!status) status = "?";
 	if (!cmd) cmd = "(none)";
-	if (!summary) summary = raw.find((l) => !/^(status|cmd|summary)\s*:/i.test(l) && !/^(idle|busy|error|done)$/i.test(l)) ?? "(no summary)";
+	if (!summary) {
+		summary =
+			raw.find(
+				(l) => !/^(status|cmd|summary)\s*:/i.test(l) && !/^(idle|busy|error|done)$/i.test(l),
+			) ?? "(no summary)";
+	}
 
-	return [`status: ${status}`, `cmd: ${cmd}`, `summary: ${summary}`];
+	return { status, cmd, summary };
 }
 
-/** Single -a widget lines: structured fields + programmatic raw tail. */
-function formatSingleAnalyzeWidget(analysis: string, paneOutput: string): string[] {
-	const lines = formatSingleAnalyzeFields(analysis);
+function appendRawTail(lines: string[], paneOutput: string, rawTailLines: number): void {
 	lines.push(BLANK_ROW, "── raw ──");
-	const tail = paneOutput.replace(/\s+$/, "").split("\n").slice(-SINGLE_ANALYZE_RAW_TAIL);
+	const cleaned = paneOutput.replace(/\s+$/, "");
+	if (
+		!cleaned.trim() ||
+		cleaned === "(empty)" ||
+		cleaned === "(no pane)" ||
+		cleaned === "(no output)"
+	) {
+		lines.push(cleaned.trim() || "(no output)");
+		return;
+	}
+	const tail = cleaned.split("\n").slice(-rawTailLines);
 	if (tail.length === 0 || (tail.length === 1 && !tail[0].trim())) {
 		lines.push("(no output)");
-	} else {
-		for (const row of tail) {
-			lines.push(row.length === 0 ? BLANK_ROW : row);
-		}
+		return;
 	}
+	for (const row of tail) {
+		lines.push(row.length === 0 ? BLANK_ROW : row);
+	}
+}
+
+/** Batch workspace banner — longer rules so it doesn't look like ── raw ──. */
+function formatBatchNameHeader(name: string, status: string): string {
+	return `────── ${name} · ${status} ──────`;
+}
+
+/**
+ * Single /ws-status without -a: current pane status (idle|busy) + raw tail + Monitor (footer).
+ */
+function formatSingleRawWidget(paneOutput: string): string[] {
+	const { tag } = classifyRawPane(paneOutput);
+	const lines = [`status: ${tag}`];
+	appendRawTail(lines, paneOutput, SINGLE_ANALYZE_RAW_TAIL);
 	return lines;
 }
 
 /**
- * Compact batch format — same intent as STATUS_SYSTEM_PROMPT (last command only),
- * dense TUI lines. Line 2 = command text after prompt (from log); Line 3 = outcome.
+ * Analyze widget body + programmatic raw.
+ * - Single (no name): status: / cmd: / summary:  then raw (15)
+ * - Batch (with name): ────── name · status ──────, then cmd: / summary: only, then raw (5)
  */
-const BATCH_ITEM_STATUS_SYSTEM_PROMPT = `You are a workspace status analyzer for a compact TUI widget.
+function formatAnalyzeWidget(
+	analysis: string,
+	paneOutput: string,
+	rawTailLines: number,
+	name?: string,
+): string[] {
+	const { status, cmd, summary } = parseAnalyzeFields(analysis);
+	const lines: string[] = [];
+	if (name) {
+		// Batch: status in banner header; raw keeps short ── raw ──
+		lines.push(formatBatchNameHeader(name, status));
+		lines.push(`cmd: ${cmd}`, `summary: ${summary}`);
+	} else {
+		lines.push(`status: ${status}`, `cmd: ${cmd}`, `summary: ${summary}`);
+	}
+	appendRawTail(lines, paneOutput, rawTailLines);
+	return lines;
+}
 
-Given terminal pane output from ONE coding workspace, analyze ONLY the last executed command and its output. Do not summarize the branch, project, or overall session.
-
-TAG vocabulary (last-command outcome — do NOT use "idle"):
-  - busy: the last command is still running
-  - error: the last command failed (non-zero exit, Error/failed/panic/traceback, etc.) — NEVER use done if it failed
-  - done: the last command finished successfully, OR there is no useful last command (shell prompt only)
-
-Reply with EXACTLY this shape:
-
-Line 1: TAG — exactly one of: busy | error | done
-Line 2: ONLY the command portion after the shell prompt (❯ $ % >). Example: if the log has "~/path ❯ echo foo; true", write "echo foo; true". Copy that text from the log; do not invent. Do not include the path/prompt. If there is no command, write "(none)".
-Line 3: one short Simplified Chinese outcome (max ~30 chars). Do NOT start with "最后命令". State the result only (e.g. "成功，输出 LAST_CMD_OK"). If TAG is error, you MUST quote the key failure text from the log (e.g. include "Error: simulated failure").
-
-Rules:
-- Focus exclusively on the last command
-- Line 2 is command-after-prompt only, copied from the pane log
-- No markdown (no #, no code fences, no bullets)
-- Prefer at most 3 lines; 4 lines only when needed for a long error
-- Be direct, no filler`;
+/** Local fields when pane is missing/empty — skip LLM. */
+function fallbackAnalyzeFields(output: string): string {
+	if (output === "(no pane)") {
+		return "status: done\ncmd: (none)\nsummary: 无 pane";
+	}
+	if (!output.trim() || output === "(empty)") {
+		return "status: done\ncmd: (none)\nsummary: 无输出";
+	}
+	return "status: done\ncmd: (none)\nsummary: 仅 shell 提示符，无最近命令";
+}
 
 async function analyzeStatus(
 	pi: ExtensionAPI,
 	ctx: ExtensionCommandContext,
 	paneOutput: string,
-	systemPrompt: string = STATUS_SYSTEM_PROMPT,
 ): Promise<AnalysisResult> {
 	const rushSpec = loadRushModeSpec(ctx.cwd);
 	if (!rushSpec) {
@@ -669,7 +708,7 @@ async function analyzeStatus(
 	const response = await completeSimple(
 		model,
 		{
-			systemPrompt,
+			systemPrompt: STATUS_SYSTEM_PROMPT,
 			messages: [userMessage],
 		},
 		{
@@ -688,40 +727,9 @@ async function analyzeStatus(
 	return { analysis: text };
 }
 
-/** Format compact LLM (or fallback) text into 2–3 widget lines for one workspace. */
-function formatCompactBatchItem(name: string, text: string): string[] {
-	const raw = text
-		.trim()
-		.split("\n")
-		.map((l) => l.trim())
-		.filter((l) => l.length > 0);
-
-	// Analyze tags: done | error | busy only (map legacy "idle" → done)
-	let tag = "?";
-	const body: string[] = [];
-	if (raw.length > 0) {
-		const m = raw[0].match(/^(idle|busy|error|done)\b/i);
-		if (m) {
-			const t = m[1].toLowerCase();
-			tag = t === "idle" ? "done" : t;
-			// Line 2+ from model: verbatim command line, then outcome
-			body.push(...raw.slice(1));
-		} else {
-			body.push(...raw);
-		}
-	}
-
-	const out: string[] = [`── ${name} · ${tag} ──`];
-	// body[0] = command after prompt; body[1..] = outcome / error
-	for (const line of body.slice(0, 3)) {
-		out.push(`  ${line}`);
-	}
-	return out;
-}
-
 /**
- * Analyze each active workspace in parallel with a compact prompt,
- * then render a dense multi-workspace widget.
+ * Analyze each active workspace in parallel with the shared STATUS_SYSTEM_PROMPT,
+ * then render status/cmd/summary + short raw (5 lines) per workspace.
  */
 async function analyzeBatchStatusParallel(
 	pi: ExtensionAPI,
@@ -731,18 +739,29 @@ async function analyzeBatchStatusParallel(
 	const results = await Promise.all(
 		items.map(async (item) => {
 			if (!item.output.trim() || item.output === "(no pane)" || item.output === "(empty)") {
-				const { tag, snippet } = classifyRawPane(item.output || "(empty)");
-				return { name: item.name, text: `${tag}\n${snippet}` };
+				return {
+					name: item.name,
+					analysis: fallbackAnalyzeFields(item.output || "(empty)"),
+					output: item.output || "(empty)",
+				};
 			}
 			try {
-				const result = await analyzeStatus(pi, ctx, item.output, BATCH_ITEM_STATUS_SYSTEM_PROMPT);
+				const result = await analyzeStatus(pi, ctx, item.output);
 				if ("analysis" in result) {
-					return { name: item.name, text: result.analysis };
+					return { name: item.name, analysis: result.analysis, output: item.output };
 				}
-				return { name: item.name, text: `error\nAnalysis failed: ${result.error}` };
+				return {
+					name: item.name,
+					analysis: `status: error\ncmd: (none)\nsummary: 分析失败：${result.error}`,
+					output: item.output,
+				};
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
-				return { name: item.name, text: `error\nAnalysis failed: ${msg}` };
+				return {
+					name: item.name,
+					analysis: `status: error\ncmd: (none)\nsummary: 分析失败：${msg}`,
+					output: item.output,
+				};
 			}
 		}),
 	);
@@ -750,7 +769,9 @@ async function analyzeBatchStatusParallel(
 	const lines: string[] = [`Batch · ${results.length} active`, BLANK_ROW];
 	results.forEach((r, i) => {
 		if (i > 0) lines.push(BLANK_ROW);
-		lines.push(...formatCompactBatchItem(r.name, r.text));
+		lines.push(
+			...formatAnalyzeWidget(r.analysis, r.output, BATCH_ANALYZE_RAW_TAIL, r.name),
+		);
 	});
 	return lines;
 }
@@ -1121,7 +1142,7 @@ export default function (pi: ExtensionAPI): void {
 			const monitorCmd = `Monitor: ${rawCmd}${copied ? " (copied)" : ""}`;
 
 			if (!analyze) {
-				const lines = paneOutput.trim().split("\n");
+				const lines = formatSingleRawWidget(paneOutput);
 				ctx.ui.setWidget("ws-status", buildWidget(lines, monitorCmd), { placement: "aboveEditor" });
 				return;
 			}
@@ -1139,7 +1160,11 @@ export default function (pi: ExtensionAPI): void {
 			}
 
 			if ("analysis" in result) {
-				const lines = formatSingleAnalyzeWidget(result.analysis, paneOutput);
+				const lines = formatAnalyzeWidget(
+					result.analysis,
+					paneOutput,
+					SINGLE_ANALYZE_RAW_TAIL,
+				);
 				ctx.ui.setWidget("ws-status", buildWidget(lines, monitorCmd), { placement: "aboveEditor" });
 			} else {
 				ctx.ui.setWidget("ws-status", undefined);
