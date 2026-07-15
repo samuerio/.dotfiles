@@ -1,6 +1,6 @@
 ---
 name: branch-workspace
-description: "orchestrate branch-workspace work: /ws task and /ws handoff-for-impl. Discovery/lifecycle via ws_list / ws_open / ws_close tools (or user slash commands)."
+description: "orchestrate branch-workspace work: /ws task and /ws handoff-for-impl. Discovery/lifecycle via ws_list / ws_open / ws_close tools."
 ---
 
 ## Concept
@@ -12,7 +12,7 @@ A **branch-workspace** is an isolated execution environment bound to a single br
 
 Each branch-workspace is identified by `<name>`. The git branch name and the tmux session name both equal `<name>`. The two components share this identity and must be managed together.
 
-**Lifecycle** (list / open / close) is provided by the `ws_list`, `ws_open`, and `ws_close` tools (or the matching user slash commands `/ws-list`, `/ws-open`, `/ws-close`). This skill only orchestrates **task** dispatch and **handoff-for-impl**.
+**Lifecycle** (list / open / close) is provided by the `ws_list`, `ws_open`, and `ws_close` tools. This skill only orchestrates **task** dispatch and **handoff-for-impl**.
 
 ## Role Boundaries
 
@@ -41,8 +41,6 @@ Typical flow:
 2. `ws_open` with the full exact `name` → use returned `socket`, `paneTarget`, `worktreePath`, `monitorCmd`.
 3. Orchestrate via `/ws-task` or this skill’s task section (do not re-run worktree list / find-sessions).
 4. `ws_close`; if the result has `needsForce`, ask the user, then retry with `force: true`.
-
-Other human slash commands (`/ws-status`, `/ws-vscode`, `/ws-cancel`, …) exist for the TUI; they are not skill procedures.
 
 ## Current branch-workspace state
 
