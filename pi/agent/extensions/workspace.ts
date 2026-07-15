@@ -43,13 +43,25 @@ function wrapLine(text: string, width: number): string[] {
 	return out;
 }
 
+/**
+ * Spacer for blank rows. pi-tui Text skips anything that is empty after trim()
+ * (including "" and "\u00A0"), returning zero height. U+200B is not trimmed, so
+ * Text still renders a full-width padded blank line.
+ */
+const BLANK_ROW = "\u200B";
+
 function buildWidget(lines: string[], footer?: string) {
 	return (tui: { width: number }, theme: { fg: (color: string, text: string) => string }) => {
 		const container = new Container();
 		const w = tui.width || 80;
 		for (const line of lines) {
+			// Map empty / unicode-whitespace-only rows to BLANK_ROW so Text keeps height
+			if (line.length === 0 || line === BLANK_ROW || /^[\s\u00A0]*$/.test(line)) {
+				container.addChild(new Text(BLANK_ROW, 1, 0));
+				continue;
+			}
 			for (const part of wrapLine(line, w)) {
-				container.addChild(new Text(part, 1, 0));
+				container.addChild(new Text(part.length === 0 ? BLANK_ROW : part, 1, 0));
 			}
 		}
 		if (footer) {
@@ -428,12 +440,19 @@ async function capturePaneOutput(
 	paneTarget: string,
 	lines: number = 200,
 ): Promise<string> {
+	// Capture extra history: large terminals pad the bottom with blank lines, so
+	// the true tail is often above the last N rows of raw capture.
+	const fetchLines = Math.max(lines * 4, 80);
 	const result = await pi.exec("tmux", [
 		"-S", socket,
-		"capture-pane", "-S", `-${lines}`, "-J", "-p", "-t", paneTarget,
+		"capture-pane", "-S", `-${fetchLines}`, "-J", "-p", "-t", paneTarget,
 	]);
 	if (result.code !== 0) return "";
 	const allLines = result.stdout.split("\n");
+	// Drop trailing blank padding before taking the last N meaningful lines
+	while (allLines.length > 0 && allLines[allLines.length - 1].trim() === "") {
+		allLines.pop();
+	}
 	return allLines.slice(-lines).join("\n");
 }
 
@@ -444,13 +463,16 @@ function isPaneIdle(output: string): boolean {
 	return /[\$%>❯]\s*$/.test(last);
 }
 
-/** Compact tag + snippet for raw batch listing. */
-function classifyRawPane(output: string): { tag: string; snippet: string } {
+/**
+ * Raw batch tags = current pane state only: idle | busy.
+ * (Last-command outcome tags belong to analyze mode: done | error | busy.)
+ */
+function classifyRawPane(output: string): { tag: "idle" | "busy"; snippet: string } {
 	if (!output.trim() || output === "(empty)") {
-		return { tag: "empty", snippet: "(no output)" };
+		return { tag: "idle", snippet: "(no output)" };
 	}
 	if (output === "(no pane)") {
-		return { tag: "no-pane", snippet: "(no pane target)" };
+		return { tag: "idle", snippet: "(no pane target)" };
 	}
 	const nonEmpty = output
 		.trim()
@@ -461,31 +483,27 @@ function classifyRawPane(output: string): { tag: string; snippet: string } {
 	if (isPaneIdle(output)) {
 		return { tag: "idle", snippet: last || "(shell prompt)" };
 	}
-	const hasError = /\b(error|failed|failure|panic|exception|traceback)\b/i.test(output);
-	return { tag: hasError ? "error" : "busy", snippet: last || "(running)" };
+	return { tag: "busy", snippet: last || "(running)" };
 }
 
 function formatBatchRawLines(captures: Array<{ name: string; output: string }>): string[] {
-	const nameWidth = Math.min(
-		40,
-		Math.max(8, ...captures.map((c) => c.name.length)),
-	);
-	const lines: string[] = [`Batch · ${captures.length} active`];
-	for (const c of captures) {
-		const { tag, snippet } = classifyRawPane(c.output);
-		const name = c.name.padEnd(nameWidth);
-		const tagPad = tag.padEnd(7);
-		lines.push(`${name}  ${tagPad}  ${snippet}`);
-	}
-	return lines;
-}
+	// Spacer rows (not ""): title ↔ first block, and between workspace blocks
+	const lines: string[] = [`Batch · ${captures.length} active`, BLANK_ROW];
 
-function buildBatchMonitorFooter(socket: string, names: string[]): string {
-	if (names.length === 0) return "";
-	if (names.length === 1) {
-		return `Monitor: tmux -S ${socket} attach -t ${names[0]}`;
-	}
-	return `Monitor: tmux -S ${socket} attach -t <${names.join("|")}>`;
+	captures.forEach((c, i) => {
+		if (i > 0) lines.push(BLANK_ROW);
+		const { tag } = classifyRawPane(c.output);
+		lines.push(`── ${c.name} · ${tag} ──`);
+		if (!c.output.trim() || c.output === "(empty)" || c.output === "(no pane)") {
+			lines.push(c.output.trim() || "(no output)");
+			return;
+		}
+		const tail = c.output.split("\n").slice(-5);
+		for (const row of tail) {
+			lines.push(row.length === 0 ? BLANK_ROW : row);
+		}
+	});
+	return lines;
 }
 
 // ─── Rush Mode Resolution ─────────────────────────────────────────
@@ -531,22 +549,32 @@ const STATUS_SYSTEM_PROMPT = `You are a workspace status analyzer. Given termina
 
 Keep response under 200 words. Be direct, no filler.`;
 
-/** Compact multi-line format for batch widget (no markdown). */
-const BATCH_ITEM_STATUS_SYSTEM_PROMPT = `You are a workspace status analyzer for a compact TUI widget (not a full report).
+/**
+ * Compact batch format — same intent as STATUS_SYSTEM_PROMPT (last command only),
+ * but constrained to a few plain-text lines for the TUI widget.
+ * Line 2 is the verbatim command line from the pane log (LLM-copied, not code-extracted).
+ */
+const BATCH_ITEM_STATUS_SYSTEM_PROMPT = `You are a workspace status analyzer for a compact TUI widget.
 
-Given terminal pane output from ONE coding workspace, reply in Simplified Chinese with this shape:
+Given terminal pane output from ONE coding workspace, analyze ONLY the last executed command and its output. Do not summarize the branch, project, or overall session.
 
-Line 1: TAG — exactly one of: idle | busy | error | done
-  (optionally append " — short note" on the same line)
-Line 2: one short sentence of what is happening (max ~40 Chinese chars)
-Line 3 (only if TAG is error): the key error message, one line
+TAG vocabulary for analyze mode (last-command outcome only — do NOT use "idle"):
+  - busy: the last command is still running
+  - error: the last command failed (non-zero exit, Error/failed/panic/traceback, etc.) — NEVER use done if it failed
+  - done: the last command finished successfully, OR there is no useful last command (shell prompt only)
+
+Reply with EXACTLY this shape:
+
+Line 1: TAG — exactly one of: busy | error | done
+Line 2: the exact log line from the pane that contains the last command (copy verbatim from the input — include the prompt if present, e.g. "~/path ❯ echo foo"). Do not invent or shorten to just the command name. If there is no command line, write "(none)".
+Line 3: one short Simplified Chinese sentence about that last command's outcome only (max ~40 Chinese chars). If TAG is error, include or quote the key failure text in this sentence (or use a 4th line only for a long error message).
 
 Rules:
+- Focus exclusively on the last command
+- Line 2 MUST be copied from the pane log, not paraphrased (never output only "echo" or "sleep")
 - No markdown (no #, no code fences, no bullets)
-- At most 3 lines total
+- Prefer at most 3 lines; 4 lines only when needed for a long error
 - Be direct, no filler`;
-
-type AnalysisResult = { analysis: string } | { error: string };
 
 async function analyzeStatus(
 	pi: ExtensionAPI,
@@ -605,13 +633,15 @@ function formatCompactBatchItem(name: string, text: string): string[] {
 		.map((l) => l.trim())
 		.filter((l) => l.length > 0);
 
+	// Analyze tags: done | error | busy only (map legacy "idle" → done)
 	let tag = "?";
 	const body: string[] = [];
 	if (raw.length > 0) {
-		const m = raw[0].match(/^(idle|busy|error|done)\b\s*[—\-:：]?\s*(.*)$/i);
+		const m = raw[0].match(/^(idle|busy|error|done)\b/i);
 		if (m) {
-			tag = m[1].toLowerCase();
-			if (m[2]) body.push(m[2]);
+			const t = m[1].toLowerCase();
+			tag = t === "idle" ? "done" : t;
+			// Line 2+ from model: verbatim command line, then outcome
 			body.push(...raw.slice(1));
 		} else {
 			body.push(...raw);
@@ -619,7 +649,8 @@ function formatCompactBatchItem(name: string, text: string): string[] {
 	}
 
 	const out: string[] = [`— ${name} · ${tag} —`];
-	for (const line of body.slice(0, 2)) {
+	// body[0] = verbatim command line from log; body[1..] = outcome / error
+	for (const line of body.slice(0, 3)) {
 		out.push(`  ${line}`);
 	}
 	return out;
@@ -653,10 +684,11 @@ async function analyzeBatchStatusParallel(
 		}),
 	);
 
-	const lines: string[] = [`Batch · ${results.length} active`];
-	for (const r of results) {
+	const lines: string[] = [`Batch · ${results.length} active`, BLANK_ROW];
+	results.forEach((r, i) => {
+		if (i > 0) lines.push(BLANK_ROW);
 		lines.push(...formatCompactBatchItem(r.name, r.text));
-	}
+	});
 	return lines;
 }
 
@@ -966,15 +998,11 @@ export default function (pi: ExtensionAPI): void {
 					captures.push({ name: ws.name, output: output || "(empty)" });
 				}
 
-				const names = captures.map((c) => c.name);
-				const attachCmds = names.map((n) => `tmux -S ${socket} attach -t ${n}`).join("\n");
-				const copied = await copyToClipboard(pi, attachCmds);
-				const monitorCmd =
-					buildBatchMonitorFooter(socket, names) + (copied ? " (copied)" : "");
-
+				// Batch is an overview only — no fake multi-target attach line.
+				// Drill down with /ws-status <name> (single mode copies a real attach cmd).
 				if (!analyze) {
 					const lines = formatBatchRawLines(captures);
-					ctx.ui.setWidget("ws-status", buildWidget(lines, monitorCmd), { placement: "aboveEditor" });
+					ctx.ui.setWidget("ws-status", buildWidget(lines), { placement: "aboveEditor" });
 					return;
 				}
 
@@ -986,7 +1014,7 @@ export default function (pi: ExtensionAPI): void {
 
 				try {
 					const lines = await analyzeBatchStatusParallel(pi, ctx, captures);
-					ctx.ui.setWidget("ws-status", buildWidget(lines, monitorCmd), { placement: "aboveEditor" });
+					ctx.ui.setWidget("ws-status", buildWidget(lines), { placement: "aboveEditor" });
 				} catch (err) {
 					const msg = err instanceof Error ? err.message : String(err);
 					ctx.ui.setWidget("ws-status", undefined);
