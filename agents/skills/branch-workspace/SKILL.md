@@ -1,6 +1,6 @@
 ---
 name: branch-workspace
-description: "manage isolated branch-scoped workspaces composed of a git worktree and matching tmux session. use this skill for /ws commands, including /ws open, /ws list, /ws close, /ws task, /ws status, /ws vscode, and /ws handoff-for-impl."
+description: "orchestrate branch-workspace work: /ws task and /ws handoff-for-impl. Discovery/lifecycle via ws_list / ws_open / ws_close tools (or user slash commands)."
 ---
 
 ## Concept
@@ -10,11 +10,13 @@ A **branch-workspace** is an isolated execution environment bound to a single br
 - a **`git worktree`**: a writable, branch-scoped filesystem where the worker agent edits code without disturbing the main checkout.
 - a **`tmux` session**: an observable, persistent execution environment for that branch. The pane is shared — the worker agent runs implementation commands there, and the dispatcher agent runs observable tasks (tests, debugging, runtime checks) there directly. The user or dispatcher can attach to watch either.
 
-Each branch-workspace is identified by `<name>`. The git branch name and the tmux session name both equal `<name>`. The two components share this identity and must be managed together. This skill owns their joint lifecycle.
+Each branch-workspace is identified by `<name>`. The git branch name and the tmux session name both equal `<name>`. The two components share this identity and must be managed together.
+
+**Lifecycle** (list / open / close) is provided by the `ws_list`, `ws_open`, and `ws_close` tools (or the matching user slash commands `/ws-list`, `/ws-open`, `/ws-close`). This skill only orchestrates **task** dispatch and **handoff-for-impl**.
 
 ## Role Boundaries
 
-The dispatcher agent owns the branch-workspace lifecycle and all coordination. The tmux pane is a shared execution environment — both agents may run commands there, but only the worker agent may write files:
+The dispatcher agent owns coordination. The tmux pane is a shared execution environment — both agents may run commands there, but only the worker agent may write files:
 
 - **Explore freely**: the dispatcher may read and inspect files in the branch-workspace's worktree at any point — to refine a task with the user, to review results, or to understand context. Use bash or read-only tools directly for speed and efficiency.
 - **No direct writes**: the dispatcher must never write to or modify files in the branch-workspace's worktree, even for trivial changes. All file modifications go through the worker agent.
@@ -23,110 +25,53 @@ The dispatcher agent owns the branch-workspace lifecycle and all coordination. T
 
 The worker agent performs implementation work inside the branch-workspace. It receives a self-contained task document and runs to completion.
 
-`worktree.sh` owns the git worktree side. tmux operations must follow the tmux SKILL. `<name>` always means the complete branch-workspace identifier and must be matched exactly; never fuzzy-match or shorten it.
+Use `ws_list` / `ws_open` / `ws_close` for discovery and lifecycle — do not reimplement worktree/session management via bash. `<name>` always means the complete branch-workspace identifier and must be matched exactly; never fuzzy-match or shorten it. When an injected header or tool result says worktree/session/pane are pre-validated, trust those fields and do not rediscover them.
 
-## worktree.sh Usage
+## Lifecycle tools (prefer these)
 
-`worktree.sh` is the implementation script and uses `<branch>` as its parameter name, since it operates only on the git worktree side. At the SKILL layer this `<branch>` always equals the branch-workspace `<name>`.
+| Tool | Role |
+|------|------|
+| `ws_list` | Read-only inventory: name, status (`active`/`idle`/`orphan`), dirty, current |
+| `ws_open` | Open or reuse worktree + tmux session; set current; return full env envelope |
+| `ws_close` | Remove worktree + kill session; dirty/orphan require `force: true` only after user confirms |
 
-```bash
-bash {baseDir}/worktree.sh open <branch>
-bash {baseDir}/worktree.sh list [-q <query>]
-bash {baseDir}/worktree.sh clean <branch> [--force]
-```
+Typical flow:
 
-Rules:
+1. `ws_list` when the exact name is unknown or when reviewing dirty/orphan/current.
+2. `ws_open` with the full exact `name` → use returned `socket`, `paneTarget`, `worktreePath`, `monitorCmd`.
+3. Orchestrate via `/ws-task` or this skill’s task section (do not re-run worktree list / find-sessions).
+4. `ws_close`; if the result has `needsForce`, ask the user, then retry with `force: true`.
 
-- Always run `{baseDir}/worktree.sh` from the main worktree; never `cd` there implicitly and retry.
-- `open` may update `.gitignore` and create commits. `clean <name>` only removes the worktree via `git worktree remove`.
-- For `clean`: never infer `--force`; on failure, surface the error and stop — no retries, no extra cleanup (`rm -rf`, `git worktree prune`, etc.) unless the user asks.
-- Never expose worktree paths from script output; always refer to branch-workspaces by full `<name>`.
+Other human slash commands (`/ws-status`, `/ws-vscode`, `/ws-cancel`, …) exist for the TUI; they are not skill procedures.
 
 ## Current branch-workspace state
 
-The "current" branch-workspace is the one most recently opened via `/ws open`, tracked in `.branch-workspace-current.json` in the current working directory:
+The most recently opened workspace is tracked in `.branch-workspace-current.json` in the current working directory:
+
 ```json
 {"name": "<name>", "worktreePath": "<worktree_path>"}
 ```
-Add this file to `.gitignore` — it is per-checkout local state. Writing always overwrites any prior record.
 
-- **Write**: after every successful `/ws open <name>`.
-- **Read**: for name-scoped commands (`close`, `task`, `status`), if `<name>` is omitted, read the state file. If the file does not exist, error: `no name specified and no current branch-workspace is set; run /ws open <name> first.`
-- **Validate after read**: always resolve branch-workspace state and apply the active guard — never skip validation because the name came from the state file.
-- **Clear on close**: delete the state file when `/ws close` closes a workspace whose name matches it; leave it untouched otherwise.
-- **`/ws handoff-for-impl` does not read this file** — it always derives or accepts a name per its own rules.
+- Written by successful `ws_open` / `/ws-open`.
+- Used as the default name when `/ws-task` omits `<name>`.
+- Cleared by `ws_close` / `/ws-close` when the closed name matches.
+- `/ws handoff-for-impl` does not read this file for naming — it derives or accepts a name per its own rules.
 
-To resolve branch-workspace state for `<name>`:
-
-1. Worktree:
-   ```bash
-   bash {baseDir}/worktree.sh list -q "<name>"
-   ```
-   `-q` is substring matching, so treat the worktree as found only when one returned `worktree_N_branch` exactly equals `<name>`. Use the matching `worktree_N_path` and `worktree_N_dirty`.
-
-2. Session:
-   ```bash
-   bash {baseDir}/../tmux/scripts/find-sessions.sh -S <socket> -q "<name>" --json
-   ```
-   `-q` is substring matching, so treat the session as found only when one returned `session_name` exactly equals `<name>`. Treat a missing socket, non-zero exit, or no exact match as missing.
-
-3. State:
-   - `active`: worktree exists + session exists.
-   - `idle`: worktree exists + session missing.
-   - `orphan`: worktree missing + session exists.
-     Report to the user: "Detected an orphaned tmux session for `<name>` (the git worktree is missing). Would you like me to kill the residual tmux session?"
-     If the user confirms, execute `tmux -S <socket> kill-session -t "<name>"` directly. Do not auto-resolve without explicit confirmation.
-   - `missing`: neither exists.
+Add this file to `.gitignore` — it is per-checkout local state.
 
 ## /ws trigger
 
 > **SKILL roles**: `refine-task` clarifies a single task's scope through Q&A and outputs plain task text for immediate dispatch. `draft-impl-handoff` produces a structured handoff document consumed by a headless `pi` worker. Do not conflate the two — `/ws task` always uses `refine-task`; `/ws hfi`'s generate-then-run path always uses `draft-impl-handoff`.
 
-`/ws` is the only entry point. Name-scoped subcommands operate on a specific `<name>`: full branch-workspace name, exact match, no fuzzy lookup.
+Name-scoped operations use the full branch-workspace name, exact match, no fuzzy lookup.
 
 > **`/ws hfi` is an advanced command** that chains workspace creation, handoff-doc generation (if needed), and `pi` dispatch in a single step. Use it when a finalized plan already exists in the current conversation (plan doc, handoff doc, or Ralph `task.json`). Without any of these, it automatically invokes `draft-impl-handoff` before dispatching.
 
-tmux conventions (per the tmux SKILL):
-
-- Derive `<socket>` from the repo root: `<socket>=/tmp/claude-tmux-sockets/$(bash {baseDir}/worktree.sh root-name).sock`
-- Session name equals `<name>`.
-- **Pane target**: for all name-scoped commands, discover the target pane via `list-panes` and pick the first pane; never hardcode `:0.0`.
-
-**Active guard**: name-scoped commands other than `open`, `list`, and `close` require state `active`; error if not; never auto-open.
-
-- `/ws handoff-for-impl` / `/ws hfi`: silently open a branch-workspace (manual `<name>` or derived `feat/<feature-name>`) and kick off implementation.
-
-### /ws open <name> (alias: /ws op)  ← also sets the current branch-workspace
-
-1. Run `bash {baseDir}/worktree.sh open <name>`. Read `branch`, `worktree_path`, and `worktree_created` from stdout. If the command fails, surface the error and stop.
-2. Ensure a tmux session named `<name>` with cwd `<worktree_path>`:
-   - If `tmux -S <socket> has-session -t "<name>"` succeeds, switch or attach.
-   - Otherwise, run `tmux -S <socket> new-session -d -s "<name>" -c "<worktree_path>"`.
-3. Do not create duplicate sessions.
-4. Write `{"name": "<name>", "worktreePath": "<worktree_path>"}` to the state file (**Current branch-workspace state**), overwriting any prior record.
-5. When a session is started, print the monitor command from the tmux SKILL.
-
-### /ws list (alias: /ws ls)
-
-1. Run `bash {baseDir}/worktree.sh list`.
-2. List sessions on the socket using tmux SKILL **Finding sessions** with `--json`. Treat a missing socket or no sessions as an empty list.
-3. Join worktrees and sessions by exact `branch == session_name` (both equal `<name>`).
-4. Present each branch-workspace as `active`, `idle`, or `orphan`, including dirty status. If the state file (`.branch-workspace-current.json`) exists and its `name` matches a listed branch-workspace, append `(current)` to that entry.
-
-### /ws close [<name>]
-
-1. If `<name>` is omitted, read it from the state file (**Current branch-workspace state**); error per that section if unset.
-2. Resolve branch-workspace state for `<name>`.
-3. If state is `missing`, report an error and stop. If state is `orphan`, ask the user for permission to kill the residual tmux session (same as the orphan resolution in **State** definition above). If the user declines, stop and leave the session untouched.
-4. If `dirty=yes`, ask the user to confirm before proceeding. On no or unclear answer, abort and leave the worktree and session untouched.
-5. Run `bash {baseDir}/worktree.sh clean <name>` without `--force`. On git failure, surface the error and stop.
-6. Only after the script succeeds: if a session exists, run `tmux -S <socket> kill-session -t "<name>"`; otherwise skip.
-7. If `kill-session` fails after a successful clean, the session becomes orphan. Surface this to the user and do not auto-resolve.
-8. If the closed `<name>` matches the state file's current record, delete the state file. Skip if no state file exists or its `name` differs.
+When `/ws-task` or `/ws-hfi` injects a header, trust it (worktree, socket, session, paneTarget are pre-validated). Use the tmux SKILL only to **send input** and **watch output** with those fields — do not re-derive socket or pane.
 
 ### /ws task [<name>] [-m|--choose-model] <task> (alias: /ws t)
 
-1. If `<name>` is omitted, read it (and its `worktreePath`) from the state file (**Current branch-workspace state**); error per that section if unset. Apply active guard. Apply pane target convention. Apply pane readiness check (tmux SKILL **Checking pane readiness**); if the pane is busy, report it and stop.
+1. If `<name>` is omitted, use the current workspace from the state file; error if unset. The slash command pre-validates active session and idle pane before injecting context.
 2. **Task Triage (Intent Classification)**: Before dispatching, evaluate the complexity and clarity of the `<task>`:
    - **Fast Path (Direct Dispatch)**: If the task is trivial, unambiguous, and self-contained (e.g., "fix typo in README", "bump version to 2.0", "add a specific unit test for function X"), **skip the interactive Q&A of `refine-task`**. The dispatcher should internally draft a clear, self-contained task description for the worker and proceed directly to step 3. Do not ask the user for confirmation.
    - **Standard Path (Refine & Confirm)**: If the task is ambiguous, broad, involves multiple files, or requires architectural decisions (e.g., "refactor the auth module", "implement a new caching layer"), strictly apply the `refine-task` SKILL. The dispatcher must proactively explore the worktree to answer questions from context. If critical information is still missing, ask the user targeted questions. **Wait for explicit user confirmation** of the refined task before proceeding to step 3.
@@ -148,54 +93,15 @@ tmux conventions (per the tmux SKILL):
         ```
         *(Note: Ensure the `<YYYY-MM-DD-HHMMSS>-<slug>` in the instruction exactly matches the filename stem).*
      4. Pass the task file to pi via `@/tmp/task/<filename>.md`. If `-m`/`--choose-model` was given, follow the `pi-headless` SKILL model-selection flow; otherwise use defaults.
-     5. Send the command to the tmux pane via the tmux SKILL **Sending input safely** and use **Watching output** (poll mode) with pattern `DONE:<YYYY-MM-DD-HHMMSS>-<slug>` to wait for completion.
+     5. Send the command to the tmux pane via the tmux SKILL **Sending input safely** (use header `socket` / `paneTarget`) and use **Watching output** (poll mode) with pattern `DONE:<YYYY-MM-DD-HHMMSS>-<slug>` to wait for completion.
      6. **Post-Execution Review**: Once the `DONE` marker is detected, **do not parse the raw tmux pane output**. Instead, read the content of `/tmp/task/<YYYY-MM-DD-HHMMSS>-<slug>.result.md` to understand the worker's output. Present this structured summary to the user.
    - **dispatcher path** (for tasks requiring observability — running tests, executing commands, checking runtime errors): execute the command using either bash or the branch-workspace's tmux pane, capturing the output for the user.
 
    If a task requires both (e.g. run tests then fix failures, or fix code then verify with a command), handle the observable step via the dispatcher and the file-change step via the worker — in whichever order the task demands. Pass findings between steps in the task doc.
 
-### /ws status [<name>] (alias: /ws st)
-
-1. If `<name>` is omitted, read it from the state file (**Current branch-workspace state**); error per that section if unset. Apply active guard. Apply pane target convention.
-2. Capture pane output (tmux SKILL **Watching output**, capture mode; `-S -200`). Do not send any keys.
-3. **Intelligent Summary**: Analyze the captured logs and report to the user using the following structured format:
-   - **Current State**: What step, command, or process is currently executing? (e.g., "running pytest", "idle at shell prompt", "compiling TypeScript").
-   - **Health Check**: Are there any visible errors, warnings, or panics? If an error is found, quote the exact failure message.
-   - **Progress**: A brief estimate of the current progress based on the logs.
-4. **Smart Snippet**: Do NOT dump the full 200 lines. Instead, include a highly relevant snippet in a collapsible block:
-   - If there is an **error/panic**, extract the error message and ~10 lines of surrounding context.
-   - If it is **running normally**, extract only the **last 10-15 lines** to show the current active output.
-   Format: `<details><summary>Relevant Log Snippet</summary>...`
-5. **Full Log Access**: Always append the tmux attach command so the user can inspect the full live session if needed:
-   `To monitor this session yourself: tmux -S <socket> attach -t <name>`
-
-### /ws vscode [<name>] (alias: /ws vs)
-
-1. If `<name>` is omitted, read it (and its `worktreePath`) from the state file (**Current branch-workspace state**); error per that section if unset.
-2. Resolve branch-workspace state for `<name>`. If state is `missing`, report an error and stop.
-3. Launch VS Code in the background, suppressing startup logs:
-   ```bash
-   code "<worktreePath>" >/dev/null 2>&1 &
-   ```
-4. Report to the user that the editor window for `<name>` has been opened.
-
-### /ws cancel [<name>] (alias: /ws c)
-
-1. If `<name>` is omitted, read it from the state file (**Current branch-workspace state**); error per that section if unset. Apply active guard. Apply pane target convention.
-2. **Check readiness**: Apply pane readiness check (tmux SKILL **Checking pane readiness**).
-   - If the pane is already **idle** (at a shell prompt), report to the user: "The workspace is already idle, no task is currently running." and stop.
-   - If the pane is **busy**, proceed to step 3.
-3. **Send interrupt signal**: Use the tmux SKILL **Sending input safely** to send the interrupt signal to the pane:
-   ```bash
-   tmux -S <socket> send-keys -t <target> C-c
-   ```
-   *(Note: `C-c` is sufficient for 99% of CLI processes like `pi`, `pytest`, `npm`. Do not use `C-\` unless `C-c` is explicitly caught and ignored by the process).*
-4. **Wait for recovery**: After sending `C-c`, the process will terminate and the shell should return to a prompt. Use the tmux SKILL **Watching output** (poll mode) to wait for the shell prompt pattern (e.g., `^\$\s*$` or `^%\s*$`) with a short timeout (e.g., 5 seconds).
-5. **Report**: Once the prompt is detected (or timeout occurs), report to the user that the task has been interrupted and the workspace is ready for the next command.
-
 ### /ws handoff-for-impl [<name>] [-m|--choose-model] (alias: /ws hfi)
 
-`handoff-for-impl` is a silent kickoff command for implementation work whose duration is unknown. It creates or reuses a branch-workspace, sends the implementation command into its tmux pane, and does not wait for completion or capture output.
+`handoff-for-impl` is a silent kickoff command for implementation work whose duration is unknown. It creates or reuses a branch-workspace (via the same open core as `ws_open`), sends the implementation command into its tmux pane, and does not wait for completion or capture output.
 
 Argument parsing: `<name>` is an optional positional argument; `-m`/`--choose-model` is a flag with no value. The flag may appear before or after `<name>`. The first non-`-` token is `<name>`.
 
@@ -206,16 +112,11 @@ Argument parsing: `<name>` is an optional positional argument; `-m`/`--choose-mo
      - If the conversation clearly indicates a different kind of work (bug fix, refactor, chore, experiment, etc.), use the matching prefix instead (`fix/`, `refactor/`, `chore/`, `exp/`, ...).
      - If a suitable name cannot be derived, ask the user for it.
 
-2. Run the equivalent of `/ws open <name>`:
-   - Create or reuse the worktree.
-   - Create or reuse the tmux session.
-   - Write the state file as in `/ws open` step 4, making this the current branch-workspace.
+2. Ensure the workspace is open (slash command uses open core; agent path uses `ws_open`). Use the returned / injected env envelope.
 
 3. Choose the implementation command:
 
-   Apply pane readiness check (tmux SKILL **Checking pane readiness**); if the pane is busy, report it and stop.
-
-   Before constructing any `pi` command: if `-m`/`--choose-model` was given, follow the `pi-headless` SKILL model-selection flow; otherwise use defaults.
+   Pane must be idle (slash command pre-checks). If `choose-model: yes` is present in the header, follow the `pi-headless` SKILL model-selection flow before constructing any `pi` command.
 
    **Ralph path** — if the `ralph` SKILL has been used in the current conversation and `task.json` exists on disk with a corresponding Ralph execution command:
 
@@ -240,4 +141,4 @@ Argument parsing: `<name>` is an optional positional argument; `-m`/`--choose-mo
 6. Report only:
    - the branch-workspace name
    - that the command was sent
-   - the monitor command from the tmux SKILL
+   - the monitor command (`monitorCmd` from open / header)
