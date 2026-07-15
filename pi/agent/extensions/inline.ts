@@ -8,6 +8,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
+type ExtensionUI = ExtensionCommandContext["ui"];
+
 const SYSTEM_PROMPT = `You are an inline marker extractor. You receive ripgrep output that scanned a codebase for PI! and PI? comments. Your job has three steps only: filter, construct, and output all. Do NOT implement changes, answer questions, clarify, or interpret what the marker asks for.
 
 Filter:
@@ -49,8 +51,8 @@ const FRAMING_HEADER = `Found inline markers (PI!/PI?) for one file in the codeb
 
 Both PI! and PI? represent tasks to be executed.
 
-- For a PI? task: when carrying out the task, do not modify the file that contains this marker.
-- For a PI! task: there is no such restriction; the task may modify the file containing the marker.
+- For a PI? task: do not modify the file that contains this marker, except to remove the marker itself.
+- For a PI! task: there is no such restriction; the task may freely modify the file containing the marker.
 
 Complete the tasks. After finishing all tasks in this group, remove the corresponding markers.
 
@@ -177,11 +179,24 @@ function getCurrentState(ctx: any): InlineBatchState | null {
     return inlineState;
 }
 
-function setState(newState: InlineBatchState | null, pi: ExtensionAPI): void {
+function setState(newState: InlineBatchState | null, pi: ExtensionAPI, ui?: ExtensionUI): void {
     inlineState = newState;
     if (newState) {
         persistState(pi, newState);
     }
+    if (ui) {
+        updateInlineStatus(ui);
+    }
+}
+
+function updateInlineStatus(ui: ExtensionUI): void {
+    const s = inlineState;
+    if (!s || s.groups.length === 0 || s.nextIndex >= s.groups.length) {
+        ui.setStatus("inline", undefined);
+        return;
+    }
+    const label = ui.theme.fg("accent", "inline");
+    ui.setStatus("inline", `${label} (${s.nextIndex + 1}/${s.groups.length})`);
 }
 
 function parsePiTasks(text: string): InlineTask[] {
@@ -230,9 +245,17 @@ export default function (pi: ExtensionAPI) {
     // Reconstruct state on session load / tree navigation
     pi.on("session_start", async (_event, ctx) => {
         reconstructState(ctx);
+        if (ctx.hasUI) updateInlineStatus(ctx.ui);
     });
     pi.on("session_tree", async (_event, ctx) => {
         reconstructState(ctx);
+        if (ctx.hasUI) updateInlineStatus(ctx.ui);
+    });
+
+    pi.on("session_shutdown", async (_event, ctx) => {
+        if (ctx.hasUI) {
+            ctx.ui.setStatus("inline", undefined);
+        }
     });
 
     const handler = async (args: string, ctx: ExtensionCommandContext) => {
@@ -275,7 +298,7 @@ export default function (pi: ExtensionAPI) {
         }
 
         if (flags.includes("-r") || flags.includes("--reset")) {
-            setState(null, pi);
+            setState({ groups: [], nextIndex: 0 }, pi, ctx.hasUI ? ctx.ui : undefined);
             if (ctx.hasUI) {
                 ctx.ui.notify("inline batch 已重置", "info");
             } else {
@@ -286,6 +309,7 @@ export default function (pi: ExtensionAPI) {
 
         // plain /inline : smart continue or regenerate
         const state = getCurrentState(ctx);
+        if (ctx.hasUI) updateInlineStatus(ctx.ui);
 
         // Resolve model/auth (needed for describe in regenerate case)
         const rushSpec = loadRushModeSpec(ctx.cwd);
@@ -337,7 +361,7 @@ export default function (pi: ExtensionAPI) {
 
             // advance
             const newState: InlineBatchState = { ...state, nextIndex: state.nextIndex + 1 };
-            setState(newState, pi);
+            setState(newState, pi, ctx.hasUI ? ctx.ui : undefined);
             return;
         }
 
@@ -354,7 +378,7 @@ export default function (pi: ExtensionAPI) {
         const scanOutput = rg.stdout.trim();
         if (!scanOutput) {
             if (ctx.hasUI) ctx.ui.notify("No PI!/PI? markers found", "info");
-            setState({ groups: [], nextIndex: 0 }, pi);
+            setState({ groups: [], nextIndex: 0 }, pi, ctx.hasUI ? ctx.ui : undefined);
             return;
         }
 
@@ -385,20 +409,20 @@ export default function (pi: ExtensionAPI) {
         if (formatted === NO_GENUINE_MARKERS) {
             if (ctx.hasUI) ctx.ui.notify("No genuine markers (all matches are docs)", "info");
             else process.stdout.write("No genuine markers (all matches are docs)\n");
-            setState({ groups: [], nextIndex: 0 }, pi);
+            setState({ groups: [], nextIndex: 0 }, pi, ctx.hasUI ? ctx.ui : undefined);
             return;
         }
 
         const tasks = parsePiTasks(formatted);
         if (tasks.length === 0) {
             if (ctx.hasUI) ctx.ui.notify("No genuine markers (all matches are docs)", "info");
-            setState({ groups: [], nextIndex: 0 }, pi);
+            setState({ groups: [], nextIndex: 0 }, pi, ctx.hasUI ? ctx.ui : undefined);
             return;
         }
 
         const newGroups = groupTasks(tasks);
         const newState: InlineBatchState = { groups: newGroups, nextIndex: 0 };
-        setState(newState, pi);
+        setState(newState, pi);  // temp head; status updated after first handoff below
 
         if (!ctx.hasUI) {
             // non-TUI: just output the first group as before (minimal support)
@@ -407,7 +431,7 @@ export default function (pi: ExtensionAPI) {
             process.stdout.write(`${content}\n`);
             // advance for consistency (though non-TUI doesn't persist turns the same way)
             newState.nextIndex = 1;
-            setState(newState, pi);
+            setState(newState, pi, undefined);
             return;
         }
 
@@ -424,7 +448,7 @@ export default function (pi: ExtensionAPI) {
 
         // advance
         newState.nextIndex = 1;
-        setState(newState, pi);
+        setState(newState, pi, ctx.ui);
     };
 
     pi.registerCommand("inline", {
