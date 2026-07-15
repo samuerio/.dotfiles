@@ -27,19 +27,31 @@ async function copyToClipboard(pi: ExtensionAPI, text: string): Promise<boolean>
 	return false;
 }
 
-/** Soft-wrap a line at word boundaries; fall back to hard wrap if no space. */
-function wrapLine(text: string, width: number): string[] {
+/**
+ * Soft-wrap at word boundaries. hangIndent: spaces prepended to continuation
+ * lines only (keeps wrapped tails aligned under the first line's content).
+ */
+function wrapLine(text: string, width: number, hangIndent = 0): string[] {
 	const w = Math.max(8, width);
 	if (text.length <= w) return [text];
+	const hang = hangIndent > 0 ? " ".repeat(hangIndent) : "";
+	const contW = Math.max(8, w - hang.length);
 	const out: string[] = [];
 	let rest = text;
-	while (rest.length > w) {
+	// First line: full width
+	{
 		let breakAt = rest.lastIndexOf(" ", w);
 		if (breakAt < Math.floor(w * 0.4)) breakAt = w;
 		out.push(rest.slice(0, breakAt).trimEnd());
 		rest = rest.slice(breakAt).trimStart();
 	}
-	if (rest) out.push(rest);
+	while (rest.length > contW) {
+		let breakAt = rest.lastIndexOf(" ", contW);
+		if (breakAt < Math.floor(contW * 0.4)) breakAt = contW;
+		out.push(hang + rest.slice(0, breakAt).trimEnd());
+		rest = rest.slice(breakAt).trimStart();
+	}
+	if (rest) out.push(hang + rest);
 	return out;
 }
 
@@ -60,12 +72,14 @@ function buildWidget(lines: string[], footer?: string) {
 				container.addChild(new Text(BLANK_ROW, 1, 0));
 				continue;
 			}
-			for (const part of wrapLine(line, w)) {
+				// Hang continuations under the first line's leading indent (e.g. "  cmd…")
+			const hang = (line.match(/^(\s*)/) ?? ["", ""])[1].length;
+			for (const part of wrapLine(line, w, hang)) {
 				container.addChild(new Text(part.length === 0 ? BLANK_ROW : part, 1, 0));
 			}
 		}
 		if (footer) {
-			for (const part of wrapLine(footer, w)) {
+			for (const part of wrapLine(footer, w, 0)) {
 				container.addChild(new Text(theme.fg("muted", part), 1, 0));
 			}
 		}
@@ -551,14 +565,13 @@ Keep response under 200 words. Be direct, no filler.`;
 
 /**
  * Compact batch format — same intent as STATUS_SYSTEM_PROMPT (last command only),
- * but constrained to a few plain-text lines for the TUI widget.
- * Line 2 is the verbatim command line from the pane log (LLM-copied, not code-extracted).
+ * dense TUI lines. Line 2 = command text after prompt (from log); Line 3 = outcome.
  */
 const BATCH_ITEM_STATUS_SYSTEM_PROMPT = `You are a workspace status analyzer for a compact TUI widget.
 
 Given terminal pane output from ONE coding workspace, analyze ONLY the last executed command and its output. Do not summarize the branch, project, or overall session.
 
-TAG vocabulary for analyze mode (last-command outcome only — do NOT use "idle"):
+TAG vocabulary (last-command outcome — do NOT use "idle"):
   - busy: the last command is still running
   - error: the last command failed (non-zero exit, Error/failed/panic/traceback, etc.) — NEVER use done if it failed
   - done: the last command finished successfully, OR there is no useful last command (shell prompt only)
@@ -566,12 +579,12 @@ TAG vocabulary for analyze mode (last-command outcome only — do NOT use "idle"
 Reply with EXACTLY this shape:
 
 Line 1: TAG — exactly one of: busy | error | done
-Line 2: the exact log line from the pane that contains the last command (copy verbatim from the input — include the prompt if present, e.g. "~/path ❯ echo foo"). Do not invent or shorten to just the command name. If there is no command line, write "(none)".
-Line 3: one short Simplified Chinese sentence about that last command's outcome only (max ~40 Chinese chars). If TAG is error, include or quote the key failure text in this sentence (or use a 4th line only for a long error message).
+Line 2: ONLY the command portion after the shell prompt (❯ $ % >). Example: if the log has "~/path ❯ echo foo; true", write "echo foo; true". Copy that text from the log; do not invent. Do not include the path/prompt. If there is no command, write "(none)".
+Line 3: one short Simplified Chinese outcome (max ~30 chars). Do NOT start with "最后命令". State the result only (e.g. "成功，输出 LAST_CMD_OK"). If TAG is error, you MUST quote the key failure text from the log (e.g. include "Error: simulated failure").
 
 Rules:
 - Focus exclusively on the last command
-- Line 2 MUST be copied from the pane log, not paraphrased (never output only "echo" or "sleep")
+- Line 2 is command-after-prompt only, copied from the pane log
 - No markdown (no #, no code fences, no bullets)
 - Prefer at most 3 lines; 4 lines only when needed for a long error
 - Be direct, no filler`;
@@ -648,8 +661,8 @@ function formatCompactBatchItem(name: string, text: string): string[] {
 		}
 	}
 
-	const out: string[] = [`— ${name} · ${tag} —`];
-	// body[0] = verbatim command line from log; body[1..] = outcome / error
+	const out: string[] = [`── ${name} · ${tag} ──`];
+	// body[0] = command after prompt; body[1..] = outcome / error
 	for (const line of body.slice(0, 3)) {
 		out.push(`  ${line}`);
 	}
