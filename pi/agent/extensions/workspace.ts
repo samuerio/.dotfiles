@@ -27,15 +27,35 @@ async function copyToClipboard(pi: ExtensionAPI, text: string): Promise<boolean>
 	return false;
 }
 
+/** Soft-wrap a line at word boundaries; fall back to hard wrap if no space. */
+function wrapLine(text: string, width: number): string[] {
+	const w = Math.max(8, width);
+	if (text.length <= w) return [text];
+	const out: string[] = [];
+	let rest = text;
+	while (rest.length > w) {
+		let breakAt = rest.lastIndexOf(" ", w);
+		if (breakAt < Math.floor(w * 0.4)) breakAt = w;
+		out.push(rest.slice(0, breakAt).trimEnd());
+		rest = rest.slice(breakAt).trimStart();
+	}
+	if (rest) out.push(rest);
+	return out;
+}
+
 function buildWidget(lines: string[], footer?: string) {
 	return (tui: { width: number }, theme: { fg: (color: string, text: string) => string }) => {
 		const container = new Container();
 		const w = tui.width || 80;
 		for (const line of lines) {
-			container.addChild(new Text(line.length > w ? line.slice(0, w - 1) + "…" : line, 1, 0));
+			for (const part of wrapLine(line, w)) {
+				container.addChild(new Text(part, 1, 0));
+			}
 		}
 		if (footer) {
-			container.addChild(new Text(theme.fg("muted", footer), 1, 0));
+			for (const part of wrapLine(footer, w)) {
+				container.addChild(new Text(theme.fg("muted", part), 1, 0));
+			}
 		}
 		return container;
 	};
@@ -127,17 +147,21 @@ async function selectWorkspace(
 		return null;
 	}
 	const currentName = cwd ? (await readCurrentState(cwd))?.name : undefined;
-	const options = workspaces.map((ws) => {
+
+	// Build display strings and a robust map to avoid fragile string parsing of names
+	const displayToWorkspace = new Map<string, ResolvedWorkspace>();
+	for (const ws of workspaces) {
 		const marks: string[] = [];
 		if (ws.dirty) marks.push("dirty");
 		if (ws.name === currentName) marks.push("current");
 		const mark = marks.length > 0 ? ` (${marks.join(", ")})` : "";
-		return `${ws.name} [${ws.status}]${mark}`;
-	});
-	const choice = await ctx.ui.select(title, options);
+		const display = `${ws.name} [${ws.status}]${mark}`;
+		displayToWorkspace.set(display, ws);
+	}
+
+	const choice = await ctx.ui.select(title, Array.from(displayToWorkspace.keys()));
 	if (!choice) return null;
-	const name = choice.replace(/ \[[^\]]*\]/g, "").replace(/ \([^)]*\)/g, "");
-	return workspaces.find((ws) => ws.name === name) ?? null;
+	return displayToWorkspace.get(choice) ?? null;
 }
 
 type WorkspaceAction = "open" | "status" | "vscode" | "cancel" | "close";
@@ -420,6 +444,50 @@ function isPaneIdle(output: string): boolean {
 	return /[\$%>❯]\s*$/.test(last);
 }
 
+/** Compact tag + snippet for raw batch listing. */
+function classifyRawPane(output: string): { tag: string; snippet: string } {
+	if (!output.trim() || output === "(empty)") {
+		return { tag: "empty", snippet: "(no output)" };
+	}
+	if (output === "(no pane)") {
+		return { tag: "no-pane", snippet: "(no pane target)" };
+	}
+	const nonEmpty = output
+		.trim()
+		.split("\n")
+		.map((l) => l.trim())
+		.filter((l) => l.length > 0);
+	const last = nonEmpty[nonEmpty.length - 1] ?? "";
+	if (isPaneIdle(output)) {
+		return { tag: "idle", snippet: last || "(shell prompt)" };
+	}
+	const hasError = /\b(error|failed|failure|panic|exception|traceback)\b/i.test(output);
+	return { tag: hasError ? "error" : "busy", snippet: last || "(running)" };
+}
+
+function formatBatchRawLines(captures: Array<{ name: string; output: string }>): string[] {
+	const nameWidth = Math.min(
+		40,
+		Math.max(8, ...captures.map((c) => c.name.length)),
+	);
+	const lines: string[] = [`Batch · ${captures.length} active`];
+	for (const c of captures) {
+		const { tag, snippet } = classifyRawPane(c.output);
+		const name = c.name.padEnd(nameWidth);
+		const tagPad = tag.padEnd(7);
+		lines.push(`${name}  ${tagPad}  ${snippet}`);
+	}
+	return lines;
+}
+
+function buildBatchMonitorFooter(socket: string, names: string[]): string {
+	if (names.length === 0) return "";
+	if (names.length === 1) {
+		return `Monitor: tmux -S ${socket} attach -t ${names[0]}`;
+	}
+	return `Monitor: tmux -S ${socket} attach -t <${names.join("|")}>`;
+}
+
 // ─── Rush Mode Resolution ─────────────────────────────────────────
 
 type ModeSpec = {
@@ -463,12 +531,28 @@ const STATUS_SYSTEM_PROMPT = `You are a workspace status analyzer. Given termina
 
 Keep response under 200 words. Be direct, no filler.`;
 
+/** Compact multi-line format for batch widget (no markdown). */
+const BATCH_ITEM_STATUS_SYSTEM_PROMPT = `You are a workspace status analyzer for a compact TUI widget (not a full report).
+
+Given terminal pane output from ONE coding workspace, reply in Simplified Chinese with this shape:
+
+Line 1: TAG — exactly one of: idle | busy | error | done
+  (optionally append " — short note" on the same line)
+Line 2: one short sentence of what is happening (max ~40 Chinese chars)
+Line 3 (only if TAG is error): the key error message, one line
+
+Rules:
+- No markdown (no #, no code fences, no bullets)
+- At most 3 lines total
+- Be direct, no filler`;
+
 type AnalysisResult = { analysis: string } | { error: string };
 
 async function analyzeStatus(
 	pi: ExtensionAPI,
 	ctx: ExtensionCommandContext,
 	paneOutput: string,
+	systemPrompt: string = STATUS_SYSTEM_PROMPT,
 ): Promise<AnalysisResult> {
 	const rushSpec = loadRushModeSpec(ctx.cwd);
 	if (!rushSpec) {
@@ -494,7 +578,7 @@ async function analyzeStatus(
 	const response = await completeSimple(
 		model,
 		{
-			systemPrompt: STATUS_SYSTEM_PROMPT,
+			systemPrompt,
 			messages: [userMessage],
 		},
 		{
@@ -511,6 +595,69 @@ async function analyzeStatus(
 		.join("\n")
 		.trim();
 	return { analysis: text };
+}
+
+/** Format compact LLM (or fallback) text into 2–3 widget lines for one workspace. */
+function formatCompactBatchItem(name: string, text: string): string[] {
+	const raw = text
+		.trim()
+		.split("\n")
+		.map((l) => l.trim())
+		.filter((l) => l.length > 0);
+
+	let tag = "?";
+	const body: string[] = [];
+	if (raw.length > 0) {
+		const m = raw[0].match(/^(idle|busy|error|done)\b\s*[—\-:：]?\s*(.*)$/i);
+		if (m) {
+			tag = m[1].toLowerCase();
+			if (m[2]) body.push(m[2]);
+			body.push(...raw.slice(1));
+		} else {
+			body.push(...raw);
+		}
+	}
+
+	const out: string[] = [`— ${name} · ${tag} —`];
+	for (const line of body.slice(0, 2)) {
+		out.push(`  ${line}`);
+	}
+	return out;
+}
+
+/**
+ * Analyze each active workspace in parallel with a compact prompt,
+ * then render a dense multi-workspace widget.
+ */
+async function analyzeBatchStatusParallel(
+	pi: ExtensionAPI,
+	ctx: ExtensionCommandContext,
+	items: Array<{ name: string; output: string }>,
+): Promise<string[]> {
+	const results = await Promise.all(
+		items.map(async (item) => {
+			if (!item.output.trim() || item.output === "(no pane)" || item.output === "(empty)") {
+				const { tag, snippet } = classifyRawPane(item.output || "(empty)");
+				return { name: item.name, text: `${tag}\n${snippet}` };
+			}
+			try {
+				const result = await analyzeStatus(pi, ctx, item.output, BATCH_ITEM_STATUS_SYSTEM_PROMPT);
+				if ("analysis" in result) {
+					return { name: item.name, text: result.analysis };
+				}
+				return { name: item.name, text: `error\nAnalysis failed: ${result.error}` };
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				return { name: item.name, text: `error\nAnalysis failed: ${msg}` };
+			}
+		}),
+	);
+
+	const lines: string[] = [`Batch · ${results.length} active`];
+	for (const r of results) {
+		lines.push(...formatCompactBatchItem(r.name, r.text));
+	}
+	return lines;
 }
 
 // ─── Session Management ───────────────────────────────────────────
@@ -664,7 +811,7 @@ export default function (pi: ExtensionAPI): void {
 
 	// ── /ws-list ──
 	pi.registerCommand("ws-list", {
-		description: "List all branch-workspaces and optionally run an action.",
+		description: "List all branch-workspaces and optionally run an action. (For status of all active: /ws-status -b)",
 		handler: async (_args, ctx) => {
 			// Select workspace
 			const selected = await selectWorkspace(pi, ctx, "Select workspace", ctx.cwd);
@@ -680,7 +827,10 @@ export default function (pi: ExtensionAPI): void {
 			const action = await ctx.ui.select(`Action for "${selected.name}"`, actions) as WorkspaceAction | undefined;
 			if (!action) return;
 
-			const cmd = `/ws-${action} -b ${selected.name}`;
+			// Paste the command using positional argument for the selected workspace.
+			// This works for all actions offered here (open / status / vscode / cancel / close).
+			// For batch status of *all* active workspaces, use `/ws-status -b` (or --batch) directly.
+			const cmd = `/ws-${action} ${selected.name}`;
 			ctx.ui.pasteToEditor(cmd);
 		},
 	});
@@ -775,14 +925,77 @@ export default function (pi: ExtensionAPI): void {
 		},
 	});
 
-	// ── /ws-status [-b name] [-s] [-a|--analyze] ──
+	// ── /ws-status [-b|--batch] [name] [-s] [-a|--analyze] ──
 	pi.registerCommand("ws-status", {
-		description: "Show workspace status. Usage: /ws-status [name] [-s] [-a|--analyze]",
+		description: "Show workspace status. Usage: /ws-status [-b|--batch] [name] [-s] [-a|--analyze]",
 		handler: async (args, ctx) => {
 			const analyze = /(^|\s)(--analyze|-a)\b/.test(args);
 			const selectFlag = /(^|\s)-s\b/.test(args);
-			const { name: branchName } = parsePositionalName(args, [/(^|\s)(--analyze|-a)\b/g, /(^|\s)-s\b/g]);
+			const batch = /(^|\s)(-b|--batch)\b/.test(args);
+			const flagPatterns = [
+				/(^|\s)(--analyze|-a)\b/g,
+				/(^|\s)-s\b/g,
+				/(^|\s)(-b|--batch)\b/g,
+			];
+			const { name: branchName } = parsePositionalName(args, flagPatterns);
 
+			if (batch) {
+				const socket = await getTmuxSocket(pi);
+				if (!socket) {
+					ctx.ui.notify("Failed to resolve tmux socket.", "error");
+					return;
+				}
+
+				const allWs = await listAllWorkspaces(pi);
+				const actives = allWs.filter((w) => w.status === "active");
+				if (actives.length === 0) {
+					ctx.ui.notify("No active workspaces.", "info");
+					return;
+				}
+
+				const captures: Array<{ name: string; output: string }> = [];
+				for (const ws of actives) {
+					const target = await discoverPaneTarget(pi, socket, ws.name);
+					if (!target) {
+						captures.push({ name: ws.name, output: "(no pane)" });
+						continue;
+					}
+					// Match single-workspace capture depth when analyzing so each parallel call gets full context
+					const capLines = analyze ? 200 : 12;
+					const output = await capturePaneOutput(pi, socket, target, capLines);
+					captures.push({ name: ws.name, output: output || "(empty)" });
+				}
+
+				const names = captures.map((c) => c.name);
+				const attachCmds = names.map((n) => `tmux -S ${socket} attach -t ${n}`).join("\n");
+				const copied = await copyToClipboard(pi, attachCmds);
+				const monitorCmd =
+					buildBatchMonitorFooter(socket, names) + (copied ? " (copied)" : "");
+
+				if (!analyze) {
+					const lines = formatBatchRawLines(captures);
+					ctx.ui.setWidget("ws-status", buildWidget(lines, monitorCmd), { placement: "aboveEditor" });
+					return;
+				}
+
+				ctx.ui.setWidget(
+					"ws-status",
+					buildWidget([`Analyzing ${captures.length} workspaces in parallel...`]),
+					{ placement: "aboveEditor" },
+				);
+
+				try {
+					const lines = await analyzeBatchStatusParallel(pi, ctx, captures);
+					ctx.ui.setWidget("ws-status", buildWidget(lines, monitorCmd), { placement: "aboveEditor" });
+				} catch (err) {
+					const msg = err instanceof Error ? err.message : String(err);
+					ctx.ui.setWidget("ws-status", undefined);
+					ctx.ui.notify(`LLM batch analysis failed: ${msg}`, "warning");
+				}
+				return;
+			}
+
+			// Single workspace (existing behavior)
 			const resolved = await resolveNameOrSelect(pi, branchName, ctx.cwd, ctx, selectFlag);
 			if (!resolved) return;
 			const { name } = resolved;
