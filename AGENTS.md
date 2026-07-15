@@ -15,3 +15,5 @@ When debugging or verifying a pi coding agent extension (`pi/agent/extensions/*.
 Use the `tmux` SKILL only when headless mode cannot cover the case, such as TUI-specific behavior, multi-turn follow-up, slash-command interaction, cancel/Esc behavior, or failures that require mid-session input.
 
 When you do use the `tmux` SKILL for interactive verification, print the attach command for the user right after the session starts and again when reporting results, so they can observe live. Never run interactive tests in a detached session the user cannot attach to.
+
+To cleanly quit pi interactive mode during testing, send the slash command `/quit` (Ctrl+C or Ctrl+D may leave the session in a bad state or not fully terminate the TUI). After quitting, relaunch with explicit extension loading e.g. `pi --no-session --no-extensions -e ./pi/agent/extensions/inline.ts` (or the relevant extension) so that code changes take effect. Use a dedicated clean pane or window for each test run to avoid side effects on other work.

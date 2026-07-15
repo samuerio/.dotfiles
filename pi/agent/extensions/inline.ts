@@ -18,7 +18,7 @@ Filter:
 
 Construct:
 - For every genuine marker (after filtering), emit one <pi-task> element.
-- The element body is the raw rg context (the path:line:content lines surrounding the match, preserved exactly as they appear in the rg output, including the path:line prefix). Do not summarize, rewrite, or trim the snippet.
+- The element body must be the raw rg output block for that match (the surrounding lines with their exact "path:line:" or "path-line-" prefixes as produced by rg -C3 -n -H). Do not summarize, rewrite, trim, or reformat the snippet.
 - Do not include a type attribute. The PI! or PI? in the content itself indicates the nature of the task.
 - The file attribute is the relative file path from the rg output. The line attribute is the line number of the match line from the rg output (the scan-time line number).
 - Do NOT emit a separate comment field. The matching line in the snippet already carries the comment text.
@@ -33,16 +33,20 @@ NO_GENUINE_MARKERS
 
 and nothing else.
 
-Output shape (multiple markers, one per genuine match):
+Output shape (multiple markers, one per genuine match). Example of realistic rg -C output inside the body:
 
-<pi-task file="<relative path>" line="<n>">
-<path>:<line>: <raw rg context line>
-<path>:<line>: <raw rg context line>
+<pi-task file="src/foo.ts" line="42">
+src/foo.ts-39- function bar() {
+src/foo.ts-40-   const x = 1;
+src/foo.ts:42:// PI! add error handling here
+src/foo.ts-43-   console.log(x);
+src/foo.ts-44- }
 </pi-task>
 
-<pi-task file="<relative path>" line="<n>">
-<path>:<line>: <raw rg context line>
-<path>:<line>: <raw rg context line>
+<pi-task file="src/bar.ts" line="10">
+src/bar.ts-7-  // earlier
+src/bar.ts:10:// PI? should we rename this?
+src/bar.ts-11- function baz() {}
 </pi-task>
 
 Use English for any prose. Do NOT output meta commentary, resolution rules, or output format instructions. Output ONLY the <pi-task> elements (or the NO_GENUINE_MARKERS token).`;
@@ -64,7 +68,7 @@ const INLINE_STATE_KEY = "inline-state";
 
 interface InlineTask {
     line: number;
-    content: string; // raw rg context lines inside the <pi-task>
+    content: string; // raw rg output block (with path:line: / path-line- prefixes) inside the <pi-task>
     file: string;
 }
 
@@ -191,12 +195,20 @@ function setState(newState: InlineBatchState | null, pi: ExtensionAPI, ui?: Exte
 
 function updateInlineStatus(ui: ExtensionUI): void {
     const s = inlineState;
-    if (!s || s.groups.length === 0 || s.nextIndex >= s.groups.length) {
+    // Show status whenever there is a batch with remaining groups.
+    // nextIndex = number of groups already handed off (can be 0 right after
+    // batch creation). This means (0/N) is possible and acceptable.
+    const hasRemaining =
+        !!s &&
+        s.groups.length > 0 &&
+        s.nextIndex < s.groups.length;
+
+    if (!hasRemaining) {
         ui.setStatus("inline", undefined);
         return;
     }
     const label = ui.theme.fg("accent", "inline");
-    ui.setStatus("inline", `${label} (${s.nextIndex + 1}/${s.groups.length})`);
+    ui.setStatus("inline", `${label} (${s.nextIndex}/${s.groups.length})`);
 }
 
 function parsePiTasks(text: string): InlineTask[] {
@@ -422,7 +434,7 @@ export default function (pi: ExtensionAPI) {
 
         const newGroups = groupTasks(tasks);
         const newState: InlineBatchState = { groups: newGroups, nextIndex: 0 };
-        setState(newState, pi);  // temp head; status updated after first handoff below
+        setState(newState, pi);  // status will show (0/N) or (1/N) depending on timing
 
         if (!ctx.hasUI) {
             // non-TUI: just output the first group as before (minimal support)
