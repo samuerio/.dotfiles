@@ -1211,6 +1211,24 @@ function formatCloseText(result: CloseResult): string {
 	return msg;
 }
 
+function formatStateText(env: WorkspaceEnv): string {
+	if (env.status === "missing") {
+		return `Workspace "${env.name}" does not exist (no worktree, no session). Open it with ws_open first.`;
+	}
+	return [
+		`Workspace "${env.name}" state.`,
+		`status: ${env.status}`,
+		`dirty: ${env.dirty ?? false}`,
+		`worktreePath: ${env.worktreePath ?? ""}`,
+		`socket: ${env.socket ?? ""}`,
+		`session: ${env.session}`,
+		`paneTarget: ${env.paneTarget ?? ""}`,
+		`paneIdle: ${env.paneIdle ?? "?"}`,
+		`preValidated: ${env.preValidated}`,
+		`monitorCmd: ${env.monitorCmd ?? ""}`,
+	].join("\n");
+}
+
 // ─── Commands ─────────────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI): void {
@@ -1840,6 +1858,36 @@ ${WS_HFI_SKILL_TEXT}`;
 			return {
 				content: [{ type: "text" as const, text: formatCloseText(result) }],
 				details: result,
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "ws_state",
+		label: "Inspect workspace",
+		description:
+			"Read-only: return the dispatch environment envelope for an existing branch-workspace (name, worktreePath, socket, session, paneTarget, paneIdle, status, dirty, monitorCmd). No side effects (does not create sessions or change current).",
+		promptSnippet: "Inspect a branch-workspace env (socket/paneTarget/paneIdle); read-only.",
+		promptGuidelines: [
+			"Before dispatching a task to a branch-workspace, use ws_state to query its socket/paneTarget and confirm paneIdle. No need to re-open an already-open workspace.",
+			"Require an exact full name (e.g. feat/my-feature); use ws_list when the name is unknown.",
+			"If status is missing, the workspace has no worktree and no session. Open it with ws_open first.",
+		],
+		parameters: Type.Object({
+			name: Type.String({ description: "Full branch-workspace name (exact match)." }),
+		}),
+		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+			const name = typeof params.name === "string" ? params.name.trim() : "";
+			if (!name) {
+				return {
+					content: [{ type: "text" as const, text: "ws_state requires a non-empty name." }],
+					details: { ok: false, error: "name required" },
+				};
+			}
+			const env = await buildWorkspaceEnv(pi, name);
+			return {
+				content: [{ type: "text" as const, text: formatStateText(env) }],
+				details: { ok: env.status !== "missing", ...env },
 			};
 		},
 	});
