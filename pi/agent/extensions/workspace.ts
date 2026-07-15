@@ -28,60 +28,29 @@ async function copyToClipboard(pi: ExtensionAPI, text: string): Promise<boolean>
 }
 
 /**
- * Soft-wrap at word boundaries. hangIndent: spaces prepended to continuation
- * lines only (keeps wrapped tails aligned under the first line's content).
- */
-function wrapLine(text: string, width: number, hangIndent = 0): string[] {
-	const w = Math.max(8, width);
-	if (text.length <= w) return [text];
-	const hang = hangIndent > 0 ? " ".repeat(hangIndent) : "";
-	const contW = Math.max(8, w - hang.length);
-	const out: string[] = [];
-	let rest = text;
-	// First line: full width
-	{
-		let breakAt = rest.lastIndexOf(" ", w);
-		if (breakAt < Math.floor(w * 0.4)) breakAt = w;
-		out.push(rest.slice(0, breakAt).trimEnd());
-		rest = rest.slice(breakAt).trimStart();
-	}
-	while (rest.length > contW) {
-		let breakAt = rest.lastIndexOf(" ", contW);
-		if (breakAt < Math.floor(contW * 0.4)) breakAt = contW;
-		out.push(hang + rest.slice(0, breakAt).trimEnd());
-		rest = rest.slice(breakAt).trimStart();
-	}
-	if (rest) out.push(hang + rest);
-	return out;
-}
-
-/**
  * Spacer for blank rows. pi-tui Text skips anything that is empty after trim()
  * (including "" and "\u00A0"), returning zero height. U+200B is not trimmed, so
  * Text still renders a full-width padded blank line.
+ *
+ * Do not pre-wrap lines here — Text already soft-wraps with padding-aware,
+ * ANSI-aware width. A second wrapLine layer was off-by-padding and worse.
  */
 const BLANK_ROW = "\u200B";
 
 function buildWidget(lines: string[], footer?: string) {
-	return (tui: { width: number }, theme: { fg: (color: string, text: string) => string }) => {
+	return (_tui: { width: number }, theme: { fg: (color: string, text: string) => string }) => {
 		const container = new Container();
-		const w = tui.width || 80;
 		for (const line of lines) {
 			// Map empty / unicode-whitespace-only rows to BLANK_ROW so Text keeps height
 			if (line.length === 0 || line === BLANK_ROW || /^[\s\u00A0]*$/.test(line)) {
 				container.addChild(new Text(BLANK_ROW, 1, 0));
 				continue;
 			}
-				// Hang continuations under the first line's leading indent (e.g. "  cmd…")
-			const hang = (line.match(/^(\s*)/) ?? ["", ""])[1].length;
-			for (const part of wrapLine(line, w, hang)) {
-				container.addChild(new Text(part.length === 0 ? BLANK_ROW : part, 1, 0));
-			}
+			container.addChild(new Text(line, 1, 0));
 		}
 		if (footer) {
-			for (const part of wrapLine(footer, w, 0)) {
-				container.addChild(new Text(theme.fg("muted", part), 1, 0));
-			}
+			container.addChild(new Text(BLANK_ROW, 1, 0));
+			container.addChild(new Text(theme.fg("muted", footer), 1, 0));
 		}
 		return container;
 	};
@@ -556,12 +525,93 @@ function loadRushModeSpec(cwd: string): ModeSpec | null {
 
 // ─── LLM Status Analysis ─────────────────────────────────────────
 
-const STATUS_SYSTEM_PROMPT = `You are a workspace status analyzer. Given terminal pane output from a coding workspace:
+/** Lines of pane log appended under single-workspace analyze (programmatic, not LLM). */
+const SINGLE_ANALYZE_RAW_TAIL = 15;
 
-1. Identify the last executed command and briefly describe what happened in Simplified Chinese — what it did, whether it succeeded or failed, and any notable output.
-2. Show the last command and its output inside a markdown code block (\`\`\`). If the output is 15 lines or fewer, show it in full. If it exceeds 15 lines, extract only the key content (must include the command line and the final result), keeping the snippet within 15 lines. Do NOT truncate with "..." — show selected lines in full.
+/**
+ * Single-workspace -a: structured fields only. Raw pane tail is attached in code.
+ */
+const STATUS_SYSTEM_PROMPT = `You are a workspace status analyzer for a single coding workspace TUI widget.
 
-Keep response under 200 words. Be direct, no filler.`;
+Given terminal pane output, analyze ONLY the last executed command and its output. Do not summarize the branch, project, or overall session.
+
+TAG vocabulary (last-command outcome — do NOT use "idle"):
+  - busy: the last command is still running
+  - error: the last command failed (non-zero exit, Error/failed/panic/traceback, etc.) — NEVER use done if it failed
+  - done: the last command finished successfully, OR there is no useful last command (shell prompt only)
+
+Reply with EXACTLY three lines, each with a fixed prefix:
+
+status: <done|error|busy>
+cmd: <command after shell prompt only>
+summary: <one short Simplified Chinese outcome>
+
+Rules for each field:
+- status: exactly one of done | error | busy (lowercase)
+- cmd: ONLY the command portion after the shell prompt (❯ $ % >). Example: if the log has "~/path ❯ echo foo; true", write "echo foo; true". Copy from the log; do not invent. Do not include the path/prompt. If there is no command, write "(none)".
+- summary: Simplified Chinese, max ~40 chars. Do NOT start with "最后命令". State the result only (e.g. "成功，输出 LAST_CMD_OK"). If status is error, you MUST quote key failure text from the log (e.g. include "Error: simulated failure").
+- Do NOT guess shell control-flow semantics (no "because there was no next command", no inventing exit codes you cannot see).
+- No markdown, no code fences, no bullets, no blank lines, no extra lines.
+- Do NOT paste raw pane log — the UI attaches that separately.`;
+
+/**
+ * Normalize LLM single-analyze text into status/cmd/summary lines.
+ * Tolerates missing prefixes when the model returns bare 3-line shape.
+ */
+function formatSingleAnalyzeFields(analysis: string): string[] {
+	const raw = analysis
+		.trim()
+		.split("\n")
+		.map((l) => l.trim())
+		.filter((l) => l.length > 0);
+
+	let status = "";
+	let cmd = "";
+	let summary = "";
+
+	for (const line of raw) {
+		const m = line.match(/^(status|cmd|summary)\s*:\s*(.*)$/i);
+		if (m) {
+			const key = m[1].toLowerCase();
+			const val = m[2].trim();
+			if (key === "status") status = val;
+			else if (key === "cmd") cmd = val;
+			else summary = val;
+		}
+	}
+
+	// Bare three-line fallback: tag / cmd / summary
+	if (!status && raw.length >= 1) {
+		const m = raw[0].match(/^(idle|busy|error|done)\b/i);
+		if (m) {
+			status = m[1].toLowerCase() === "idle" ? "done" : m[1].toLowerCase();
+			if (raw.length >= 2 && !cmd) cmd = raw[1].replace(/^cmd\s*:\s*/i, "");
+			if (raw.length >= 3 && !summary) summary = raw[2].replace(/^summary\s*:\s*/i, "");
+		}
+	}
+
+	if (status === "idle") status = "done";
+	if (!status) status = "?";
+	if (!cmd) cmd = "(none)";
+	if (!summary) summary = raw.find((l) => !/^(status|cmd|summary)\s*:/i.test(l) && !/^(idle|busy|error|done)$/i.test(l)) ?? "(no summary)";
+
+	return [`status: ${status}`, `cmd: ${cmd}`, `summary: ${summary}`];
+}
+
+/** Single -a widget lines: structured fields + programmatic raw tail. */
+function formatSingleAnalyzeWidget(analysis: string, paneOutput: string): string[] {
+	const lines = formatSingleAnalyzeFields(analysis);
+	lines.push(BLANK_ROW, "── raw ──");
+	const tail = paneOutput.replace(/\s+$/, "").split("\n").slice(-SINGLE_ANALYZE_RAW_TAIL);
+	if (tail.length === 0 || (tail.length === 1 && !tail[0].trim())) {
+		lines.push("(no output)");
+	} else {
+		for (const row of tail) {
+			lines.push(row.length === 0 ? BLANK_ROW : row);
+		}
+	}
+	return lines;
+}
 
 /**
  * Compact batch format — same intent as STATUS_SYSTEM_PROMPT (last command only),
@@ -1089,12 +1139,12 @@ export default function (pi: ExtensionAPI): void {
 			}
 
 			if ("analysis" in result) {
-				const lines = result.analysis.split("\n");
+				const lines = formatSingleAnalyzeWidget(result.analysis, paneOutput);
 				ctx.ui.setWidget("ws-status", buildWidget(lines, monitorCmd), { placement: "aboveEditor" });
 			} else {
 				ctx.ui.setWidget("ws-status", undefined);
 				const lines = paneOutput.trim().split("\n");
-				const tail = lines.slice(-15).join("\n");
+				const tail = lines.slice(-SINGLE_ANALYZE_RAW_TAIL).join("\n");
 				ctx.ui.notify(
 					`${result.error} Raw output for "${name}":\n${tail}`,
 					"warning",
