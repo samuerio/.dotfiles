@@ -276,6 +276,5 @@
     "terminal.integrated.fontFamily": "'Fira Code'",
     "terminal.integrated.fontSize": 14,
     "files.eol": "\n",
-    "git.openRepositoryInParentFolders": "never",
-    "diffEditor.hideUnchangedRegions.enabled": true
+    "git.openRepositoryInParentFolders": "never"
 }
