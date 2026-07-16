@@ -68,15 +68,11 @@ Notes:
 - **Close gates (fail-closed):** clean `active`/`idle` close without confirmation. **dirty** and **orphan** both require explicit user confirmation before `force: true`. Do not auto-resolve either.
 - **Orphan + `ws_open`:** open rebuilds the worktree and reuses the existing same-named session without resetting its cwd. Prefer `ws_close` (confirmed) then `ws_open` when cleaning up an orphan.
 
-## Current branch-workspace
-
-The **current** branch-workspace is the one most recently opened via `ws_open`. Inspect it with **`ws_status` (no `name`)**.
-
 ## Orchestration
 
 > **SKILL roles**: `refine-task` clarifies a single task's scope through Q&A and outputs plain task text for immediate dispatch. `draft-impl-handoff` produces a structured handoff document consumed by a headless `pi` worker. Do not conflate the two — **task** always uses `refine-task` (or fast-path); **handoff-for-impl**'s generate-then-run path always uses `draft-impl-handoff`.
 
-Name-scoped operations use the full branch-workspace name, exact match, no fuzzy lookup. Use the tmux SKILL only to **send input** and **watch output** with `socket` / `paneTarget` from `ws_status` — do not re-derive them.
+Use the tmux SKILL only to **send input** and **watch output** with `socket` / `paneTarget` from `ws_status` — do not re-derive them.
 
 ### Triggers
 
@@ -97,8 +93,6 @@ Match **natural language** that includes the keyword **`ws`**. Match intent from
 | Current | HFI on the current workspace | `current ws hfi` |
 | Named | HFI on workspace `<name>` | `on <name> ws hfi` |
 | New | Create/open a workspace, then HFI | `new ws hfi` |
-
-Lifecycle (list / open / close / status) is **not** driven by these triggers — use the `ws_*` tools.
 
 ### Model selection
 
