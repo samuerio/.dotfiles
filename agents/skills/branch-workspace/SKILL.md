@@ -2,8 +2,8 @@
 name: branch-workspace
 description: >-
   Orchestrate branch-workspace task dispatch and handoff-for-impl via natural
-  language with the keyword "ws". Examples: on current ws + task; on <name> ws
-  + task; new ws + task; current/named/new ws hfi.
+  language with the keyword "bw". Examples: on current bw + task; on <name> bw
+  + task; new bw + task; current/named/new bw hfi.
 ---
 
 ## Concept
@@ -15,7 +15,7 @@ A **branch-workspace** is an isolated execution environment bound to a single br
 
 Each branch-workspace is identified by `<name>`. The git branch name and the tmux session name both equal `<name>`. The two components share this identity and must be managed together.
 
-**Lifecycle** (list / open / close) is provided by the `ws_list`, `ws_open`, and `ws_close` tools. This skill only orchestrates **task** dispatch and **handoff-for-impl**.
+**Lifecycle** (list / open / close) is provided by the `bw_list`, `bw_open`, and `bw_close` tools. This skill only orchestrates **task** dispatch and **handoff-for-impl**.
 
 ## Role Boundaries
 
@@ -34,14 +34,14 @@ The worker agent performs implementation work inside the branch-workspace. It re
 
 | Tool | Role |
 |------|------|
-| `ws_list` | Read-only inventory: name, state (`active`/`idle`/`orphan`), dirty, current. `missing` does not appear here (list is worktree ∪ session). |
-| `ws_open` | Open or reuse worktree + tmux session; set current. Returns only `ok` / `name` / `warnings` (or `error`) — not env. Always call `ws_status` after open, before dispatch. |
-| `ws_close` | Remove worktree + kill session; dirty or orphan → `needsForce`; ask the user, then retry with `force: true` |
-| `ws_status` | Read-only **status** report: `state` + env. Omit `name` → current; pass `name` for an exact target. Required for dispatch readiness after open. |
+| `bw_list` | Read-only inventory: name, state (`active`/`idle`/`orphan`), dirty, current. `missing` does not appear here (list is worktree ∪ session). |
+| `bw_open` | Open or reuse worktree + tmux session; set current. Returns only `ok` / `name` / `warnings` (or `error`) — not env. Always call `bw_status` after open, before dispatch. |
+| `bw_close` | Remove worktree + kill session; dirty or orphan → `needsForce`; ask the user, then retry with `force: true` |
+| `bw_status` | Read-only **status** report: `state` + env. Omit `name` → current; pass `name` for an exact target. Required for dispatch readiness after open. |
 
 ## Workspace state
 
-**state** is the four-value lifecycle enum. **status** (via the `ws_status` tool) is a full report: `state` + env and related fields.
+**state** is the four-value lifecycle enum. **status** (via the `bw_status` tool) is a full report: `state` + env and related fields.
 
 State is derived from worktree × session presence:
 
@@ -54,29 +54,29 @@ State is derived from worktree × session presence:
 
 Notes:
 
-- **`dirty` is not a state.** It is an orthogonal flag on worktrees (`active` or `idle`). Closing a dirty worktree returns `needsForce: "dirty"`; ask the user, then `ws_close` with `force: true`.
+- **`dirty` is not a state.** It is an orthogonal flag on worktrees (`active` or `idle`). Closing a dirty worktree returns `needsForce: "dirty"`; ask the user, then `bw_close` with `force: true`.
 - **Workspace `idle` ≠ pane idle/busy.** Workspace `idle` (a **state**) means no tmux session. Pane idle/busy (`paneIdle`) means whether the pane is free to accept input. Task dispatch needs **active** workspace **and** an idle pane.
-- **Close gates:** never auto-resolve `dirty`/`orphan` — always get explicit user confirmation before `force: true` (see `ws_close` above).
-- **Orphan cleanup:** reopening an orphan does *not* reset the reused session's cwd — prefer `ws_close` (confirmed) then `ws_open` instead of reopening directly.
+- **Close gates:** never auto-resolve `dirty`/`orphan` — always get explicit user confirmation before `force: true` (see `bw_close` above).
+- **Orphan cleanup:** reopening an orphan does *not* reset the reused session's cwd — prefer `bw_close` (confirmed) then `bw_open` instead of reopening directly.
 
 ## Orchestration
 
 > **SKILL roles**: `refine-task` clarifies a single task's scope through Q&A and outputs plain task text for immediate dispatch. `draft-impl-handoff` produces a structured handoff document consumed by a headless `pi` worker. Do not conflate the two — **task** always uses `refine-task` (or fast-path); **handoff-for-impl**'s generate-then-run path always uses `draft-impl-handoff`.
 
-Use the tmux SKILL only to **send input** and **watch output** with `socket` / `paneTarget` from `ws_status` — do not re-derive them.
+Use the tmux SKILL only to **send input** and **watch output** with `socket` / `paneTarget` from `bw_status` — do not re-derive them.
 
 ### Triggers
 
-Match **natural language** that includes the keyword **`ws`**. Match intent from phrasing; do not require exact wording.
+Match **natural language** that includes the keyword **`bw`**. Match intent from phrasing; do not require exact wording.
 
 | Mode | Target | Intent | Example utterances |
 |------|--------|--------|--------------------|
-| **Task** (wait for completion) | Current | Run `<task>` on the current workspace | `on current ws, <task>` |
-| | Named | Run `<task>` on workspace `<name>` | `on <name> ws, <task>` |
-| | New | Create/open a workspace, then run `<task>` | `new ws, <task>` |
-| **HFI** (silent kickoff) | Current | HFI on the current workspace | `current ws hfi` |
-| | Named | HFI on workspace `<name>` | `on <name> ws hfi` |
-| | New | Create/open a workspace, then HFI | `new ws hfi` |
+| **Task** (wait for completion) | Current | Run `<task>` on the current workspace | `on current bw, <task>` |
+| | Named | Run `<task>` on workspace `<name>` | `on <name> bw, <task>` |
+| | New | Create/open a workspace, then run `<task>` | `new bw, <task>` |
+| **HFI** (silent kickoff) | Current | HFI on the current workspace | `current bw hfi` |
+| | Named | HFI on workspace `<name>` | `on <name> bw hfi` |
+| | New | Create/open a workspace, then HFI | `new bw hfi` |
 
 
 *Note: **Task** dispatches work and waits for the worker to signal completion. **Handoff-for-impl (HFI)** is a silent kickoff that does not wait for completion or capture output.*
@@ -89,9 +89,9 @@ Use the `pi-headless` SKILL defaults unless the user asks to choose a model (e.g
 
 Before task or HFI dispatch, resolve the workspace target from the utterance:
 
-1. **Current** — `ws_status` (omit `name`).
-2. **Named** — `ws_status` with exact `<name>`.
-3. **New** — derive a name from the task / plan / conversation, then `ws_open` + `ws_status`:
+1. **Current** — `bw_status` (omit `name`).
+2. **Named** — `bw_status` with exact `<name>`.
+3. **New** — derive a name from the task / plan / conversation, then `bw_open` + `bw_status`:
    - Default `feat/<feature-name>` (short kebab-case).
    - Use a matching prefix when the work is clearly a fix, refactor, chore, experiment, etc. (`fix/`, `refactor/`, `chore/`, `exp/`, …).
    - If a suitable name cannot be derived, ask the user.
@@ -161,4 +161,4 @@ Use when a finalized plan already exists in the current conversation (plan doc, 
 5. Report only:
    - the branch-workspace name
    - that the command was sent
-   - the monitor command (`monitorCmd` from `ws_status`)
+   - the monitor command (`monitorCmd` from `bw_status`)

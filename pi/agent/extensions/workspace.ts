@@ -435,7 +435,7 @@ function loadRushModeSpec(cwd: string): ModeSpec | null {
 
 /**
  * Shared -a analyzer: structured fields only. Raw pane tail is attached in code.
- * Used by single /ws-log -a and by batch /ws-log -b -a (N parallel calls).
+ * Used by single /bw-log -a and by batch /bw-log -b -a (N parallel calls).
  */
 const STATUS_SYSTEM_PROMPT = `You are a workspace status analyzer for a single coding workspace TUI widget.
 
@@ -539,7 +539,7 @@ function formatBatchNameHeader(name: string, status: string): string {
 }
 
 /**
- * Single /ws-log without -a: current pane idle|busy + raw tail + Monitor (footer).
+ * Single /bw-log without -a: current pane idle|busy + raw tail + Monitor (footer).
  */
 function formatSingleRawWidget(paneOutput: string): string[] {
 	const { tag } = classifyRawPane(paneOutput);
@@ -997,7 +997,7 @@ function formatOpenText(result: OpenResult): string {
 	return lines.join("\n");
 }
 
-/** Agent-facing open details: no path/created/env (use ws_status for dispatch readiness). */
+/** Agent-facing open details: no path/created/env (use bw_status for dispatch readiness). */
 function openToolDetails(result: OpenResult): {
 	ok: boolean;
 	name: string;
@@ -1031,7 +1031,7 @@ function formatCloseText(result: CloseResult): string {
 
 function formatStatusText(env: WorkspaceEnv): string {
 	if (env.state === "missing") {
-		return `Workspace "${env.name}" does not exist (no worktree, no session). Open it with ws_open first.`;
+		return `Workspace "${env.name}" does not exist (no worktree, no session). Open it with bw_open first.`;
 	}
 	return [
 		`Workspace "${env.name}" status.`,
@@ -1055,9 +1055,9 @@ export default function (pi: ExtensionAPI): void {
 		if (state) updateStatusBar(ctx.ui, state.name);
 	});
 
-	// ── /ws-open [-b name] ──
-	pi.registerCommand("ws-open", {
-		description: "Open a branch-workspace (git worktree + tmux session). Usage: /ws-open [name]",
+	// ── /bw-open [-b name] ──
+	pi.registerCommand("bw-open", {
+		description: "Open a branch-workspace (git worktree + tmux session). Usage: /bw-open [name]",
 		handler: async (args, ctx) => {
 			let { name } = parsePositionalName(args);
 			if (!name) {
@@ -1085,9 +1085,9 @@ export default function (pi: ExtensionAPI): void {
 		},
 	});
 
-	// ── /ws-list ──
-	pi.registerCommand("ws-list", {
-		description: "List all branch-workspaces and optionally run an action. (For pane log of all active: /ws-log -b)",
+	// ── /bw-list ──
+	pi.registerCommand("bw-list", {
+		description: "List all branch-workspaces and optionally run an action. (For pane log of all active: /bw-log -b)",
 		handler: async (_args, ctx) => {
 			// Select workspace
 			const selected = await selectWorkspace(pi, ctx, "Select workspace", ctx.cwd);
@@ -1105,18 +1105,18 @@ export default function (pi: ExtensionAPI): void {
 
 			// Paste the command using positional argument for the selected workspace.
 			// This works for all actions offered here (open / log / status / vscode / cancel / close).
-			// For batch pane log of *all* active workspaces, use `/ws-log -b` (or --batch) directly.
-			const cmd = `/ws-${action} ${selected.name}`;
+			// For batch pane log of *all* active workspaces, use `/bw-log -b` (or --batch) directly.
+			const cmd = `/bw-${action} ${selected.name}`;
 			ctx.ui.pasteToEditor(cmd);
 		},
 	});
 
-	// ── /ws-status [name] [-s] ──
-	// Workspace status = state + env (not pane log — use /ws-log for that).
-	// Display uses the same aboveEditor widget surface as /ws-log.
-	pi.registerCommand("ws-status", {
+	// ── /bw-status [name] [-s] ──
+	// Workspace status = state + env (not pane log — use /bw-log for that).
+	// Display uses the same aboveEditor widget surface as /bw-log.
+	pi.registerCommand("bw-status", {
 		description:
-			"Show branch-workspace status (state + env: socket, pane, dirty, …). Usage: /ws-status [name] [-s]",
+			"Show branch-workspace status (state + env: socket, pane, dirty, …). Usage: /bw-status [name] [-s]",
 		handler: async (args, ctx) => {
 			const selectFlag = /(^|\s)-s\b/.test(args);
 			const { name: branchName } = parsePositionalName(args, [/(^|\s)-s\b/g]);
@@ -1128,20 +1128,20 @@ export default function (pi: ExtensionAPI): void {
 			const env = await buildWorkspaceEnv(pi, name);
 			const lines = formatStatusText(env).split("\n");
 
-			// Attach hint only when a session exists (active / orphan), matching /ws-log footer.
+			// Attach hint only when a session exists (active / orphan), matching /bw-log footer.
 			let footer: string | undefined;
 			if (env.monitorCmd && (env.state === "active" || env.state === "orphan")) {
 				const copied = await copyToClipboard(pi, env.monitorCmd);
 				footer = `Monitor: ${env.monitorCmd}${copied ? " (copied)" : ""}`;
 			}
 
-			ctx.ui.setWidget("ws-status", buildWidget(lines, footer), { placement: "aboveEditor" });
+			ctx.ui.setWidget("bw-status", buildWidget(lines, footer), { placement: "aboveEditor" });
 		},
 	});
 
-	// ── /ws-close [-b name] [-s] ──
-	pi.registerCommand("ws-close", {
-		description: "Close a branch-workspace (remove worktree + kill tmux session). Usage: /ws-close [name] [-s]",
+	// ── /bw-close [-b name] [-s] ──
+	pi.registerCommand("bw-close", {
+		description: "Close a branch-workspace (remove worktree + kill tmux session). Usage: /bw-close [name] [-s]",
 		handler: async (args, ctx) => {
 			const selectFlag = /(^|\s)-s\b/.test(args);
 			const { name: branchName } = parsePositionalName(args, [/(^|\s)-s\b/g]);
@@ -1191,9 +1191,9 @@ export default function (pi: ExtensionAPI): void {
 		},
 	});
 
-	// ── /ws-log [-b|--batch] [name] [-s] [-a|--analyze] ──  (pane log; not /ws-status)
-	pi.registerCommand("ws-log", {
-		description: "Show pane log and last-command outcome (not workspace status — use /ws-status). Usage: /ws-log [-b|--batch] [name] [-s] [-a|--analyze]",
+	// ── /bw-log [-b|--batch] [name] [-s] [-a|--analyze] ──  (pane log; not /bw-status)
+	pi.registerCommand("bw-log", {
+		description: "Show pane log and last-command outcome (not workspace status — use /bw-status). Usage: /bw-log [-b|--batch] [name] [-s] [-a|--analyze]",
 		handler: async (args, ctx) => {
 			const analyze = /(^|\s)(--analyze|-a)\b/.test(args);
 			const selectFlag = /(^|\s)-s\b/.test(args);
@@ -1233,25 +1233,25 @@ export default function (pi: ExtensionAPI): void {
 				}
 
 				// Batch is an overview only — no fake multi-target attach line.
-				// Drill down with /ws-log <name> (single mode copies a real attach cmd).
+				// Drill down with /bw-log <name> (single mode copies a real attach cmd).
 				if (!analyze) {
 					const lines = formatBatchRawLines(captures);
-					ctx.ui.setWidget("ws-log", buildWidget(lines), { placement: "aboveEditor" });
+					ctx.ui.setWidget("bw-log", buildWidget(lines), { placement: "aboveEditor" });
 					return;
 				}
 
 				ctx.ui.setWidget(
-					"ws-log",
+					"bw-log",
 					buildWidget([`Analyzing ${captures.length} workspaces in parallel...`]),
 					{ placement: "aboveEditor" },
 				);
 
 				try {
 					const lines = await analyzeBatchStatusParallel(pi, ctx, captures);
-					ctx.ui.setWidget("ws-log", buildWidget(lines), { placement: "aboveEditor" });
+					ctx.ui.setWidget("bw-log", buildWidget(lines), { placement: "aboveEditor" });
 				} catch (err) {
 					const msg = err instanceof Error ? err.message : String(err);
-					ctx.ui.setWidget("ws-log", undefined);
+					ctx.ui.setWidget("bw-log", undefined);
 					ctx.ui.notify(`LLM batch analysis failed: ${msg}`, "warning");
 				}
 				return;
@@ -1293,18 +1293,18 @@ export default function (pi: ExtensionAPI): void {
 
 			if (!analyze) {
 				const lines = formatSingleRawWidget(paneOutput);
-				ctx.ui.setWidget("ws-log", buildWidget(lines, monitorCmd), { placement: "aboveEditor" });
+				ctx.ui.setWidget("bw-log", buildWidget(lines, monitorCmd), { placement: "aboveEditor" });
 				return;
 			}
 
-			ctx.ui.setWidget("ws-log", buildWidget([`Analyzing pane log for "${name}"...`]), { placement: "aboveEditor" });
+			ctx.ui.setWidget("bw-log", buildWidget([`Analyzing pane log for "${name}"...`]), { placement: "aboveEditor" });
 
 			let result: AnalysisResult;
 			try {
 				result = await analyzeStatus(pi, ctx, paneOutput);
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
-				ctx.ui.setWidget("ws-log", undefined);
+				ctx.ui.setWidget("bw-log", undefined);
 				ctx.ui.notify(`LLM analysis failed: ${msg}`, "warning");
 				return;
 			}
@@ -1315,9 +1315,9 @@ export default function (pi: ExtensionAPI): void {
 					paneOutput,
 					SINGLE_ANALYZE_RAW_TAIL,
 				);
-				ctx.ui.setWidget("ws-log", buildWidget(lines, monitorCmd), { placement: "aboveEditor" });
+				ctx.ui.setWidget("bw-log", buildWidget(lines, monitorCmd), { placement: "aboveEditor" });
 			} else {
-				ctx.ui.setWidget("ws-log", undefined);
+				ctx.ui.setWidget("bw-log", undefined);
 				const lines = paneOutput.trim().split("\n");
 				const tail = lines.slice(-SINGLE_ANALYZE_RAW_TAIL).join("\n");
 				ctx.ui.notify(
@@ -1328,9 +1328,9 @@ export default function (pi: ExtensionAPI): void {
 		},
 	});
 
-	// ── /ws-vscode [-b name] [-s] ──
-	pi.registerCommand("ws-vscode", {
-		description: "Open a branch-workspace in VS Code. Usage: /ws-vscode [name] [-s]",
+	// ── /bw-vscode [-b name] [-s] ──
+	pi.registerCommand("bw-vscode", {
+		description: "Open a branch-workspace in VS Code. Usage: /bw-vscode [name] [-s]",
 		handler: async (args, ctx) => {
 			const selectFlag = /(^|\s)-s\b/.test(args);
 			const { name: branchName } = parsePositionalName(args, [/(^|\s)-s\b/g]);
@@ -1359,9 +1359,9 @@ export default function (pi: ExtensionAPI): void {
 		},
 	});
 
-	// ── /ws-cancel [-b name] [-s] ──
-	pi.registerCommand("ws-cancel", {
-		description: "Interrupt the running process in a workspace's tmux pane. Usage: /ws-cancel [name] [-s]",
+	// ── /bw-cancel [-b name] [-s] ──
+	pi.registerCommand("bw-cancel", {
+		description: "Interrupt the running process in a workspace's tmux pane. Usage: /bw-cancel [name] [-s]",
 		handler: async (args, ctx) => {
 			const selectFlag = /(^|\s)-s\b/.test(args);
 			const { name: branchName } = parsePositionalName(args, [/(^|\s)-s\b/g]);
@@ -1422,7 +1422,7 @@ export default function (pi: ExtensionAPI): void {
 				ctx.ui.notify(`Process in "${name}" interrupted.`, "info");
 			} else {
 				ctx.ui.notify(
-					`Sent C-c to "${name}". Process may still be terminating; check with /ws-log.`,
+					`Sent C-c to "${name}". Process may still be terminating; check with /bw-log.`,
 					"warning",
 				);
 			}
@@ -1430,21 +1430,21 @@ export default function (pi: ExtensionAPI): void {
 	});
 
 	// Task / handoff-for-impl orchestration lives in agents/skills/branch-workspace/SKILL.md
-	// (tools: ws_list / ws_open / ws_close / ws_status). Task/hfi orchestration is skill-driven.
+	// (tools: bw_list / bw_open / bw_close / bw_status). Task/hfi orchestration is skill-driven.
 
-	// ── Tools: ws_list / ws_open / ws_close / ws_status ──
+	// ── Tools: bw_list / bw_open / bw_close / bw_status ──
 
 	pi.registerTool({
-		name: "ws_list",
+		name: "bw_list",
 		label: "List workspaces",
 		description:
 			"List branch-workspaces (git worktree + tmux session) with state (active=worktree+session, idle=worktree only, orphan=session only; field name state), dirty flag, and current marker. Read-only. missing never appears (list is worktree ∪ session). Use before open/close when the exact name is unknown.",
 		promptSnippet: "List branch-workspaces (active/idle/orphan, dirty, current).",
 		promptGuidelines: [
-			"Prefer ws_list when the exact branch-workspace name is unknown or before closing.",
-			"Use the full exact name from the result for ws_open / ws_close — never invent short aliases.",
+			"Prefer bw_list when the exact branch-workspace name is unknown or before closing.",
+			"Use the full exact name from the result for bw_open / bw_close — never invent short aliases.",
 			"query is substring filter only; identity for open/close is still exact name match.",
-			"Workspace state vocabulary (field state): active | idle | orphan (missing only appears on name-targeted ws_status).",
+			"Workspace state vocabulary (field state): active | idle | orphan (missing only appears on name-targeted bw_status).",
 		],
 		parameters: Type.Object({
 			query: Type.Optional(
@@ -1464,16 +1464,16 @@ export default function (pi: ExtensionAPI): void {
 	});
 
 	pi.registerTool({
-		name: "ws_open",
+		name: "bw_open",
 		label: "Open workspace",
 		description:
-			"Open or reuse a branch-workspace (git worktree + tmux session) and set it as current. Returns only ok/name/warnings (or error). For state/env/dispatch readiness, call ws_status next. Recreates a missing session for idle; for orphan prefer close-then-open.",
-		promptSnippet: "Open/reuse a branch-workspace; then call ws_status for env.",
+			"Open or reuse a branch-workspace (git worktree + tmux session) and set it as current. Returns only ok/name/warnings (or error). For state/env/dispatch readiness, call bw_status next. Recreates a missing session for idle; for orphan prefer close-then-open.",
+		promptSnippet: "Open/reuse a branch-workspace; then call bw_status for env.",
 		promptGuidelines: [
-			"Require an exact full name (e.g. feat/my-feature). Prefer names from ws_list when reusing.",
-			"On success, call ws_status (same name or omit for current) to get state/socket/paneTarget/paneIdle before dispatch.",
-			"Does not return worktreePath, state, or env — use ws_status for those.",
-			"idle (worktree only): open recreates the session. orphan (session only): prefer ws_close after user confirm, then open — open reuses the residual session without resetting cwd.",
+			"Require an exact full name (e.g. feat/my-feature). Prefer names from bw_list when reusing.",
+			"On success, call bw_status (same name or omit for current) to get state/socket/paneTarget/paneIdle before dispatch.",
+			"Does not return worktreePath, state, or env — use bw_status for those.",
+			"idle (worktree only): open recreates the session. orphan (session only): prefer bw_close after user confirm, then open — open reuses the residual session without resetting cwd.",
 			"First open in a repo may commit .gitignore via worktree.sh (existing behavior).",
 		],
 		parameters: Type.Object({
@@ -1483,7 +1483,7 @@ export default function (pi: ExtensionAPI): void {
 			const name = typeof params.name === "string" ? params.name.trim() : "";
 			if (!name) {
 				return {
-					content: [{ type: "text" as const, text: "ws_open requires a non-empty name." }],
+					content: [{ type: "text" as const, text: "bw_open requires a non-empty name." }],
 					details: { ok: false, error: "name required", warnings: [] as string[] },
 				};
 			}
@@ -1496,17 +1496,17 @@ export default function (pi: ExtensionAPI): void {
 	});
 
 	pi.registerTool({
-		name: "ws_close",
+		name: "bw_close",
 		label: "Close workspace",
 		description:
 			"Close a branch-workspace (remove worktree + kill tmux session). Fail-closed: dirty worktree or orphan session returns needsForce and requires force:true only after explicit user confirmation. Clean active/idle close without force.",
 		promptSnippet: "Close a branch-workspace; force only after user confirms dirty/orphan.",
 		promptGuidelines: [
-			"Use exact name from ws_list or prior open. Never invent force:true.",
+			"Use exact name from bw_list or prior open. Never invent force:true.",
 			"needsForce dirty: uncommitted changes — ask the user, then re-call with force:true only if they confirm.",
 			"needsForce orphan: residual tmux session with no worktree — ask the user, then re-call with force:true only if they confirm (kills the session).",
 			"Do not kill sessions via raw tmux; always use this tool.",
-			"Prefer ws_list first when unsure which workspace to close.",
+			"Prefer bw_list first when unsure which workspace to close.",
 		],
 		parameters: Type.Object({
 			name: Type.String({ description: "Full branch-workspace name (exact match)." }),
@@ -1521,7 +1521,7 @@ export default function (pi: ExtensionAPI): void {
 			const name = typeof params.name === "string" ? params.name.trim() : "";
 			if (!name) {
 				return {
-					content: [{ type: "text" as const, text: "ws_close requires a non-empty name." }],
+					content: [{ type: "text" as const, text: "bw_close requires a non-empty name." }],
 					details: { ok: false, error: "name required" },
 				};
 			}
@@ -1535,16 +1535,16 @@ export default function (pi: ExtensionAPI): void {
 	});
 
 	pi.registerTool({
-		name: "ws_status",
+		name: "bw_status",
 		label: "Inspect workspace",
 		description:
 			"Read-only workspace status report: state (active|idle|orphan|missing) + env (worktreePath, socket, session, paneTarget, paneIdle, dirty, monitorCmd). Omit name to use the current branch-workspace. No side effects.",
 		promptSnippet: "Inspect workspace status (state+env); omit name for current.",
 		promptGuidelines: [
-			"After ws_open, call this to get state/socket/paneTarget/paneIdle before dispatch. Also use to inspect without opening, or re-check later.",
-			"Omit name for current; pass an exact full name for a non-current workspace; use ws_list when the name is unknown.",
+			"After bw_open, call this to get state/socket/paneTarget/paneIdle before dispatch. Also use to inspect without opening, or re-check later.",
+			"Omit name for current; pass an exact full name for a non-current workspace; use bw_list when the name is unknown.",
 			"If no current is set, the tool fails with: no current workspace.",
-			"Field state: active (worktree+session, ready for task), idle (worktree only → ws_open), orphan (session only → close with user confirm + force), missing (neither → ws_open to create).",
+			"Field state: active (worktree+session, ready for task), idle (worktree only → bw_open), orphan (session only → close with user confirm + force), missing (neither → bw_open to create).",
 			"status (this tool) = state + env. Workspace idle ≠ paneIdle.",
 		],
 		parameters: Type.Object({
