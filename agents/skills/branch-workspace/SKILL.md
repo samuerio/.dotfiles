@@ -1,9 +1,9 @@
 ---
 name: branch-workspace
 description: >-
-  Orchestrate branch-workspace task dispatch and handoff-for-impl via natural
-  language with the keyword "bw". Examples: on current bw + task; on <name> bw
-  + task; new bw + task; current/named/new bw hfi.
+  Orchestrate branch-workspace (keyword "bw") task dispatch and handoff-for-impl.
+  "bw" is short for branch-workspace. Examples: on current bw + task; on <name>
+  bw + task; new bw + task; current/named/new bw hfi.
 ---
 
 ## Concept
@@ -67,7 +67,7 @@ Use the tmux SKILL only to **send input** and **watch output** with `socket` / `
 
 ### Triggers
 
-Match **natural language** that includes the keyword **`bw`**. Match intent from phrasing; do not require exact wording.
+**`bw`** is short for **branch-workspace**. Match **natural language** that includes the keyword **`bw`**. Match intent from phrasing; do not require exact wording.
 
 | Mode | Target | Intent | Example utterances |
 |------|--------|--------|--------------------|
