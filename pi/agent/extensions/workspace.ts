@@ -1,7 +1,6 @@
 import { completeSimple, type UserMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { getAgentDir, convertToLlm, serializeConversation } from "@earendil-works/pi-coding-agent";
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Container, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { existsSync, readFileSync, promises as fs } from "node:fs";
@@ -164,23 +163,15 @@ async function selectWorkspace(
 	return displayToWorkspace.get(choice) ?? null;
 }
 
-type WorkspaceAction = "open" | "status" | "vscode" | "cancel" | "close";
+type WorkspaceAction = "open" | "status" | "state" | "vscode" | "cancel" | "close";
 
 function getAvailableActions(status: WorkspaceStatus): WorkspaceAction[] {
 	switch (status) {
-		case "active": return ["open", "status", "vscode", "cancel", "close"];
-		case "idle": return ["open", "vscode", "close"];
-		case "orphan": return ["close"];
+		case "active": return ["open", "status", "state", "vscode", "cancel", "close"];
+		case "idle": return ["open", "state", "vscode", "close"];
+		case "orphan": return ["state", "close"];
 		default: return [];
 	}
-}
-
-function parseBranchFlag(args: string): { name: string | undefined; rest: string } {
-	const match = args.match(/(?:^|\s)(?:-b|--branch-workspace)\s+(\S+)/);
-	if (!match) return { name: undefined, rest: args };
-	const name = match[1];
-	const rest = args.replace(match[0], "").trim();
-	return { name, rest };
 }
 
 function parsePositionalName(args: string, flagPatterns: RegExp[] = []): { name: string | undefined; rest: string } {
@@ -316,96 +307,6 @@ async function resolveWorkspaceState(
 		dirty: worktree?.dirty,
 	};
 }
-
-// ─── SKILL Context Constants ──────────────────────────────────────
-
-const WS_CONCEPT_TEXT = `A **branch-workspace** is an isolated execution environment bound to a single branch. It is composed of two coupled components:
-
-- a **\`git worktree\`**: a writable, branch-scoped filesystem where the worker agent edits code without disturbing the main checkout.
-- a **\`tmux\` session**: an observable, persistent execution environment for that branch. The pane is shared — the worker agent runs implementation commands there, and the dispatcher agent runs observable tasks (tests, debugging, runtime checks) there directly. The user or dispatcher can attach to watch either.
-
-Each branch-workspace is identified by \`<name>\`. The git branch name and the tmux session name both equal \`<name>\`. The two components share this identity and must be managed together.
-
-Lifecycle (list / open / close) is provided by the \`ws_list\`, \`ws_open\`, and \`ws_close\` tools (or the matching user slash commands). This skill only orchestrates **task** dispatch and **handoff-for-impl**.`;
-
-const WS_ROLE_BOUNDARIES_TEXT = `The dispatcher agent owns coordination. The tmux pane is a shared execution environment — both agents may run commands there, but only the worker agent may write files:
-
-- **Explore freely**: the dispatcher may read and inspect files in the branch-workspace's worktree at any point — to refine a task with the user, to review results, or to understand context. Use bash or read-only tools directly for speed and efficiency.
-- **No direct writes**: the dispatcher must never write to or modify files in the branch-workspace's worktree, even for trivial changes. All file modifications go through the worker agent.
-- **Observable tasks**: running commands, running tests, and debugging in the worktree are the dispatcher's responsibility because it is the interaction layer with the user. The dispatcher may use either bash or the branch-workspace's tmux pane to execute these tasks.
-- **Review after completion**: after the worker agent signals completion, the dispatcher inspects the result and reports back to the user.
-
-The worker agent performs implementation work inside the branch-workspace. It receives a self-contained task document and runs to completion.
-
-Use \`ws_list\` / \`ws_open\` / \`ws_close\` for discovery and lifecycle — do not reimplement worktree/session management via bash. \`<name>\` always means the complete branch-workspace identifier and must be matched exactly; never fuzzy-match or shorten it. When the injected header says worktree/session/pane are pre-validated, trust those fields and do not rediscover them.`;
-
-const WS_TASK_SKILL_TEXT = `2. **Task Triage (Intent Classification)**: Before dispatching, evaluate the complexity and clarity of the \`<task>\`:
-   - **Fast Path (Direct Dispatch)**: If the task is trivial, unambiguous, and self-contained (e.g., "fix typo in README", "bump version to 2.0", "add a specific unit test for function X"), **skip the interactive Q&A of \`refine-task\`**. The dispatcher should internally draft a clear, self-contained task description for the worker and proceed directly to step 3. Do not ask the user for confirmation.
-   - **Standard Path (Refine & Confirm)**: If the task is ambiguous, broad, involves multiple files, or requires architectural decisions (e.g., "refactor the auth module", "implement a new caching layer"), strictly apply the \`refine-task\` SKILL. The dispatcher must proactively explore the worktree to answer questions from context. If critical information is still missing, ask the user targeted questions. **Wait for explicit user confirmation** of the refined task before proceeding to step 3.
-
-   After \`refine-task\` completes (including any clarifying exchange with the user), resume from step 3 using the refined task text as \`<task>\`. The dispatcher reviews the worker's output once the worker signals completion.
-3. The dispatcher must choose how to route the work, but it must not implement file changes itself. If the task output is expected to be code, docs, tests, review comments, or any other file modification, send it to the worker path.
-4. Determine how to dispatch:
-   - **worker path** (default for any task whose output is file changes — writing code, docs, tests, or review comments):
-     1. Construct a \`pi -p\` command following the \`pi-headless\` SKILL **Print Mode**. Use \`--no-session\`.
-     2. Write the refined task text to \`/tmp/task/<YYYY-MM-DD-HHMMSS>-<slug>.md\` (create the directory with \`mkdir -p /tmp/task\` if needed), where \`<slug>\` is a short meaningful kebab-case English phrase derived from the task content. Write the refined task text in the same language as the original \`<task>\` input.
-     3. **Append the Structured Handoff Instruction** to the task text:
-        \`\`\`
-        When you have completed the task, you must do the following two things in order:
-        1. Write a concise, structured summary of your work to \`/tmp/task/<YYYY-MM-DD-HHMMSS>-<slug>.result.md\`. The summary must include:
-           - **Files Modified**: A list of files you created or changed.
-           - **Key Changes**: A brief description of the core logic or implementation details.
-           - **Issues/Blockers**: Any unexpected problems encountered or things the user should review.
-        2. Print the exact marker \`DONE:<YYYY-MM-DD-HHMMSS>-<slug>\` on a line by itself in the terminal.
-        \`\`\`
-        *(Note: Ensure the \`<YYYY-MM-DD-HHMMSS>-<slug>\` in the instruction exactly matches the filename stem).*
-     4. Pass the task file to pi via \`@/tmp/task/<filename>.md\`. If \`choose-model: yes\` was given, follow the \`pi-headless\` SKILL model-selection flow; otherwise use defaults.
-     5. Send the command to the tmux pane via the tmux SKILL **Sending input safely** and use **Watching output** (poll mode) with pattern \`DONE:<YYYY-MM-DD-HHMMSS>-<slug>\` to wait for completion.
-     6. **Post-Execution Review**: Once the \`DONE\` marker is detected, **do not parse the raw tmux pane output**. Instead, read the content of \`/tmp/task/<YYYY-MM-DD-HHMMSS>-<slug>.result.md\` to understand the worker's output. Present this structured summary to the user.
-   - **dispatcher path** (for tasks requiring observability — running tests, executing commands, checking runtime errors): execute the command using either bash or the branch-workspace's tmux pane, capturing the output for the user.
-
-   If a task requires both (e.g. run tests then fix failures, or fix code then verify with a command), handle the observable step via the dispatcher and the file-change step via the worker — in whichever order the task demands. Pass findings between steps in the task doc.`;
-
-const TASK_SKILL_CONTEXT = `## Concept
-
-${WS_CONCEPT_TEXT}
-
-## Role Boundaries
-
-${WS_ROLE_BOUNDARIES_TEXT}
-
-## Task Execution
-
-${WS_TASK_SKILL_TEXT}`;
-
-const WS_HFI_SKILL_TEXT = `3. Choose the implementation command:
-
-   If \`choose-model: yes\` is present in the header, follow the \`pi-headless\` SKILL model-selection flow before constructing any \`pi\` command.
-
-   **Ralph path** — if the \`ralph\` SKILL has been used in the current conversation and \`task.json\` exists on disk with a corresponding Ralph execution command:
-
-   - Send that Ralph command to the workspace pane via the tmux SKILL **Sending input safely** convention.
-
-   **plan doc path** — if the conversation references a plan document (a file the user points to, e.g. \`plan.md\`, \`design.md\`, or similar) but no handoff doc has been generated:
-
-   - Follow the \`pi-headless\` SKILL **Running pi as an Implementation Worker — Plan without implementation instruction** pattern to construct the command.
-   - Send the constructed command via the tmux SKILL **Sending input safely** convention.
-
-   **handoff doc path** — if the \`draft-impl-handoff\` SKILL has already been run in the current conversation and produced a handoff file:
-
-   - Follow the \`pi-headless\` SKILL **Running pi as an Implementation Worker — Plan with implementation instruction** pattern to construct the command.
-   - Send the constructed command via the tmux SKILL **Sending input safely** convention.
-
-   **generate then run path** — otherwise (no plan doc, no handoff doc):
-
-   - First run the \`draft-impl-handoff\` SKILL to generate a handoff document, then follow the **handoff doc path** above.
-
-4. Do not wait for completion.
-5. Do not capture pane output after sending.
-6. Report only:
-   - the branch-workspace name
-   - that the command was sent
-   - the monitor command from the tmux SKILL`;
 
 // ─── tmux Helpers ─────────────────────────────────────────────────
 
@@ -799,68 +700,6 @@ async function ensureSession(
 	return result.code === 0;
 }
 
-// ─── Session History Helpers ──────────────────────────────────────
-
-type ConversationEntry = {
-	type: string;
-	id?: string;
-	message?: AgentMessage;
-	summary?: string;
-	tokensBefore?: number;
-	timestamp?: string;
-	firstKeptEntryId?: string;
-};
-
-function entryToMessage(entry: ConversationEntry): AgentMessage | undefined {
-	if (entry.type === "message") {
-		return entry.message;
-	}
-	if (entry.type === "compaction") {
-		return {
-			role: "compactionSummary",
-			summary: entry.summary ?? "",
-			tokensBefore: entry.tokensBefore ?? 0,
-			timestamp: entry.timestamp ? new Date(entry.timestamp).getTime() : Date.now(),
-		} as AgentMessage;
-	}
-	return undefined;
-}
-
-function getHandoffMessages(branch: ConversationEntry[]): AgentMessage[] {
-	let compactionIndex = -1;
-	for (let i = branch.length - 1; i >= 0; i--) {
-		if (branch[i].type === "compaction") {
-			compactionIndex = i;
-			break;
-		}
-	}
-	if (compactionIndex < 0) {
-		return branch.map(entryToMessage).filter((message) => message !== undefined);
-	}
-
-	const compaction = branch[compactionIndex];
-	const firstKeptIndex =
-		compaction.type === "compaction" ? branch.findIndex((entry) => entry.id === compaction.firstKeptEntryId) : -1;
-	const compactedBranch = [
-		compaction,
-		...(firstKeptIndex >= 0 ? branch.slice(firstKeptIndex, compactionIndex) : []),
-		...branch.slice(compactionIndex + 1),
-	];
-	return compactedBranch.map(entryToMessage).filter((message) => message !== undefined);
-}
-
-const NAME_INFERENCE_SYSTEM_PROMPT = `You are a branch name generator. Given a conversation history, generate a short kebab-case branch name for the implementation work being described.
-
-Rules:
-- Default format: feat/<feature-name>
-- If the conversation indicates a bug fix: fix/<name>
-- If it's a refactor: refactor/<name>
-- If it's a chore or experiment: chore/<name> or exp/<name>
-- Use short, descriptive kebab-case names (2-4 words max)
-- Return ONLY the branch name, nothing else`;
-
-const NAME_INFERENCE_USER_PROMPT = `Based on the conversation above, generate a short kebab-case branch name for the implementation work being described. Return ONLY the branch name, nothing else.`;
-
 // ─── Status Bar ────────────────────────────────────────────────────
 
 type ExtensionUI = ExtensionCommandContext["ui"];
@@ -961,6 +800,7 @@ async function buildWorkspaceEnv(pi: ExtensionAPI, name: string): Promise<Worksp
 		}
 	}
 	const preValidated = !!(socket && paneTarget && ws.status === "active");
+	const hasSession = ws.status === "active" || ws.status === "orphan";
 	return {
 		name,
 		branch: name,
@@ -972,23 +812,9 @@ async function buildWorkspaceEnv(pi: ExtensionAPI, name: string): Promise<Worksp
 		dirty: ws.dirty,
 		paneIdle,
 		preValidated,
-		monitorCmd: socket ? `tmux -S ${socket} attach -t ${name}` : undefined,
+		// Attach only when a tmux session exists (active / orphan). Idle has no session.
+		monitorCmd: hasSession && socket ? `tmux -S ${socket} attach -t ${name}` : undefined,
 	};
-}
-
-function formatEnvHeader(title: string, env: WorkspaceEnv, extraLines: string[] = []): string {
-	return [
-		title,
-		`name: ${env.name}`,
-		`branch: ${env.branch}`,
-		`worktreePath: ${env.worktreePath ?? ""}`,
-		`socket: ${env.socket ?? ""}`,
-		`session: ${env.session}`,
-		`paneTarget: ${env.paneTarget ?? ""}`,
-		"",
-		"note: DO NOT verify worktree, session, or pane — all pre-validated.",
-		...extraLines,
-	].join("\n");
 }
 
 async function openWorkspace(
@@ -1284,10 +1110,40 @@ export default function (pi: ExtensionAPI): void {
 			if (!action) return;
 
 			// Paste the command using positional argument for the selected workspace.
-			// This works for all actions offered here (open / status / vscode / cancel / close).
+			// This works for all actions offered here (open / status / state / vscode / cancel / close).
 			// For batch status of *all* active workspaces, use `/ws-status -b` (or --batch) directly.
 			const cmd = `/ws-${action} ${selected.name}`;
 			ctx.ui.pasteToEditor(cmd);
+		},
+	});
+
+	// ── /ws-state [name] [-s] ──
+	// Workspace lifecycle + env envelope (not pane last-command status — use /ws-status for that).
+	pi.registerCommand("ws-state", {
+		description:
+			"Show branch-workspace state and env (active/idle/orphan/missing, socket, pane). Usage: /ws-state [name] [-s]",
+		handler: async (args, ctx) => {
+			const selectFlag = /(^|\s)-s\b/.test(args);
+			const { name: branchName } = parsePositionalName(args, [/(^|\s)-s\b/g]);
+
+			const resolved = await resolveNameOrSelect(pi, branchName, ctx.cwd, ctx, selectFlag);
+			if (!resolved) return;
+			const { name } = resolved;
+
+			const env = await buildWorkspaceEnv(pi, name);
+			const body = formatStateText(env);
+
+			// Attach hint only when a session exists (active / orphan), matching open / ws-status.
+			if (env.monitorCmd && (env.status === "active" || env.status === "orphan")) {
+				const copied = await copyToClipboard(pi, env.monitorCmd);
+				ctx.ui.notify(
+					`${body}\nMonitor: ${env.monitorCmd}${copied ? " (copied)" : ""}`,
+					env.status === "missing" ? "error" : "info",
+				);
+				return;
+			}
+
+			ctx.ui.notify(body, env.status === "missing" ? "error" : "info");
 		},
 	});
 
@@ -1581,191 +1437,10 @@ export default function (pi: ExtensionAPI): void {
 		},
 	});
 
-	// ── /ws-task + /ws-hfi (DISABLED) ──
-	// Orchestration is skill-driven (branch-workspace SKILL: /ws task, /ws hfi).
-	// Keep handlers out of the slash command surface so agents load the skill
-	// instead of the extension injecting a turn. Set true to re-enable.
-	const ENABLE_WS_TASK_HFI_COMMANDS = false;
-	if (ENABLE_WS_TASK_HFI_COMMANDS) {
-		// ── /ws-task [-b name] [-m|--choose-model] <task> ──
-		pi.registerCommand("ws-task", {
-			description: "Dispatch a task to a branch-workspace. Usage: /ws-task [-b name] [-m|--choose-model] <task>",
-			handler: async (args, ctx) => {
-				const chooseModel = /(^|\s)(-m|--choose-model)\b/.test(args);
-				const { name: branchName, rest: taskArgs } = parseBranchFlag(
-					args.replace(/(^|\s)(-m|--choose-model)\b/g, ""),
-				);
-				const task = taskArgs.trim();
+	// Task / handoff-for-impl orchestration lives in agents/skills/branch-workspace/SKILL.md
+	// (tools: ws_list / ws_open / ws_close / ws_state). No slash commands for those flows.
 
-				let name = branchName;
-				if (!name) {
-					const state = await readCurrentState(ctx.cwd);
-					if (state) name = state.name;
-				}
-
-				if (!name) {
-					const selected = await selectWorkspace(pi, ctx, "Select workspace", ctx.cwd);
-					if (!selected) return;
-					name = selected.name;
-				}
-
-				if (!task) {
-					ctx.ui.notify("No task specified.", "error");
-					return;
-				}
-
-				const env = await buildWorkspaceEnv(pi, name);
-				if (env.status !== "active") {
-					ctx.ui.notify(`Workspace "${name}" is not active (${env.status}). Task requires a running tmux session.`, "error");
-					return;
-				}
-				if (!env.socket) {
-					ctx.ui.notify("Failed to resolve tmux socket.", "error");
-					return;
-				}
-				if (!env.paneTarget) {
-					ctx.ui.notify(`No pane found for session "${name}".`, "error");
-					return;
-				}
-				if (env.paneIdle === false) {
-					ctx.ui.notify(`Pane in "${name}" is busy. Cancel the running process first or wait for it to finish.`, "error");
-					return;
-				}
-
-				const extra = chooseModel ? ["choose-model: yes"] : [];
-				const content = [
-					formatEnvHeader("[branch-workspace]", env, extra),
-					`[Task]\n${task}`,
-					TASK_SKILL_CONTEXT,
-				].join("\n\n---\n\n");
-
-				pi.sendMessage(
-					{ customType: "branch-workspace-task", content, display: true },
-					{ triggerTurn: true },
-				);
-			},
-		});
-
-		// ── /ws-hfi [-b name] [-m|--choose-model] ──
-		pi.registerCommand("ws-hfi", {
-			description: "Silently kick off implementation in a new branch-workspace. Usage: /ws-hfi [-b name] [-m|--choose-model]",
-			handler: async (args, ctx) => {
-				const chooseModel = /(^|\s)(-m|--choose-model)\b/.test(args);
-				const { name: branchName } = parseBranchFlag(
-					args.replace(/(^|\s)(-m|--choose-model)\b/g, ""),
-				);
-
-				let name = branchName;
-
-				// Name inference via LLM if not provided
-				if (!name) {
-					if (!ctx.model) {
-						ctx.ui.notify("No model selected. Cannot infer branch name. Use -b <name>.", "error");
-						return;
-					}
-
-					const messages = getHandoffMessages(ctx.sessionManager.getBranch() as ConversationEntry[]);
-					if (messages.length === 0) {
-						ctx.ui.notify("No conversation history. Use -b <name>.", "error");
-						return;
-					}
-
-					const llmMessages = convertToLlm(messages);
-					const systemPrompt = ctx.getSystemPrompt() ?? "";
-
-					const userMessage: UserMessage = {
-						role: "user",
-						content: [{ type: "text", text: NAME_INFERENCE_USER_PROMPT }],
-						timestamp: Date.now(),
-					};
-
-					const auth = await ctx.modelRegistry.getApiKeyAndHeaders(ctx.model);
-					if (!auth.ok) {
-						ctx.ui.notify(`Failed to get API key: ${auth.error}`, "error");
-						return;
-					}
-
-					const response = await completeSimple(
-						ctx.model,
-						{
-							systemPrompt,
-							messages: [...llmMessages, userMessage],
-						},
-						{
-							apiKey: auth.apiKey,
-							headers: auth.headers,
-							signal: ctx.signal,
-							reasoning: "off",
-						},
-					);
-
-					const inferredName = response.content
-						.filter((c): c is { type: "text"; text: string } => c.type === "text")
-						.map((c) => c.text)
-						.join("")
-						.trim();
-
-					if (!inferredName) {
-						ctx.ui.notify(`Failed to infer branch name. Use -b <name>.`, "error");
-						return;
-					}
-
-					name = inferredName.includes("/") ? inferredName : `feat/${inferredName}`;
-					ctx.ui.notify(`Inferred branch name: ${name}`, "info");
-				}
-
-				const openResult = await openWorkspace(pi, { cwd: ctx.cwd, name, ui: ctx.ui });
-				if (!openResult.ok) {
-					ctx.ui.notify(openResult.error ?? "open failed", "error");
-					return;
-				}
-				for (const w of openResult.warnings) {
-					ctx.ui.notify(w, "warning");
-				}
-
-				const env = openResult.preValidated
-					? openResult
-					: await buildWorkspaceEnv(pi, name);
-				if (env.status !== "active") {
-					ctx.ui.notify(`Workspace "${name}" is not active (${env.status}).`, "error");
-					return;
-				}
-				if (!env.paneTarget) {
-					ctx.ui.notify(`No pane found for session "${name}".`, "error");
-					return;
-				}
-				if (env.paneIdle === false) {
-					ctx.ui.notify(`Pane in "${name}" is busy. Cancel the running process first or wait for it to finish.`, "error");
-					return;
-				}
-
-				const extra = chooseModel ? ["choose-model: yes"] : [];
-				const hfiContext = `## Concept
-
-${WS_CONCEPT_TEXT}
-
-## Role Boundaries
-
-${WS_ROLE_BOUNDARIES_TEXT}
-
-## Handoff for Implementation
-
-${WS_HFI_SKILL_TEXT}`;
-
-				const content = [
-					formatEnvHeader("[branch-workspace handoff-for-impl]", env, extra),
-					hfiContext,
-				].join("\n\n---\n\n");
-
-				pi.sendMessage(
-					{ customType: "branch-workspace-hfi", content, display: true },
-					{ triggerTurn: true },
-				);
-			},
-		});
-	}
-
-	// ── Tools: ws_list / ws_open / ws_close ──
+	// ── Tools: ws_list / ws_open / ws_close / ws_state ──
 
 	pi.registerTool({
 		name: "ws_list",
