@@ -1,6 +1,9 @@
 ---
 name: branch-workspace
-description: "orchestrate branch-workspace work: task dispatch and handoff-for-impl. Discovery/lifecycle via ws_list / ws_open / ws_close / ws_status tools."
+description: >-
+  Orchestrate branch-workspace task dispatch and handoff-for-impl via natural
+  language with the keyword "ws". Examples: on current ws + task; on <name> ws
+  + task; new ws + task; current/named/new ws hfi.
 ---
 
 ## Concept
@@ -75,14 +78,50 @@ The **current** branch-workspace is the one most recently opened via `ws_open`. 
 
 Name-scoped operations use the full branch-workspace name, exact match, no fuzzy lookup. Use the tmux SKILL only to **send input** and **watch output** with `socket` / `paneTarget` from `ws_status` — do not re-derive them.
 
-### Task [`<name>`] [-m|--choose-model] `<task>`
+### Triggers
+
+Match **natural language** that includes the keyword **`ws`**. Match intent from phrasing; do not require exact wording.
+
+**Task** — dispatch work into a workspace (wait for completion on the worker path):
+
+| Target | Intent | Example utterances |
+|--------|--------|--------------------|
+| Current | Run `<task>` on the current workspace | `on current ws, <task>` |
+| Named | Run `<task>` on workspace `<name>` | `on <name> ws, <task>` |
+| New | Create/open a workspace, then run `<task>` | `new ws, <task>` |
+
+**Handoff-for-impl (hfi)** — silent kickoff; do not wait for completion:
+
+| Target | Intent | Example utterances |
+|--------|--------|--------------------|
+| Current | HFI on the current workspace | `current ws hfi` |
+| Named | HFI on workspace `<name>` | `on <name> ws hfi` |
+| New | Create/open a workspace, then HFI | `new ws hfi` |
+
+Lifecycle (list / open / close / status) is **not** driven by these triggers — use the `ws_*` tools.
+
+### Model selection
+
+Use the `pi-headless` SKILL defaults unless the user asks to choose a model (e.g. "pick a model", or names one) — then follow that SKILL's model-selection flow before constructing any `pi` command.
+
+### Target resolution (shared)
+
+Before task or HFI dispatch, resolve the workspace target from the utterance:
+
+1. **Current** — `ws_status` (omit `name`).
+2. **Named** — `ws_status` with exact `<name>`.
+3. **New** — derive a name from the task / plan / conversation, then `ws_open` + `ws_status`:
+   - Default `feat/<feature-name>` (short kebab-case).
+   - Use a matching prefix when the work is clearly a fix, refactor, chore, experiment, etc. (`fix/`, `refactor/`, `chore/`, `exp/`, …).
+   - If a suitable name cannot be derived, ask the user.
+
+Proceed only when `state` is `active` and `paneIdle` is true; otherwise fail fast and report the status to the user (do not auto-fix via lifecycle tools).
+
+### Task
 
 Dispatch a scoped task into a branch-workspace pane (wait for completion on the worker path).
 
-1. Obtain env for dispatch:
-   - **Need create/reuse:** `ws_open` with the exact name, then `ws_status` (same name or no `name` now that current is set).
-   - **Already open / current:** `ws_status` only (no `name`, or exact `<name>`).
-   - Proceed only when `state` is `active` and `paneIdle` is true; otherwise fix via lifecycle tools then `ws_status` again. Use returned `socket` / `paneTarget` for tmux send/watch — do not rediscover them.
+1. Resolve target and obtain env (see **Target resolution**).
 2. **Task Triage (Intent Classification)**: Before dispatching, evaluate the complexity and clarity of the `<task>`:
    - **Fast Path (Direct Dispatch)**: If the task is trivial, unambiguous, and self-contained (e.g., "fix typo in README", "bump version to 2.0", "add a specific unit test for function X"), **skip the interactive Q&A of `refine-task`**. The dispatcher should internally draft a clear, self-contained task description for the worker and proceed directly to step 3. Do not ask the user for confirmation.
    - **Standard Path (Refine & Confirm)**: If the task is ambiguous, broad, involves multiple files, or requires architectural decisions (e.g., "refactor the auth module", "implement a new caching layer"), strictly apply the `refine-task` SKILL. The dispatcher must proactively explore the worktree to answer questions from context. If critical information is still missing, ask the user targeted questions. **Wait for explicit user confirmation** of the refined task before proceeding to step 3.
@@ -91,7 +130,7 @@ Dispatch a scoped task into a branch-workspace pane (wait for completion on the 
 3. The dispatcher must choose how to route the work, but it must not implement file changes itself. If the task output is expected to be code, docs, tests, review comments, or any other file modification, send it to the worker path.
 4. Determine how to dispatch:
    - **worker path** (default for any task whose output is file changes — writing code, docs, tests, or review comments):
-     1. Construct a `pi -p` command following the `pi-headless` SKILL **Print Mode**. Use `--no-session`.
+     1. Construct a `pi -p` command following the `pi-headless` SKILL **Print Mode**. Use `--no-session`. Apply **Model selection** above.
      2. Write the refined task text to `/tmp/task/<YYYY-MM-DD-HHMMSS>-<slug>.md` (create the directory with `mkdir -p /tmp/task` if needed), where `<slug>` is a short meaningful kebab-case English phrase derived from the task content. Write the refined task text in the same language as the original `<task>` input.
      3. **Append the Structured Handoff Instruction** to the task text:
         ```
@@ -103,34 +142,21 @@ Dispatch a scoped task into a branch-workspace pane (wait for completion on the 
         2. Print the exact marker `DONE:<YYYY-MM-DD-HHMMSS>-<slug>` on a line by itself in the terminal.
         ```
         *(Note: Ensure the `<YYYY-MM-DD-HHMMSS>-<slug>` in the instruction exactly matches the filename stem).*
-     4. Pass the task file to pi via `@/tmp/task/<filename>.md`. If `-m`/`--choose-model` was given, follow the `pi-headless` SKILL model-selection flow; otherwise use defaults.
+     4. Pass the task file to pi via `@/tmp/task/<filename>.md`.
      5. Send the command to the tmux pane via the tmux SKILL **Sending input safely** (use `socket` / `paneTarget` from step 1) and use **Watching output** (poll mode) with pattern `DONE:<YYYY-MM-DD-HHMMSS>-<slug>` to wait for completion.
      6. **Post-Execution Review**: Once the `DONE` marker is detected, **do not parse the raw tmux pane output**. Instead, read the content of `/tmp/task/<YYYY-MM-DD-HHMMSS>-<slug>.result.md` to understand the worker's output. Present this structured summary to the user.
    - **dispatcher path** (for tasks requiring observability — running tests, executing commands, checking runtime errors): execute the command using either bash or the branch-workspace's tmux pane, capturing the output for the user.
 
    If a task requires both (e.g. run tests then fix failures, or fix code then verify with a command), handle the observable step via the dispatcher and the file-change step via the worker — in whichever order the task demands. Pass findings between steps in the task doc.
 
-### Handoff-for-impl [`<name>`] [-m|--choose-model]
+### Handoff-for-impl (hfi)
 
 Silent kickoff for implementation work whose duration is unknown. Creates or reuses a branch-workspace, sends the implementation command into its tmux pane, and does not wait for completion or capture output.
 
-Use when a finalized plan already exists in the current conversation (plan doc, handoff doc, or Ralph `task.json`). Without any of these, run `draft-impl-handoff` before dispatching.
+Use when a finalized plan already exists in the current conversation (plan doc, handoff doc, or Ralph `task.json`). Without any of these, run the `draft-impl-handoff` SKILL before dispatching.
 
-Optional `<name>` is a full branch-workspace identifier (exact match). Optional `-m`/`--choose-model` selects the model via the `pi-headless` SKILL model-selection flow.
-
-1. Resolve the branch-workspace name:
-   - If `<name>` was given, use it verbatim. Do not validate or rewrite its format; the user is responsible for the chosen prefix (e.g. `feat/`, `fix/`, `refactor/`, `exp/`).
-   - Otherwise, derive a name from the implementation work described by the current conversation:
-     - Default format is `feat/<feature-name>` with a short kebab-case feature name.
-     - If the conversation clearly indicates a different kind of work (bug fix, refactor, chore, experiment, etc.), use the matching prefix instead (`fix/`, `refactor/`, `chore/`, `exp/`, ...).
-     - If a suitable name cannot be derived, ask the user for it.
-
-2. Open, then status for env:
-   - Call `ws_open` with the resolved name (creates or reuses worktree + session; sets current).
-   - Call `ws_status` (no `name` or the same name). Proceed only when `state` is `active` and `paneIdle` is true.
-   - Use `socket` / `paneTarget` / `monitorCmd` from `ws_status` — do not rediscover them.
-
-3. Choose the implementation command. If `-m`/`--choose-model` was requested, follow the `pi-headless` SKILL model-selection flow before constructing any `pi` command.
+1. Resolve target and obtain env (see **Target resolution**).
+2. Choose the implementation command. Apply **Model selection** before constructing any `pi` command when the user asked to pick a model.
 
    **Ralph path** — if the `ralph` SKILL has been used in the current conversation and `task.json` exists on disk with a corresponding Ralph execution command:
 
@@ -150,9 +176,9 @@ Optional `<name>` is a full branch-workspace identifier (exact match). Optional 
 
    - First run the `draft-impl-handoff` SKILL to generate a handoff document, then follow the **handoff doc path** above.
 
-4. Do not wait for completion.
-5. Do not capture pane output after sending.
-6. Report only:
+3. Do not wait for completion.
+4. Do not capture pane output after sending.
+5. Report only:
    - the branch-workspace name
    - that the command was sent
    - the monitor command (`monitorCmd` from `ws_status`)

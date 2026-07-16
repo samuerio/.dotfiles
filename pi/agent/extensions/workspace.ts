@@ -1113,6 +1113,7 @@ export default function (pi: ExtensionAPI): void {
 
 	// ── /ws-status [name] [-s] ──
 	// Workspace status = state + env (not pane log — use /ws-log for that).
+	// Display uses the same aboveEditor widget surface as /ws-log.
 	pi.registerCommand("ws-status", {
 		description:
 			"Show branch-workspace status (state + env: socket, pane, dirty, …). Usage: /ws-status [name] [-s]",
@@ -1125,19 +1126,16 @@ export default function (pi: ExtensionAPI): void {
 			const { name } = resolved;
 
 			const env = await buildWorkspaceEnv(pi, name);
-			const body = formatStatusText(env);
+			const lines = formatStatusText(env).split("\n");
 
-			// Attach hint only when a session exists (active / orphan), matching open / ws-log.
+			// Attach hint only when a session exists (active / orphan), matching /ws-log footer.
+			let footer: string | undefined;
 			if (env.monitorCmd && (env.state === "active" || env.state === "orphan")) {
 				const copied = await copyToClipboard(pi, env.monitorCmd);
-				ctx.ui.notify(
-					`${body}\nMonitor: ${env.monitorCmd}${copied ? " (copied)" : ""}`,
-					env.state === "missing" ? "error" : "info",
-				);
-				return;
+				footer = `Monitor: ${env.monitorCmd}${copied ? " (copied)" : ""}`;
 			}
 
-			ctx.ui.notify(body, env.state === "missing" ? "error" : "info");
+			ctx.ui.setWidget("ws-status", buildWidget(lines, footer), { placement: "aboveEditor" });
 		},
 	});
 
