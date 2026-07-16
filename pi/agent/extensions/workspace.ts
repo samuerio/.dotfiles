@@ -123,13 +123,13 @@ async function listAllWorkspaces(pi: ExtensionAPI): Promise<ResolvedWorkspace[]>
 		const wt = worktrees.find((w) => w.branch === name);
 		const sess = sessions.find((s) => s.session_name === name);
 
-		let status: WorkspaceStatus;
-		if (wt && sess) status = "active";
-		else if (wt) status = "idle";
-		else if (sess) status = "orphan";
-		else status = "missing";
+		let state: WorkspaceState;
+		if (wt && sess) state = "active";
+		else if (wt) state = "idle";
+		else if (sess) state = "orphan";
+		else state = "missing";
 
-		result.push({ name, status, worktreePath: wt?.path, dirty: wt?.dirty });
+		result.push({ name, state, worktreePath: wt?.path, dirty: wt?.dirty });
 	}
 	return result;
 }
@@ -154,7 +154,7 @@ async function selectWorkspace(
 		if (ws.dirty) marks.push("dirty");
 		if (ws.name === currentName) marks.push("current");
 		const mark = marks.length > 0 ? ` (${marks.join(", ")})` : "";
-		const display = `${ws.name} [${ws.status}]${mark}`;
+		const display = `${ws.name} [${ws.state}]${mark}`;
 		displayToWorkspace.set(display, ws);
 	}
 
@@ -163,13 +163,13 @@ async function selectWorkspace(
 	return displayToWorkspace.get(choice) ?? null;
 }
 
-type WorkspaceAction = "open" | "status" | "state" | "vscode" | "cancel" | "close";
+type WorkspaceAction = "open" | "log" | "status" | "vscode" | "cancel" | "close";
 
-function getAvailableActions(status: WorkspaceStatus): WorkspaceAction[] {
-	switch (status) {
-		case "active": return ["open", "status", "state", "vscode", "cancel", "close"];
-		case "idle": return ["open", "state", "vscode", "close"];
-		case "orphan": return ["state", "close"];
+function getAvailableActions(state: WorkspaceState): WorkspaceAction[] {
+	switch (state) {
+		case "active": return ["open", "log", "status", "vscode", "cancel", "close"];
+		case "idle": return ["open", "status", "vscode", "close"];
+		case "orphan": return ["status", "close"];
 		default: return [];
 	}
 }
@@ -264,11 +264,11 @@ function parseSessionsOutput(stdout: string): SessionEntry[] {
 
 // ─── Workspace State Resolution ───────────────────────────────────
 
-type WorkspaceStatus = "active" | "idle" | "orphan" | "missing";
+type WorkspaceState = "active" | "idle" | "orphan" | "missing";
 
 interface ResolvedWorkspace {
 	name: string;
-	status: WorkspaceStatus;
+	state: WorkspaceState;
 	worktreePath?: string;
 	dirty?: boolean;
 }
@@ -294,15 +294,15 @@ async function resolveWorkspaceState(
 		}
 	}
 
-	let status: WorkspaceStatus;
-	if (worktree && session) status = "active";
-	else if (worktree) status = "idle";
-	else if (session) status = "orphan";
-	else status = "missing";
+	let state: WorkspaceState;
+	if (worktree && session) state = "active";
+	else if (worktree) state = "idle";
+	else if (session) state = "orphan";
+	else state = "missing";
 
 	return {
 		name,
-		status,
+		state,
 		worktreePath: worktree?.path,
 		dirty: worktree?.dirty,
 	};
@@ -435,7 +435,7 @@ function loadRushModeSpec(cwd: string): ModeSpec | null {
 
 /**
  * Shared -a analyzer: structured fields only. Raw pane tail is attached in code.
- * Used by single /ws-status -a and by batch /ws-status -b -a (N parallel calls).
+ * Used by single /ws-log -a and by batch /ws-log -b -a (N parallel calls).
  */
 const STATUS_SYSTEM_PROMPT = `You are a workspace status analyzer for a single coding workspace TUI widget.
 
@@ -539,7 +539,7 @@ function formatBatchNameHeader(name: string, status: string): string {
 }
 
 /**
- * Single /ws-status without -a: current pane status (idle|busy) + raw tail + Monitor (footer).
+ * Single /ws-log without -a: current pane idle|busy + raw tail + Monitor (footer).
  */
 function formatSingleRawWidget(paneOutput: string): string[] {
 	const { tag } = classifyRawPane(paneOutput);
@@ -704,7 +704,8 @@ async function ensureSession(
 
 type ExtensionUI = ExtensionCommandContext["ui"];
 
-function updateWorkspaceStatus(ui: ExtensionUI, name: string | undefined): void {
+/** Status-bar chip for current branch-workspace name (not workspace state enum). */
+function updateStatusBar(ui: ExtensionUI, name: string | undefined): void {
 	if (!name) {
 		ui.setStatus("branch-workspace", undefined);
 		return;
@@ -722,7 +723,7 @@ interface WorkspaceEnv {
 	socket: string | null;
 	session: string;
 	paneTarget: string | null;
-	status: WorkspaceStatus;
+	state: WorkspaceState;
 	dirty?: boolean;
 	paneIdle?: boolean;
 	preValidated: boolean;
@@ -731,7 +732,7 @@ interface WorkspaceEnv {
 
 interface ListWorkspaceRow {
 	name: string;
-	status: WorkspaceStatus;
+	state: WorkspaceState;
 	dirty?: boolean;
 	worktreePath?: string;
 	current: boolean;
@@ -754,7 +755,7 @@ interface OpenResult extends WorkspaceEnv {
 interface CloseResult {
 	ok: boolean;
 	name: string;
-	status?: WorkspaceStatus;
+	state?: WorkspaceState;
 	error?: string;
 	needsForce?: "dirty" | "orphan";
 	leftoverCount?: number;
@@ -777,7 +778,7 @@ async function listWorkspaces(
 		socket,
 		workspaces: workspaces.map((w) => ({
 			name: w.name,
-			status: w.status,
+			state: w.state,
 			dirty: w.dirty,
 			worktreePath: w.worktreePath,
 			current: w.name === currentName,
@@ -790,8 +791,8 @@ async function buildWorkspaceEnv(pi: ExtensionAPI, name: string): Promise<Worksp
 	const socket = await getTmuxSocket(pi);
 	let paneTarget: string | null = null;
 	let paneIdle: boolean | undefined;
-	if (socket && (ws.status === "active" || ws.status === "idle")) {
-		if (ws.status === "active") {
+	if (socket && (ws.state === "active" || ws.state === "idle")) {
+		if (ws.state === "active") {
 			paneTarget = await discoverPaneTarget(pi, socket, name);
 			if (paneTarget) {
 				const out = await capturePaneOutput(pi, socket, paneTarget, 20);
@@ -799,8 +800,8 @@ async function buildWorkspaceEnv(pi: ExtensionAPI, name: string): Promise<Worksp
 			}
 		}
 	}
-	const preValidated = !!(socket && paneTarget && ws.status === "active");
-	const hasSession = ws.status === "active" || ws.status === "orphan";
+	const preValidated = !!(socket && paneTarget && ws.state === "active");
+	const hasSession = ws.state === "active" || ws.state === "orphan";
 	return {
 		name,
 		branch: name,
@@ -808,7 +809,7 @@ async function buildWorkspaceEnv(pi: ExtensionAPI, name: string): Promise<Worksp
 		socket,
 		session: name,
 		paneTarget,
-		status: ws.status,
+		state: ws.state,
 		dirty: ws.dirty,
 		paneIdle,
 		preValidated,
@@ -833,7 +834,7 @@ async function openWorkspace(
 			socket: null,
 			session: name,
 			paneTarget: null,
-			status: "missing",
+			state: "missing",
 			preValidated: false,
 			warnings,
 			error: result.stderr.trim() || "worktree.sh open failed",
@@ -849,7 +850,7 @@ async function openWorkspace(
 			socket: null,
 			session: name,
 			paneTarget: null,
-			status: "missing",
+			state: "missing",
 			preValidated: false,
 			warnings,
 			error: "Failed to parse worktree output",
@@ -866,7 +867,7 @@ async function openWorkspace(
 			socket: null,
 			session: name,
 			paneTarget: null,
-			status: "idle",
+			state: "idle",
 			preValidated: false,
 			worktreeCreated: output.worktreeCreated,
 			warnings,
@@ -880,7 +881,7 @@ async function openWorkspace(
 	}
 
 	await writeCurrentState(cwd, name, output.worktreePath);
-	if (ui) updateWorkspaceStatus(ui, name);
+	if (ui) updateStatusBar(ui, name);
 
 	const env = await buildWorkspaceEnv(pi, name);
 	return {
@@ -900,21 +901,21 @@ async function closeWorkspace(
 	const { cwd, name, force = false, ui } = opts;
 	const ws = await resolveWorkspaceState(pi, name);
 
-	if (ws.status === "missing") {
+	if (ws.state === "missing") {
 		return {
 			ok: false,
 			name,
-			status: "missing",
+			state: "missing",
 			error: `Workspace "${name}" does not exist (no worktree, no session).`,
 		};
 	}
 
-	if (ws.status === "orphan") {
+	if (ws.state === "orphan") {
 		if (!force) {
 			return {
 				ok: false,
 				name,
-				status: "orphan",
+				state: "orphan",
 				needsForce: "orphan",
 				error: `Workspace "${name}" has an orphaned tmux session (no worktree). Ask the user, then call again with force: true to kill the session.`,
 			};
@@ -926,16 +927,16 @@ async function closeWorkspace(
 		const currentState = await readCurrentState(cwd);
 		if (currentState?.name === name) {
 			await clearCurrentState(cwd);
-			if (ui) updateWorkspaceStatus(ui, undefined);
+			if (ui) updateStatusBar(ui, undefined);
 		}
-		return { ok: true, name, status: "orphan" };
+		return { ok: true, name, state: "orphan" };
 	}
 
 	if (ws.dirty && !force) {
 		return {
 			ok: false,
 			name,
-			status: ws.status,
+			state: ws.state,
 			needsForce: "dirty",
 			error: `Workspace "${name}" has uncommitted changes. Ask the user, then call again with force: true to close anyway.`,
 		};
@@ -949,14 +950,14 @@ async function closeWorkspace(
 		return {
 			ok: false,
 			name,
-			status: ws.status,
+			state: ws.state,
 			error: cleanResult.stderr.trim() || "Failed to remove worktree.",
 		};
 	}
 	const cleanOutput = parseCleanOutput(cleanResult.stdout);
 
 	let sessionWarn: string | undefined;
-	if (ws.status === "active") {
+	if (ws.state === "active") {
 		const socket = await getTmuxSocket(pi);
 		if (socket) {
 			const killResult = await pi.exec("tmux", ["-S", socket, "kill-session", "-t", name]);
@@ -969,13 +970,13 @@ async function closeWorkspace(
 	const currentState = await readCurrentState(cwd);
 	if (currentState?.name === name) {
 		await clearCurrentState(cwd);
-		if (ui) updateWorkspaceStatus(ui, undefined);
+		if (ui) updateStatusBar(ui, undefined);
 	}
 
 	return {
 		ok: true,
 		name,
-		status: ws.status,
+		state: ws.state,
 		leftoverCount: cleanOutput?.leftoverCount ?? 0,
 		error: sessionWarn,
 	};
@@ -990,7 +991,7 @@ function formatListText(result: ListResult): string {
 		if (w.dirty) marks.push("dirty");
 		if (w.current) marks.push("current");
 		const mark = marks.length > 0 ? ` (${marks.join(", ")})` : "";
-		return `- ${w.name} [${w.status}]${mark}`;
+		return `- ${w.name} [${w.state}]${mark}`;
 	});
 	if (result.currentName) {
 		lines.push("", `current: ${result.currentName}`);
@@ -1004,7 +1005,7 @@ function formatOpenText(result: OpenResult): string {
 	}
 	const lines = [
 		`Opened workspace "${result.name}".`,
-		`status: ${result.status}`,
+		`state: ${result.state}`,
 		`worktreePath: ${result.worktreePath ?? ""}`,
 		`worktreeCreated: ${result.worktreeCreated ?? false}`,
 		`socket: ${result.socket ?? ""}`,
@@ -1037,13 +1038,13 @@ function formatCloseText(result: CloseResult): string {
 	return msg;
 }
 
-function formatStateText(env: WorkspaceEnv): string {
-	if (env.status === "missing") {
+function formatStatusText(env: WorkspaceEnv): string {
+	if (env.state === "missing") {
 		return `Workspace "${env.name}" does not exist (no worktree, no session). Open it with ws_open first.`;
 	}
 	return [
-		`Workspace "${env.name}" state.`,
-		`status: ${env.status}`,
+		`Workspace "${env.name}" status.`,
+		`state: ${env.state}`,
 		`dirty: ${env.dirty ?? false}`,
 		`worktreePath: ${env.worktreePath ?? ""}`,
 		`socket: ${env.socket ?? ""}`,
@@ -1060,7 +1061,7 @@ function formatStateText(env: WorkspaceEnv): string {
 export default function (pi: ExtensionAPI): void {
 	pi.on("session_start", async (_event, ctx) => {
 		const state = await readCurrentState(ctx.cwd);
-		if (state) updateWorkspaceStatus(ctx.ui, state.name);
+		if (state) updateStatusBar(ctx.ui, state.name);
 	});
 
 	// ── /ws-open [-b name] ──
@@ -1093,14 +1094,14 @@ export default function (pi: ExtensionAPI): void {
 
 	// ── /ws-list ──
 	pi.registerCommand("ws-list", {
-		description: "List all branch-workspaces and optionally run an action. (For status of all active: /ws-status -b)",
+		description: "List all branch-workspaces and optionally run an action. (For pane log of all active: /ws-log -b)",
 		handler: async (_args, ctx) => {
 			// Select workspace
 			const selected = await selectWorkspace(pi, ctx, "Select workspace", ctx.cwd);
 			if (!selected) return;
 
-			// Select action based on status
-			const actions = getAvailableActions(selected.status);
+			// Select action based on workspace state
+			const actions = getAvailableActions(selected.state);
 			if (actions.length === 0) {
 				ctx.ui.notify(`Workspace "${selected.name}" has no available actions.`, "error");
 				return;
@@ -1110,18 +1111,18 @@ export default function (pi: ExtensionAPI): void {
 			if (!action) return;
 
 			// Paste the command using positional argument for the selected workspace.
-			// This works for all actions offered here (open / status / state / vscode / cancel / close).
-			// For batch status of *all* active workspaces, use `/ws-status -b` (or --batch) directly.
+			// This works for all actions offered here (open / log / status / vscode / cancel / close).
+			// For batch pane log of *all* active workspaces, use `/ws-log -b` (or --batch) directly.
 			const cmd = `/ws-${action} ${selected.name}`;
 			ctx.ui.pasteToEditor(cmd);
 		},
 	});
 
-	// ── /ws-state [name] [-s] ──
-	// Workspace lifecycle + env envelope (not pane last-command status — use /ws-status for that).
-	pi.registerCommand("ws-state", {
+	// ── /ws-status [name] [-s] ──
+	// Workspace status = state + env (not pane log — use /ws-log for that).
+	pi.registerCommand("ws-status", {
 		description:
-			"Show branch-workspace state and env (active/idle/orphan/missing, socket, pane). Usage: /ws-state [name] [-s]",
+			"Show branch-workspace status (state + env: socket, pane, dirty, …). Usage: /ws-status [name] [-s]",
 		handler: async (args, ctx) => {
 			const selectFlag = /(^|\s)-s\b/.test(args);
 			const { name: branchName } = parsePositionalName(args, [/(^|\s)-s\b/g]);
@@ -1131,19 +1132,19 @@ export default function (pi: ExtensionAPI): void {
 			const { name } = resolved;
 
 			const env = await buildWorkspaceEnv(pi, name);
-			const body = formatStateText(env);
+			const body = formatStatusText(env);
 
-			// Attach hint only when a session exists (active / orphan), matching open / ws-status.
-			if (env.monitorCmd && (env.status === "active" || env.status === "orphan")) {
+			// Attach hint only when a session exists (active / orphan), matching open / ws-log.
+			if (env.monitorCmd && (env.state === "active" || env.state === "orphan")) {
 				const copied = await copyToClipboard(pi, env.monitorCmd);
 				ctx.ui.notify(
 					`${body}\nMonitor: ${env.monitorCmd}${copied ? " (copied)" : ""}`,
-					env.status === "missing" ? "error" : "info",
+					env.state === "missing" ? "error" : "info",
 				);
 				return;
 			}
 
-			ctx.ui.notify(body, env.status === "missing" ? "error" : "info");
+			ctx.ui.notify(body, env.state === "missing" ? "error" : "info");
 		},
 	});
 
@@ -1160,12 +1161,12 @@ export default function (pi: ExtensionAPI): void {
 
 			// Interactive confirms map to force:true; never call close until user accepts.
 			const ws = await resolveWorkspaceState(pi, name);
-			if (ws.status === "missing") {
+			if (ws.state === "missing") {
 				ctx.ui.notify(`Workspace "${name}" does not exist (no worktree, no session).`, "error");
 				return;
 			}
 			let force = false;
-			if (ws.status === "orphan") {
+			if (ws.state === "orphan") {
 				const kill = await ctx.ui.confirm(
 					"Orphaned Session",
 					`Workspace "${name}" has an orphaned tmux session (no worktree). Kill it?`,
@@ -1199,9 +1200,9 @@ export default function (pi: ExtensionAPI): void {
 		},
 	});
 
-	// ── /ws-status [-b|--batch] [name] [-s] [-a|--analyze] ──
-	pi.registerCommand("ws-status", {
-		description: "Show workspace status. Usage: /ws-status [-b|--batch] [name] [-s] [-a|--analyze]",
+	// ── /ws-log [-b|--batch] [name] [-s] [-a|--analyze] ──  (pane log; not /ws-status)
+	pi.registerCommand("ws-log", {
+		description: "Show pane log and last-command outcome (not workspace status — use /ws-status). Usage: /ws-log [-b|--batch] [name] [-s] [-a|--analyze]",
 		handler: async (args, ctx) => {
 			const analyze = /(^|\s)(--analyze|-a)\b/.test(args);
 			const selectFlag = /(^|\s)-s\b/.test(args);
@@ -1221,7 +1222,7 @@ export default function (pi: ExtensionAPI): void {
 				}
 
 				const allWs = await listAllWorkspaces(pi);
-				const actives = allWs.filter((w) => w.status === "active");
+				const actives = allWs.filter((w) => w.state === "active");
 				if (actives.length === 0) {
 					ctx.ui.notify("No active workspaces.", "info");
 					return;
@@ -1241,25 +1242,25 @@ export default function (pi: ExtensionAPI): void {
 				}
 
 				// Batch is an overview only — no fake multi-target attach line.
-				// Drill down with /ws-status <name> (single mode copies a real attach cmd).
+				// Drill down with /ws-log <name> (single mode copies a real attach cmd).
 				if (!analyze) {
 					const lines = formatBatchRawLines(captures);
-					ctx.ui.setWidget("ws-status", buildWidget(lines), { placement: "aboveEditor" });
+					ctx.ui.setWidget("ws-log", buildWidget(lines), { placement: "aboveEditor" });
 					return;
 				}
 
 				ctx.ui.setWidget(
-					"ws-status",
+					"ws-log",
 					buildWidget([`Analyzing ${captures.length} workspaces in parallel...`]),
 					{ placement: "aboveEditor" },
 				);
 
 				try {
 					const lines = await analyzeBatchStatusParallel(pi, ctx, captures);
-					ctx.ui.setWidget("ws-status", buildWidget(lines), { placement: "aboveEditor" });
+					ctx.ui.setWidget("ws-log", buildWidget(lines), { placement: "aboveEditor" });
 				} catch (err) {
 					const msg = err instanceof Error ? err.message : String(err);
-					ctx.ui.setWidget("ws-status", undefined);
+					ctx.ui.setWidget("ws-log", undefined);
 					ctx.ui.notify(`LLM batch analysis failed: ${msg}`, "warning");
 				}
 				return;
@@ -1271,8 +1272,8 @@ export default function (pi: ExtensionAPI): void {
 			const { name } = resolved;
 
 			const ws = await resolveWorkspaceState(pi, name);
-			if (ws.status !== "active") {
-				ctx.ui.notify(`Workspace "${name}" is not active (${ws.status}). Status requires a running tmux session.`, "error");
+			if (ws.state !== "active") {
+				ctx.ui.notify(`Workspace "${name}" is not active (${ws.state}). Log requires a running tmux session.`, "error");
 				return;
 			}
 
@@ -1301,18 +1302,18 @@ export default function (pi: ExtensionAPI): void {
 
 			if (!analyze) {
 				const lines = formatSingleRawWidget(paneOutput);
-				ctx.ui.setWidget("ws-status", buildWidget(lines, monitorCmd), { placement: "aboveEditor" });
+				ctx.ui.setWidget("ws-log", buildWidget(lines, monitorCmd), { placement: "aboveEditor" });
 				return;
 			}
 
-			ctx.ui.setWidget("ws-status", buildWidget([`Analyzing status for "${name}"...`]), { placement: "aboveEditor" });
+			ctx.ui.setWidget("ws-log", buildWidget([`Analyzing pane log for "${name}"...`]), { placement: "aboveEditor" });
 
 			let result: AnalysisResult;
 			try {
 				result = await analyzeStatus(pi, ctx, paneOutput);
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
-				ctx.ui.setWidget("ws-status", undefined);
+				ctx.ui.setWidget("ws-log", undefined);
 				ctx.ui.notify(`LLM analysis failed: ${msg}`, "warning");
 				return;
 			}
@@ -1323,9 +1324,9 @@ export default function (pi: ExtensionAPI): void {
 					paneOutput,
 					SINGLE_ANALYZE_RAW_TAIL,
 				);
-				ctx.ui.setWidget("ws-status", buildWidget(lines, monitorCmd), { placement: "aboveEditor" });
+				ctx.ui.setWidget("ws-log", buildWidget(lines, monitorCmd), { placement: "aboveEditor" });
 			} else {
-				ctx.ui.setWidget("ws-status", undefined);
+				ctx.ui.setWidget("ws-log", undefined);
 				const lines = paneOutput.trim().split("\n");
 				const tail = lines.slice(-SINGLE_ANALYZE_RAW_TAIL).join("\n");
 				ctx.ui.notify(
@@ -1350,7 +1351,7 @@ export default function (pi: ExtensionAPI): void {
 			let wtPath = stateWorktreePath;
 			if (!wtPath) {
 				const ws = await resolveWorkspaceState(pi, name);
-				if (ws.status === "missing") {
+				if (ws.state === "missing") {
 					ctx.ui.notify(`Workspace "${name}" does not exist.`, "error");
 					return;
 				}
@@ -1379,8 +1380,8 @@ export default function (pi: ExtensionAPI): void {
 			const { name } = resolved;
 
 			const ws = await resolveWorkspaceState(pi, name);
-			if (ws.status !== "active") {
-				ctx.ui.notify(`Workspace "${name}" is not active (${ws.status}). Cancel requires a running tmux session.`, "error");
+			if (ws.state !== "active") {
+				ctx.ui.notify(`Workspace "${name}" is not active (${ws.state}). Cancel requires a running tmux session.`, "error");
 				return;
 			}
 
@@ -1430,7 +1431,7 @@ export default function (pi: ExtensionAPI): void {
 				ctx.ui.notify(`Process in "${name}" interrupted.`, "info");
 			} else {
 				ctx.ui.notify(
-					`Sent C-c to "${name}". Process may still be terminating; check with /ws-status.`,
+					`Sent C-c to "${name}". Process may still be terminating; check with /ws-log.`,
 					"warning",
 				);
 			}
@@ -1438,21 +1439,21 @@ export default function (pi: ExtensionAPI): void {
 	});
 
 	// Task / handoff-for-impl orchestration lives in agents/skills/branch-workspace/SKILL.md
-	// (tools: ws_list / ws_open / ws_close / ws_state). No slash commands for those flows.
+	// (tools: ws_list / ws_open / ws_close / ws_status). Task/hfi orchestration is skill-driven.
 
-	// ── Tools: ws_list / ws_open / ws_close / ws_state ──
+	// ── Tools: ws_list / ws_open / ws_close / ws_status ──
 
 	pi.registerTool({
 		name: "ws_list",
 		label: "List workspaces",
 		description:
-			"List branch-workspaces (git worktree + tmux session) with state (active=worktree+session, idle=worktree only, orphan=session only; field name status), dirty flag, and current marker. Read-only. missing never appears (list is worktree ∪ session). Use before open/close when the exact name is unknown.",
+			"List branch-workspaces (git worktree + tmux session) with state (active=worktree+session, idle=worktree only, orphan=session only; field name state), dirty flag, and current marker. Read-only. missing never appears (list is worktree ∪ session). Use before open/close when the exact name is unknown.",
 		promptSnippet: "List branch-workspaces (active/idle/orphan, dirty, current).",
 		promptGuidelines: [
 			"Prefer ws_list when the exact branch-workspace name is unknown or before closing.",
 			"Use the full exact name from the result for ws_open / ws_close — never invent short aliases.",
 			"query is substring filter only; identity for open/close is still exact name match.",
-			"Workspace state vocabulary (field status): active | idle | orphan (missing only appears on name-targeted ws_state).",
+			"Workspace state vocabulary (field state): active | idle | orphan (missing only appears on name-targeted ws_status).",
 		],
 		parameters: Type.Object({
 			query: Type.Optional(
@@ -1543,17 +1544,17 @@ export default function (pi: ExtensionAPI): void {
 	});
 
 	pi.registerTool({
-		name: "ws_state",
+		name: "ws_status",
 		label: "Inspect workspace",
 		description:
-			"Read-only: return the dispatch environment envelope (name, worktreePath, socket, session, paneTarget, paneIdle, workspace state in field status: active|idle|orphan|missing, dirty, monitorCmd). Omit name to use the current branch-workspace. No side effects (does not create sessions or change current).",
-		promptSnippet: "Inspect workspace env; omit name for current.",
+			"Read-only workspace status report: state (active|idle|orphan|missing) + env (worktreePath, socket, session, paneTarget, paneIdle, dirty, monitorCmd). Omit name to use the current branch-workspace. No side effects.",
+		promptSnippet: "Inspect workspace status (state+env); omit name for current.",
 		promptGuidelines: [
-			"Before dispatching to the current branch-workspace, call ws_state with no name to get socket/paneTarget/paneIdle.",
+			"Before dispatching to the current branch-workspace, call ws_status with no name to get state, socket, paneTarget, paneIdle.",
 			"Pass an exact full name only when targeting a non-current workspace; use ws_list when the name is unknown.",
 			"If no current is set, the tool fails with: no current workspace.",
-			"Workspace state (field status): active (worktree+session, ready for task), idle (worktree only → ws_open), orphan (session only → close with user confirm + force), missing (neither → ws_open to create). Stale current is resolved as-is (no silent switch).",
-			"Workspace idle ≠ paneIdle: the former means no session; the latter means the pane is free for input.",
+			"Field state: active (worktree+session, ready for task), idle (worktree only → ws_open), orphan (session only → close with user confirm + force), missing (neither → ws_open to create).",
+			"status (this tool) = state + env. Workspace idle ≠ paneIdle.",
 		],
 		parameters: Type.Object({
 			name: Type.Optional(
@@ -1574,8 +1575,8 @@ export default function (pi: ExtensionAPI): void {
 			}
 			const env = await buildWorkspaceEnv(pi, name);
 			return {
-				content: [{ type: "text" as const, text: formatStateText(env) }],
-				details: { ok: env.status !== "missing", ...env },
+				content: [{ type: "text" as const, text: formatStatusText(env) }],
+				details: { ok: env.state !== "missing", ...env },
 			};
 		},
 	});
