@@ -39,13 +39,6 @@ Use `ws_list` / `ws_open` / `ws_close` / `ws_status` for discovery and lifecycle
 | `ws_close` | Remove worktree + kill session; dirty or orphan → `needsForce`; ask the user, then retry with `force: true` |
 | `ws_status` | Read-only **status** report: `state` + env. Omit `name` → current; pass `name` for an exact target. Required for dispatch readiness after open. |
 
-Typical flow:
-
-1. `ws_list` when the exact name is unknown or when reviewing dirty/orphan/current.
-2. Need create/reuse: `ws_open` then `ws_status`. Already open: `ws_status` only. Use status env for dispatch.
-3. Orchestrate via this skill’s task / handoff section (do not re-run worktree list / find-sessions).
-4. `ws_close`; if the result has `needsForce` (`dirty` or `orphan`), ask the user, then retry with `force: true`. Never invent `force: true`. Never kill sessions via raw `tmux` — always use `ws_close`.
-
 ## Workspace state
 
 **state** is the four-value lifecycle enum. **status** (via the `ws_status` tool) is a full report: `state` + env and related fields.
@@ -78,21 +71,17 @@ Use the tmux SKILL only to **send input** and **watch output** with `socket` / `
 
 Match **natural language** that includes the keyword **`ws`**. Match intent from phrasing; do not require exact wording.
 
-**Task** — dispatch work into a workspace (wait for completion on the worker path):
+| Mode | Target | Intent | Example utterances |
+|------|--------|--------|--------------------|
+| **Task** (wait for completion) | Current | Run `<task>` on the current workspace | `on current ws, <task>` |
+| | Named | Run `<task>` on workspace `<name>` | `on <name> ws, <task>` |
+| | New | Create/open a workspace, then run `<task>` | `new ws, <task>` |
+| **HFI** (silent kickoff) | Current | HFI on the current workspace | `current ws hfi` |
+| | Named | HFI on workspace `<name>` | `on <name> ws hfi` |
+| | New | Create/open a workspace, then HFI | `new ws hfi` |
 
-| Target | Intent | Example utterances |
-|--------|--------|--------------------|
-| Current | Run `<task>` on the current workspace | `on current ws, <task>` |
-| Named | Run `<task>` on workspace `<name>` | `on <name> ws, <task>` |
-| New | Create/open a workspace, then run `<task>` | `new ws, <task>` |
 
-**Handoff-for-impl (hfi)** — silent kickoff; do not wait for completion:
-
-| Target | Intent | Example utterances |
-|--------|--------|--------------------|
-| Current | HFI on the current workspace | `current ws hfi` |
-| Named | HFI on workspace `<name>` | `on <name> ws hfi` |
-| New | Create/open a workspace, then HFI | `new ws hfi` |
+*Note: **Task** dispatches work and waits for the worker to signal completion. **Handoff-for-impl (HFI)** is a silent kickoff that does not wait for completion or capture output.*
 
 ### Model selection
 
