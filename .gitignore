@@ -10,8 +10,8 @@ linux_rime/user.yaml
 .aider.input.history
 .aider.tags.cache.v4/
 .pi/todos
+.pi/branch-workspace-current.json
 **/node_modules/
 /.worktree/
 spec/
 research/
-.branch-workspace-current.json
