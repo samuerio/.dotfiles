@@ -28,7 +28,7 @@ The dispatcher agent owns coordination; only the worker agent may write files:
 
 The worker agent performs implementation work inside the branch-workspace. It receives a self-contained task document and runs to completion.
 
-Use `ws_list` / `ws_open` / `ws_close` / `ws_status` for discovery and lifecycle — do not reimplement worktree/session management via bash. `<name>` always means the complete branch-workspace identifier and must be matched exactly; never fuzzy-match or shorten it. When a tool result provides worktree/session/pane fields, trust them and do not rediscover.
+`<name>` always means the complete branch-workspace identifier and must be matched exactly; never fuzzy-match or shorten it. When a tool result provides worktree/session/pane fields, trust them and do not rediscover.
 
 ## Lifecycle tools (prefer these)
 
@@ -43,7 +43,7 @@ Use `ws_list` / `ws_open` / `ws_close` / `ws_status` for discovery and lifecycle
 
 **state** is the four-value lifecycle enum. **status** (via the `ws_status` tool) is a full report: `state` + env and related fields.
 
-State is derived from the two coupled components (git worktree × tmux session):
+State is derived from worktree × session presence:
 
 | State | Condition |
 |-------|-----------|
@@ -56,7 +56,6 @@ Notes:
 
 - **`dirty` is not a state.** It is an orthogonal flag on worktrees (`active` or `idle`). Closing a dirty worktree returns `needsForce: "dirty"`; ask the user, then `ws_close` with `force: true`.
 - **Workspace `idle` ≠ pane idle/busy.** Workspace `idle` (a **state**) means no tmux session. Pane idle/busy (`paneIdle`) means whether the pane is free to accept input. Task dispatch needs **active** workspace **and** an idle pane.
-- Tool results expose the four-value enum as field **`state`** (`active` \| `idle` \| `orphan` \| `missing`).
 - **Close gates:** never auto-resolve `dirty`/`orphan` — always get explicit user confirmation before `force: true` (see `ws_close` above).
 - **Orphan cleanup:** reopening an orphan does *not* reset the reused session's cwd — prefer `ws_close` (confirmed) then `ws_open` instead of reopening directly.
 
@@ -109,9 +108,8 @@ Dispatch a scoped task into a branch-workspace pane (wait for completion on the 
    - **Standard Path (Refine & Confirm)**: If the task is ambiguous, broad, involves multiple files, or requires architectural decisions (e.g., "refactor the auth module", "implement a new caching layer"), strictly apply the `refine-task` SKILL. The dispatcher must proactively explore the worktree to answer questions from context. If critical information is still missing, ask the user targeted questions. **Wait for explicit user confirmation** of the refined task before proceeding to step 3.
 
    After `refine-task` completes (including any clarifying exchange with the user), resume from step 3 using the refined task text as `<task>`. The dispatcher reviews the worker's output once the worker signals completion.
-3. The dispatcher must choose how to route the work, but it must not implement file changes itself. If the task output is expected to be code, docs, tests, review comments, or any other file modification, send it to the worker path.
-4. Determine how to dispatch:
-   - **worker path** (default for any task whose output is file changes — writing code, docs, tests, or review comments):
+3. Determine how to dispatch — the dispatcher must not implement file changes itself:
+   - **worker path** (any task whose output is file changes — writing code, docs, tests, or review comments):
      1. Construct a `pi -p` command following the `pi-headless` SKILL **Print Mode**. Use `--no-session`. Apply **Model selection** above.
      2. Write the refined task text to `/tmp/task/<YYYY-MM-DD-HHMMSS>-<slug>.md` (create the directory with `mkdir -p /tmp/task` if needed), where `<slug>` is a short meaningful kebab-case English phrase derived from the task content. Write the refined task text in the same language as the original `<task>` input.
      3. **Append the Structured Handoff Instruction** to the task text:
