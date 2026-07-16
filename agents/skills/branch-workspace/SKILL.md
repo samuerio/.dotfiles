@@ -32,17 +32,16 @@ Use `ws_list` / `ws_open` / `ws_close` / `ws_status` for discovery and lifecycle
 | Tool | Role |
 |------|------|
 | `ws_list` | Read-only inventory: name, state (`active`/`idle`/`orphan`), dirty, current. `missing` does not appear here (list is worktree ∪ session). |
-| `ws_open` | Open or reuse worktree + tmux session; set current; return full env envelope |
+| `ws_open` | Open or reuse worktree + tmux session; set current. Returns only `ok` / `name` / `warnings` (or `error`) — not env. |
 | `ws_close` | Remove worktree + kill session; dirty or orphan → `needsForce`; ask the user, then retry with `force: true` |
-| `ws_status` | Read-only **status** report: `state` + env (`socket`, `paneTarget`, `paneIdle`, …). Omit `name` → current; pass `name` for an exact target. |
+| `ws_status` | Read-only **status** report: `state` + env. Omit `name` → current; pass `name` for an exact target. Required for dispatch readiness after open. |
 
 Typical flow:
 
 1. `ws_list` when the exact name is unknown or when reviewing dirty/orphan/current.
-2. For the **current** workspace, call `ws_status` with no args for the status report (`state` + env). For another workspace, pass the full exact `name`.
-3. `ws_open` with the full exact `name` when creating/reusing → use returned `socket`, `paneTarget`, `worktreePath`, `monitorCmd`.
-4. Orchestrate via this skill’s task section (do not re-run worktree list / find-sessions).
-5. `ws_close`; if the result has `needsForce` (`dirty` or `orphan`), ask the user, then retry with `force: true`. Never invent `force: true`. Never kill sessions via raw `tmux` — always use `ws_close`.
+2. Need create/reuse: `ws_open` then `ws_status`. Already open: `ws_status` only. Use status env for dispatch.
+3. Orchestrate via this skill’s task / handoff section (do not re-run worktree list / find-sessions).
+4. `ws_close`; if the result has `needsForce` (`dirty` or `orphan`), ask the user, then retry with `force: true`. Never invent `force: true`. Never kill sessions via raw `tmux` — always use `ws_close`.
 
 ## Workspace state
 
@@ -60,27 +59,30 @@ State is derived from the two coupled components (git worktree × tmux session):
 Notes:
 
 - **`dirty` is not a state.** It is an orthogonal flag on worktrees (`active` or `idle`). Closing a dirty worktree returns `needsForce: "dirty"`; ask the user, then `ws_close` with `force: true`.
-- **Workspace `idle` ≠ pane idle/busy.** Workspace `idle` (a **state**) means no tmux session. Pane idle/busy (`paneIdle` from `ws_status`) means whether the pane is free to accept input. Task dispatch needs **active** workspace **and** an idle pane.
+- **Workspace `idle` ≠ pane idle/busy.** Workspace `idle` (a **state**) means no tmux session. Pane idle/busy (`paneIdle`) means whether the pane is free to accept input. Task dispatch needs **active** workspace **and** an idle pane.
 - Tool results expose the four-value enum as field **`state`** (`active` \| `idle` \| `orphan` \| `missing`).
-- **`ws_status`** returns a **status** report: `state` + env (and other fields). Without `name`, it inspects the **current** branch-workspace (set by a successful `ws_open`).
+- **`ws_open` is open-only** (`ok` / `name` / `warnings`). **`ws_status` is the only source of status/env** for dispatch. After open, always call `ws_status` before send.
 - **Close gates (fail-closed):** clean `active`/`idle` close without confirmation. **dirty** and **orphan** both require explicit user confirmation before `force: true`. Do not auto-resolve either.
 - **Orphan + `ws_open`:** open rebuilds the worktree and reuses the existing same-named session without resetting its cwd. Prefer `ws_close` (confirmed) then `ws_open` when cleaning up an orphan.
 
 ## Current branch-workspace
 
-The **current** branch-workspace is the one most recently opened via `ws_open`. To inspect its **status** (`state` + env), call **`ws_status` with no `name`**.
+The **current** branch-workspace is the one most recently opened via `ws_open`. Inspect it with **`ws_status` (no `name`)**.
 
 ## Orchestration
 
 > **SKILL roles**: `refine-task` clarifies a single task's scope through Q&A and outputs plain task text for immediate dispatch. `draft-impl-handoff` produces a structured handoff document consumed by a headless `pi` worker. Do not conflate the two — **task** always uses `refine-task` (or fast-path); **handoff-for-impl**'s generate-then-run path always uses `draft-impl-handoff`.
 
-Name-scoped operations use the full branch-workspace name, exact match, no fuzzy lookup. Use the tmux SKILL only to **send input** and **watch output** with `socket` / `paneTarget` from `ws_status` or `ws_open` — do not re-derive them.
+Name-scoped operations use the full branch-workspace name, exact match, no fuzzy lookup. Use the tmux SKILL only to **send input** and **watch output** with `socket` / `paneTarget` from `ws_status` — do not re-derive them.
 
 ### Task [`<name>`] [-m|--choose-model] `<task>`
 
 Dispatch a scoped task into a branch-workspace pane (wait for completion on the worker path).
 
-1. Resolve workspace **status** with `ws_status`: omit `name` for the current workspace, or pass the full exact `<name>`. Proceed only when `state` is `active` and `paneIdle` is true; otherwise fix via lifecycle tools (`ws_open`, etc.) before dispatch. Use the returned `socket` / `paneTarget` for tmux send/watch — do not rediscover them.
+1. Obtain env for dispatch:
+   - **Need create/reuse:** `ws_open` with the exact name, then `ws_status` (same name or no `name` now that current is set).
+   - **Already open / current:** `ws_status` only (no `name`, or exact `<name>`).
+   - Proceed only when `state` is `active` and `paneIdle` is true; otherwise fix via lifecycle tools then `ws_status` again. Use returned `socket` / `paneTarget` for tmux send/watch — do not rediscover them.
 2. **Task Triage (Intent Classification)**: Before dispatching, evaluate the complexity and clarity of the `<task>`:
    - **Fast Path (Direct Dispatch)**: If the task is trivial, unambiguous, and self-contained (e.g., "fix typo in README", "bump version to 2.0", "add a specific unit test for function X"), **skip the interactive Q&A of `refine-task`**. The dispatcher should internally draft a clear, self-contained task description for the worker and proceed directly to step 3. Do not ask the user for confirmation.
    - **Standard Path (Refine & Confirm)**: If the task is ambiguous, broad, involves multiple files, or requires architectural decisions (e.g., "refactor the auth module", "implement a new caching layer"), strictly apply the `refine-task` SKILL. The dispatcher must proactively explore the worktree to answer questions from context. If critical information is still missing, ask the user targeted questions. **Wait for explicit user confirmation** of the refined task before proceeding to step 3.
@@ -102,7 +104,7 @@ Dispatch a scoped task into a branch-workspace pane (wait for completion on the 
         ```
         *(Note: Ensure the `<YYYY-MM-DD-HHMMSS>-<slug>` in the instruction exactly matches the filename stem).*
      4. Pass the task file to pi via `@/tmp/task/<filename>.md`. If `-m`/`--choose-model` was given, follow the `pi-headless` SKILL model-selection flow; otherwise use defaults.
-     5. Send the command to the tmux pane via the tmux SKILL **Sending input safely** (use `socket` / `paneTarget` from `ws_status`) and use **Watching output** (poll mode) with pattern `DONE:<YYYY-MM-DD-HHMMSS>-<slug>` to wait for completion.
+     5. Send the command to the tmux pane via the tmux SKILL **Sending input safely** (use `socket` / `paneTarget` from step 1) and use **Watching output** (poll mode) with pattern `DONE:<YYYY-MM-DD-HHMMSS>-<slug>` to wait for completion.
      6. **Post-Execution Review**: Once the `DONE` marker is detected, **do not parse the raw tmux pane output**. Instead, read the content of `/tmp/task/<YYYY-MM-DD-HHMMSS>-<slug>.result.md` to understand the worker's output. Present this structured summary to the user.
    - **dispatcher path** (for tasks requiring observability — running tests, executing commands, checking runtime errors): execute the command using either bash or the branch-workspace's tmux pane, capturing the output for the user.
 
@@ -123,10 +125,10 @@ Optional `<name>` is a full branch-workspace identifier (exact match). Optional 
      - If the conversation clearly indicates a different kind of work (bug fix, refactor, chore, experiment, etc.), use the matching prefix instead (`fix/`, `refactor/`, `chore/`, `exp/`, ...).
      - If a suitable name cannot be derived, ask the user for it.
 
-2. Ensure the workspace is open and ready to receive input:
+2. Open, then status for env:
    - Call `ws_open` with the resolved name (creates or reuses worktree + session; sets current).
-   - Then call `ws_status` with that name (or no args, now current) and proceed only when `state` is `active` and `paneIdle` is true.
-   - Use `socket` / `paneTarget` / `monitorCmd` from these results — do not rediscover them.
+   - Call `ws_status` (no `name` or the same name). Proceed only when `state` is `active` and `paneIdle` is true.
+   - Use `socket` / `paneTarget` / `monitorCmd` from `ws_status` — do not rediscover them.
 
 3. Choose the implementation command. If `-m`/`--choose-model` was requested, follow the `pi-headless` SKILL model-selection flow before constructing any `pi` command.
 
@@ -153,4 +155,4 @@ Optional `<name>` is a full branch-workspace identifier (exact match). Optional 
 6. Report only:
    - the branch-workspace name
    - that the command was sent
-   - the monitor command (`monitorCmd` from `ws_open` / `ws_status`)
+   - the monitor command (`monitorCmd` from `ws_status`)
