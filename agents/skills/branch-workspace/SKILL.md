@@ -19,7 +19,7 @@ Each branch-workspace is identified by `<name>`. The git branch name and the tmu
 
 ## Role Boundaries
 
-The dispatcher agent owns coordination. The tmux pane is a shared execution environment — both agents may run commands there, but only the worker agent may write files:
+The dispatcher agent owns coordination; only the worker agent may write files:
 
 - **Explore freely**: the dispatcher may read and inspect files in the branch-workspace's worktree at any point — to refine a task with the user, to review results, or to understand context. Use bash or read-only tools directly for speed and efficiency.
 - **No direct writes**: the dispatcher must never write to or modify files in the branch-workspace's worktree, even for trivial changes. All file modifications go through the worker agent.
@@ -35,7 +35,7 @@ Use `ws_list` / `ws_open` / `ws_close` / `ws_status` for discovery and lifecycle
 | Tool | Role |
 |------|------|
 | `ws_list` | Read-only inventory: name, state (`active`/`idle`/`orphan`), dirty, current. `missing` does not appear here (list is worktree ∪ session). |
-| `ws_open` | Open or reuse worktree + tmux session; set current. Returns only `ok` / `name` / `warnings` (or `error`) — not env. |
+| `ws_open` | Open or reuse worktree + tmux session; set current. Returns only `ok` / `name` / `warnings` (or `error`) — not env. Always call `ws_status` after open, before dispatch. |
 | `ws_close` | Remove worktree + kill session; dirty or orphan → `needsForce`; ask the user, then retry with `force: true` |
 | `ws_status` | Read-only **status** report: `state` + env. Omit `name` → current; pass `name` for an exact target. Required for dispatch readiness after open. |
 
@@ -57,9 +57,8 @@ Notes:
 - **`dirty` is not a state.** It is an orthogonal flag on worktrees (`active` or `idle`). Closing a dirty worktree returns `needsForce: "dirty"`; ask the user, then `ws_close` with `force: true`.
 - **Workspace `idle` ≠ pane idle/busy.** Workspace `idle` (a **state**) means no tmux session. Pane idle/busy (`paneIdle`) means whether the pane is free to accept input. Task dispatch needs **active** workspace **and** an idle pane.
 - Tool results expose the four-value enum as field **`state`** (`active` \| `idle` \| `orphan` \| `missing`).
-- **`ws_open` is open-only** (`ok` / `name` / `warnings`). **`ws_status` is the only source of status/env** for dispatch. After open, always call `ws_status` before send.
-- **Close gates (fail-closed):** clean `active`/`idle` close without confirmation. **dirty** and **orphan** both require explicit user confirmation before `force: true`. Do not auto-resolve either.
-- **Orphan + `ws_open`:** open rebuilds the worktree and reuses the existing same-named session without resetting its cwd. Prefer `ws_close` (confirmed) then `ws_open` when cleaning up an orphan.
+- **Close gates:** never auto-resolve `dirty`/`orphan` — always get explicit user confirmation before `force: true` (see `ws_close` above).
+- **Orphan cleanup:** reopening an orphan does *not* reset the reused session's cwd — prefer `ws_close` (confirmed) then `ws_open` instead of reopening directly.
 
 ## Orchestration
 
