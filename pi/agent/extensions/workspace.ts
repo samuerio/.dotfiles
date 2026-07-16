@@ -1771,12 +1771,13 @@ ${WS_HFI_SKILL_TEXT}`;
 		name: "ws_list",
 		label: "List workspaces",
 		description:
-			"List branch-workspaces (git worktree + tmux session) with status, dirty flag, and current marker. Read-only. Use before open/close when the exact name is unknown.",
-		promptSnippet: "List branch-workspaces (status/dirty/current).",
+			"List branch-workspaces (git worktree + tmux session) with state (active=worktree+session, idle=worktree only, orphan=session only; field name status), dirty flag, and current marker. Read-only. missing never appears (list is worktree ∪ session). Use before open/close when the exact name is unknown.",
+		promptSnippet: "List branch-workspaces (active/idle/orphan, dirty, current).",
 		promptGuidelines: [
 			"Prefer ws_list when the exact branch-workspace name is unknown or before closing.",
 			"Use the full exact name from the result for ws_open / ws_close — never invent short aliases.",
 			"query is substring filter only; identity for open/close is still exact name match.",
+			"Workspace state vocabulary (field status): active | idle | orphan (missing only appears on name-targeted ws_state).",
 		],
 		parameters: Type.Object({
 			query: Type.Optional(
@@ -1799,12 +1800,13 @@ ${WS_HFI_SKILL_TEXT}`;
 		name: "ws_open",
 		label: "Open workspace",
 		description:
-			"Open or reuse a branch-workspace (git worktree + tmux session), set it as current, and return the full dispatch environment envelope (name, worktreePath, socket, session, paneTarget, monitorCmd, …).",
+			"Open or reuse a branch-workspace (git worktree + tmux session), set it as current, and return the full dispatch environment envelope (name, worktreePath, socket, session, paneTarget, monitorCmd, …). Recreates a missing session for idle; for orphan prefer close-then-open.",
 		promptSnippet: "Open/reuse a branch-workspace; returns socket and paneTarget.",
 		promptGuidelines: [
 			"Require an exact full name (e.g. feat/my-feature). Prefer names from ws_list when reusing.",
 			"On success, use returned socket/paneTarget/worktreePath for tmux dispatch — do not re-run worktree list or find-sessions.",
 			"Open does not fail if the pane is busy; check paneIdle before sending work.",
+			"idle (worktree only): open recreates the session. orphan (session only): prefer ws_close after user confirm, then open — open reuses the residual session without resetting cwd.",
 			"First open in a repo may commit .gitignore via worktree.sh (existing behavior).",
 		],
 		parameters: Type.Object({
@@ -1830,18 +1832,21 @@ ${WS_HFI_SKILL_TEXT}`;
 		name: "ws_close",
 		label: "Close workspace",
 		description:
-			"Close a branch-workspace (remove worktree + kill tmux session). Fail-closed: dirty or orphan requires force:true after explicit user confirmation.",
+			"Close a branch-workspace (remove worktree + kill tmux session). Fail-closed: dirty worktree or orphan session returns needsForce and requires force:true only after explicit user confirmation. Clean active/idle close without force.",
 		promptSnippet: "Close a branch-workspace; force only after user confirms dirty/orphan.",
 		promptGuidelines: [
-			"Use exact name from ws_list or prior open. Never invent force:true — only after user confirms dirty or orphan.",
-			"If result has needsForce, explain to the user and re-call with force:true only if they confirm.",
+			"Use exact name from ws_list or prior open. Never invent force:true.",
+			"needsForce dirty: uncommitted changes — ask the user, then re-call with force:true only if they confirm.",
+			"needsForce orphan: residual tmux session with no worktree — ask the user, then re-call with force:true only if they confirm (kills the session).",
+			"Do not kill sessions via raw tmux; always use this tool.",
 			"Prefer ws_list first when unsure which workspace to close.",
 		],
 		parameters: Type.Object({
 			name: Type.String({ description: "Full branch-workspace name (exact match)." }),
 			force: Type.Optional(
 				Type.Boolean({
-					description: "Required true when worktree is dirty or session is orphan-only, after user confirmation.",
+					description:
+						"Required true when needsForce is dirty (uncommitted changes) or orphan (session-only residual), after explicit user confirmation.",
 				}),
 			),
 		}),
@@ -1866,23 +1871,31 @@ ${WS_HFI_SKILL_TEXT}`;
 		name: "ws_state",
 		label: "Inspect workspace",
 		description:
-			"Read-only: return the dispatch environment envelope for an existing branch-workspace (name, worktreePath, socket, session, paneTarget, paneIdle, status, dirty, monitorCmd). No side effects (does not create sessions or change current).",
-		promptSnippet: "Inspect a branch-workspace env (socket/paneTarget/paneIdle); read-only.",
+			"Read-only: return the dispatch environment envelope (name, worktreePath, socket, session, paneTarget, paneIdle, workspace state in field status: active|idle|orphan|missing, dirty, monitorCmd). Omit name to use the current branch-workspace. No side effects (does not create sessions or change current).",
+		promptSnippet: "Inspect workspace env; omit name for current.",
 		promptGuidelines: [
-			"Before dispatching a task to a branch-workspace, use ws_state to query its socket/paneTarget and confirm paneIdle. No need to re-open an already-open workspace.",
-			"Require an exact full name (e.g. feat/my-feature); use ws_list when the name is unknown.",
-			"If status is missing, the workspace has no worktree and no session. Open it with ws_open first.",
+			"Before dispatching to the current branch-workspace, call ws_state with no name to get socket/paneTarget/paneIdle.",
+			"Pass an exact full name only when targeting a non-current workspace; use ws_list when the name is unknown.",
+			"If no current is set, the tool fails with: no current workspace.",
+			"Workspace state (field status): active (worktree+session, ready for task), idle (worktree only → ws_open), orphan (session only → close with user confirm + force), missing (neither → ws_open to create). Stale current is resolved as-is (no silent switch).",
+			"Workspace idle ≠ paneIdle: the former means no session; the latter means the pane is free for input.",
 		],
 		parameters: Type.Object({
-			name: Type.String({ description: "Full branch-workspace name (exact match)." }),
+			name: Type.Optional(
+				Type.String({ description: "Full branch-workspace name (exact match). Omit to use current." }),
+			),
 		}),
-		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-			const name = typeof params.name === "string" ? params.name.trim() : "";
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			let name = typeof params.name === "string" ? params.name.trim() : "";
 			if (!name) {
-				return {
-					content: [{ type: "text" as const, text: "ws_state requires a non-empty name." }],
-					details: { ok: false, error: "name required" },
-				};
+				const current = await readCurrentState(ctx.cwd);
+				if (!current?.name) {
+					return {
+						content: [{ type: "text" as const, text: "no current workspace" }],
+						details: { ok: false, error: "no current workspace" },
+					};
+				}
+				name = current.name;
 			}
 			const env = await buildWorkspaceEnv(pi, name);
 			return {
