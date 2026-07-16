@@ -1444,13 +1444,11 @@ export default function (pi: ExtensionAPI): void {
 		name: "bw_list",
 		label: "List branch-workspaces",
 		description:
-			"List branch-workspaces (git worktree + tmux session) with state (active=worktree+session, idle=worktree only, orphan=session only; field name state), dirty flag, and current marker. Read-only. missing never appears (list is worktree ∪ session). Use before open/close when the exact name is unknown.",
+			"List branch-workspaces (git worktree + tmux session) with state, dirty flag, and current marker. Read-only.",
 		promptSnippet: "List branch-workspaces (active/idle/orphan, dirty, current).",
 		promptGuidelines: [
-			"Prefer bw_list when the exact branch-workspace name is unknown or before closing.",
-			"Use the full exact name from the result for bw_open / bw_close — never invent short aliases.",
-			"query is substring filter only; identity for open/close is still exact name match.",
-			"Branch-workspace state vocabulary (field state): active | idle | orphan (missing only appears on name-targeted bw_status).",
+			"Use before bw_open/bw_close when the exact name is unknown; the result provides full names for exact-match identity.",
+			"query is substring filter only, not fuzzy identity match.",
 		],
 		parameters: Type.Object({
 			query: Type.Optional(
