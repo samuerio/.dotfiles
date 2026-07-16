@@ -1471,7 +1471,7 @@ export default function (pi: ExtensionAPI): void {
 		name: "bw_open",
 		label: "Open branch-workspace",
 		description:
-			"Open or reuse a branch-workspace (git worktree + tmux session) and set it as current. Returns only ok/name/warnings (or error). For state/env/dispatch readiness, call bw_status next. Recreates a missing session for idle; for orphan prefer close-then-open.",
+			"Create or reuse a branch-workspace (git worktree + tmux session) and set it as current. Returns only ok/name/warnings (or error). For state/env/dispatch readiness, call bw_status next. Recreates a missing session for idle; for orphan prefer close-then-open.",
 		promptSnippet: "Open/reuse a branch-workspace; then call bw_status for env.",
 		promptGuidelines: [
 			"Require an exact full name (e.g. feat/my-feature). Prefer names from bw_list when reusing.",

@@ -35,7 +35,7 @@ The worker agent performs implementation work inside the branch-workspace. It re
 | Tool | Role |
 |------|------|
 | `bw_list` | Read-only inventory: name, state (`active`/`idle`/`orphan`), dirty, current. `missing` does not appear here (list is worktree ∪ session). |
-| `bw_open` | Open or reuse worktree + tmux session; set current. Returns only `ok` / `name` / `warnings` (or `error`) — not env. Always call `bw_status` after open, before dispatch. |
+| `bw_open` | Create or reuse worktree + tmux session; set current. Returns only `ok` / `name` / `warnings` (or `error`) — not env. Always call `bw_status` after open, before dispatch. |
 | `bw_close` | Remove worktree + kill session; dirty or orphan → `needsForce`; ask the user, then retry with `force: true` |
 | `bw_status` | Read-only **status** report: `state` + env. Omit `name` → current; pass `name` for an exact target. Required for dispatch readiness after open. |
 
