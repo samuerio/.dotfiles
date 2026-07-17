@@ -1,9 +1,11 @@
 ---
 name: branch-workspace
 description: >-
-  Orchestrate branch-workspace (keyword "bw") dispatch. "bw" is short for
-  branch-workspace. Examples: on current bw + prompt (async); on <name> bw +
-  prompt; new bw wait + prompt (sync); on current bw, implement the plan above.
+  Orchestrate dispatch to a branch-workspace ("bw" for short) — an isolated
+  git worktree + tmux session bound to one branch. Trigger on natural language
+  containing "bw" with a prompt, e.g.: current bw + prompt (async); on <name>
+  bw + prompt; new bw wait + prompt (sync); on current bw, implement the plan
+  we just agreed on.
 ---
 
 ## Concept
