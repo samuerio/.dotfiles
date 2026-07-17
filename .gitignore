@@ -9,8 +9,8 @@ linux_rime/user.yaml
 .aider.chat.history.md
 .aider.input.history
 .aider.tags.cache.v4/
-.pi/todos
-.pi/branch-workspace-current.json
+# pi local state / handoffs / research drafts — never track
+/.pi/
 **/node_modules/
 /.worktree/
 spec/
