@@ -101,39 +101,37 @@ Any work whose output is file changes (code, docs, tests, review comments writte
 
 **Step B — pi path only: build command, send, wait fork**
 
-Follow the `pi-headless` SKILL for model resolution (use its defaults unless the user asks to choose a model). Always `--no-session`. Prefer `pi ... -p @<doc>` for plan and handoff (single send style for tmux). The worker's cwd is the worktree, so use an **absolute** path for `@<doc>` — a relative path would resolve against the worktree, not the dispatcher project.
+Follow the `pi-headless` SKILL for model resolution (use its defaults unless the user asks to choose a model). Always `--no-session`. Prefer `pi ... -p @<doc>` (file refs only when possible). The worker's cwd is the worktree, so every `@<path>` must be an **absolute** path — relative paths resolve against the worktree, not the dispatcher project.
+
+Send the full command with tmux **Sending input safely** (`send-keys -l`). Prefer a command with **no multi-line shell-quoted prompt body** (avoids zsh/bash expansion pitfalls).
 
 | Mode | Command shape |
 |------|----------------|
-| **Async (default)** + plan doc | `pi ... -p @plan.md "Implement exactly what this plan describes"` |
-| **Async (default)** + handoff doc | `pi ... -p @<handoff.md>` |
-| **Sync (`wait` / `block`)** + any pi doc | `pi ... -p @<doc> "<inline completion contract>"` |
+| **Async (default)** + plan doc | `pi ... -p @/abs/plan.md 'Implement exactly what this plan describes'` |
+| **Async (default)** + handoff doc | `pi ... -p @/abs/handoff.md` |
+| **Sync (`wait` / `block`)** + any pi doc | `pi ... -p @/abs/doc.md @/abs/sync-done.md` |
 
-**Inline completion contract** (never edit the doc file; no result file):
+**Sync completion file (required for wait/block):** do **not** put the DONE contract inline on the shell line. Materialize it as a small temp file, then `@` it.
 
+1. **Resolve `<stem>`**
+   - Doc is `.pi/handoff/<stem>/handoff.md` → reuse that `<stem>`.
+   - External plan/other path → invent `<stem> = YYYYMMDD-HHMMSS-<slug>` (slug from prompt/plan topic).
+2. **Write temp `sync-done` file** (not in the worktree, not in the repo):
+   - Path e.g. `/tmp/bw-sync-done-<stem>.md` (or `mktemp` under `/tmp`).
+   - Content: copy this skill's `sync-done.template.md` and replace every `{{STEM}}` with the concrete `<stem>` (plain text marker `DONE:<stem>` — **no backticks**).
+3. **Command** (both paths absolute):
+
+```bash
+pi --no-session --model <model> --thinking <thinking> \
+  -p @/abs/path/to/doc.md @/tmp/bw-sync-done-<stem>.md
 ```
-Implement exactly what the referenced document describes.
 
-When you have completed the work, print a concise structured summary as your
-final reply (plain text), including:
-- **Files Modified**
-- **Key Changes**
-- **Issues/Blockers**
-
-Then print the exact marker `DONE:<stem>` on a line by itself.
-```
-
-**Stem rules (pi path + wait only):**
-
-- If doc is `.pi/handoff/<stem>/handoff.md`, reuse that `<stem>` for the DONE marker.
-- If doc is an external plan path, invent `<stem> = YYYYMMDD-HHMMSS-<slug>` (slug from prompt/plan topic) for the DONE marker only.
-
-Send the command via the tmux SKILL **Sending input safely**.
+Do not edit the task doc itself. The temp file is disposable dispatch glue; optional cleanup after DONE is detected.
 
 **After send (pi path):**
 
 - **Async:** do not wait; do not capture pane output. Report: branch-workspace `name`, that the command was sent, `monitorCmd` from `bw_status`.
-- **Sync:** use tmux **Watching output** (poll mode) with pattern `DONE:<stem>`. Once detected, present the worker's **final printed summary from the pane** (the structured final reply immediately before the DONE line). No result file to read.
+- **Sync:** use tmux **Watching output** (poll mode), e.g. `wait-for-text.sh` with pattern `DONE:<stem>` (same stem as in `sync-done.md`; plain text, no backticks). Do not fall back to guessing from files or ad-hoc `sleep`+`capture-pane` unless the poll times out — then report timeout + last pane tail. Once `DONE:<stem>` is detected, present the worker's **final printed summary from the pane** (the structured final reply immediately before the DONE line). No result file to read.
 
 #### Dispatcher path
 
