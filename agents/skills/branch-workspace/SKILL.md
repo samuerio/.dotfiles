@@ -99,7 +99,7 @@ Any work whose output is file changes (code, docs, tests, review comments writte
 
 **Step B — pi path only: build command, send, wait fork**
 
-Follow the `pi-headless` SKILL for model resolution (use its defaults unless the user asks to choose a model). Always `--no-session`. Prefer `pi ... -p @<doc>` for plan and handoff (single send style for tmux). When the worker cwd is a worktree, prefer an **absolute** path for `@<doc>` so the dispatcher project's file remains readable.
+Follow the `pi-headless` SKILL for model resolution (use its defaults unless the user asks to choose a model). Always `--no-session`. Prefer `pi ... -p @<doc>` for plan and handoff (single send style for tmux). The worker's cwd is the worktree, so use an **absolute** path for `@<doc>` — a relative path would resolve against the worktree, not the dispatcher project.
 
 | Mode | Command shape |
 |------|----------------|
