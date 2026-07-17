@@ -220,7 +220,7 @@ keybinding:
 customCommands:
   - key: '<c-g>'
     context: 'commits'
-    command: "git do {{.SelectedLocalCommit.Sha}}^!"
+    command: "git d {{.SelectedLocalCommit.Sha}}^!"
     description: "Show selected commit"
     output: terminal
   - key: '<c-o>'
@@ -230,7 +230,7 @@ customCommands:
     output: terminal
   - key: '<c-g>'
     context: 'files'
-    command: "git do -- {{.SelectedPath}}"
+    command: "git d -- {{.SelectedPath}}"
     description: "Show selected file unstaged changes"
     output: terminal
   - key: '<c-o>'
@@ -240,7 +240,7 @@ customCommands:
     output: terminal
   - key: 'G'
     context: 'files'
-    command: "git do --staged -- {{.SelectedPath}}"
+    command: "git d --staged -- {{.SelectedPath}}"
     description: "Show selected file staged changes"
     output: terminal
   - key: 'O'
