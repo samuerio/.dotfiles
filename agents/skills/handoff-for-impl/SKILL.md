@@ -18,7 +18,7 @@ Triggered by `/handoff-for-impl`. Write the prompt in the language of the curren
    - Files discussed or modified. Normalize every referenced file path with the `ref-path` SKILL and use its output verbatim.
    - Known constraints, edge cases, or pitfalls
 3. Draft the handoff prompt following the **Template** below. Omit any section with no content.
-4. Ensure `/tmp/handoff-for-impl/` exists, write the prompt to `/tmp/handoff-for-impl/[YYYYMMDD-HHMMSS]-[slug].md`, then reply with the path. Derive a concise kebab-case slug from the topic, e.g. `implement-auth`, `fix-issue-42`. Full directory example: `/tmp/handoff-for-impl/20250622-143000-implement-auth/`.
+4. Write the prompt to `.pi/handoff/[YYYYMMDD-HHMMSS]-[slug]/handoff.md` (create directories as needed). Timestamp at write time; derive a concise kebab-case slug from the topic, e.g. `implement-auth`, `fix-issue-42`. Full directory example: `.pi/handoff/20250622-143000-implement-auth/`. Reply with the path.
 
 ## Template
 

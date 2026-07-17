@@ -1,9 +1,9 @@
 ---
 name: branch-workspace
 description: >-
-  Orchestrate branch-workspace (keyword "bw") task dispatch and handoff-for-impl.
-  "bw" is short for branch-workspace. Examples: on current bw + task; on <name>
-  bw + task; new bw + task; current/named/new bw hfi.
+  Orchestrate branch-workspace (keyword "bw") dispatch. "bw" is short for
+  branch-workspace. Examples: on current bw + prompt (async); on <name> bw +
+  prompt; new bw wait + prompt (sync); on current bw, implement the plan above.
 ---
 
 ## Concept
@@ -15,16 +15,16 @@ A **branch-workspace** is an isolated execution environment bound to a single br
 
 Each branch-workspace is identified by `<name>`. The git branch name and the tmux session name both equal `<name>`. The two components share this identity and must be managed together.
 
-**Lifecycle** (list / open / close) is provided by the `bw_list`, `bw_open`, and `bw_close` tools. This skill only orchestrates **task** dispatch and **handoff-for-impl**.
+**Lifecycle** (list / open / close) is provided by the `bw_list`, `bw_open`, and `bw_close` tools. This skill only orchestrates **dispatch**.
 
 ## Role Boundaries
 
 The dispatcher agent owns coordination; only the worker agent may write files:
 
-- **Explore freely**: the dispatcher may read and inspect files in the branch-workspace's worktree at any point — to refine a task with the user, to review results, or to understand context. Use bash or read-only tools directly for speed and efficiency.
+- **Explore freely**: the dispatcher may read and inspect files in the branch-workspace's worktree at any point — to refine a prompt with the user, to review results, or to understand context. Use bash or read-only tools directly for speed and efficiency.
 - **No direct writes**: the dispatcher must never write to or modify files in the branch-workspace's worktree, even for trivial changes. All file modifications go through the worker agent.
 - **Observable tasks**: running commands, running tests, and debugging in the worktree are the dispatcher's responsibility because it is the interaction layer with the user. The dispatcher may use either bash or the branch-workspace's tmux pane to execute these tasks.
-- **Review after completion**: after the worker agent signals completion, the dispatcher inspects the result and reports back to the user.
+- **Review after completion**: after the worker agent signals completion (sync mode), the dispatcher presents the worker's final printed summary to the user.
 
 The worker agent performs implementation work inside the branch-workspace. It receives a self-contained task document and runs to completion.
 
@@ -55,13 +55,11 @@ State is derived from worktree × session presence:
 Notes:
 
 - **`dirty` is not a state.** It is an orthogonal flag on worktrees (`active` or `idle`). Closing a dirty worktree returns `needsForce: "dirty"`; ask the user, then `bw_close` with `force: true`.
-- **Workspace `idle` ≠ pane idle/busy.** Workspace `idle` (a **state**) means no tmux session. Pane idle/busy (`paneIdle`) means whether the pane is free to accept input. Task dispatch needs **active** workspace **and** an idle pane.
+- **Workspace `idle` ≠ pane idle/busy.** Workspace `idle` (a **state**) means no tmux session. Pane idle/busy (`paneIdle`) means whether the pane is free to accept input. Dispatch needs **active** workspace **and** an idle pane.
 - **Close gates:** never auto-resolve `dirty`/`orphan` — always get explicit user confirmation before `force: true` (see `bw_close` above).
 - **Orphan cleanup:** reopening an orphan does *not* reset the reused session's cwd — prefer `bw_close` (confirmed) then `bw_open` instead of reopening directly.
 
 ## Orchestration
-
-> **SKILL roles**: `refine-task` clarifies a single task's scope through Q&A and outputs plain task text for immediate dispatch. `draft-impl-handoff` produces a structured handoff document consumed by a headless `pi` worker. Do not conflate the two — **task** always uses `refine-task` (or fast-path); **handoff-for-impl**'s generate-then-run path always uses `draft-impl-handoff`.
 
 Use the tmux SKILL only to **send input** and **watch output** with `socket` / `paneTarget` from `bw_status` — do not re-derive them.
 
@@ -69,96 +67,105 @@ Use the tmux SKILL only to **send input** and **watch output** with `socket` / `
 
 **`bw`** is short for **branch-workspace**. Match **natural language** that includes the keyword **`bw`**. Match intent from phrasing; do not require exact wording.
 
-| Mode | Target | Intent | Example utterances |
-|------|--------|--------|--------------------|
-| **Task** (wait for completion) | Current | Run `<task>` on the current workspace | `on current bw, <task>` |
-| | Named | Run `<task>` on workspace `<name>` | `on <name> bw, <task>` |
-| | New | Create/open a workspace, then run `<task>` | `new bw, <task>` |
-| **HFI** (silent kickoff) | Current | HFI on the current workspace | `current bw hfi` |
-| | Named | HFI on workspace `<name>` | `on <name> bw hfi` |
-| | New | Create/open a workspace, then HFI | `new bw hfi` |
+**Shape:** `[current | on <name> | new] bw [wait | block]? <prompt>`
 
+`<prompt>` is **always required**. It is the user's intent for this dispatch — free-form text. If the user only says `new bw` / `current bw` with no prompt, ask for the prompt; do not invent work.
 
-*Note: **Task** dispatches work and waits for the worker to signal completion. **Handoff-for-impl (HFI)** is a silent kickoff that does not wait for completion or capture output.*
+Examples of valid prompts:
+
+- Concrete work: `fix typo in README`, `run the unit tests`
+- Reference prior agreement: `implement the plan above`, `implement the plan we just finalized`, `execute the design we agreed on`
+
+| Wait | Target | Example utterances |
+|------|--------|--------------------|
+| no (default) | Current | `on current bw, implement the plan above` · `on current bw, fix typo in README` |
+| no | Named | `on <name> bw, implement the auth refactor` |
+| no | New | `new bw, implement the plan above` |
+| **yes** | Current | `on current bw wait, implement the plan above` · `current bw block, fix the login bug` |
+| **yes** | Named | `on <name> bw wait, ship the plan in plan.md` |
+| **yes** | New | `new bw wait, implement the plan above` · `new bw block, add unit tests for X` |
+
+Notes:
+
+- **Default is non-blocking (async).** Keywords `wait` / `block` enable completion wait — **and only on the pi path**.
 
 ### Model selection
 
 Use the `pi-headless` SKILL defaults unless the user asks to choose a model (e.g. "pick a model", or names one) — then follow that SKILL's model-selection flow before constructing any `pi` command.
 
-### Target resolution (shared)
+### Target resolution
 
-Before task or HFI dispatch, resolve the workspace target from the utterance:
+Before dispatch, resolve the workspace target from the utterance:
 
 1. **Current** — `bw_status` (omit `name`).
 2. **Named** — `bw_status` with exact `<name>`.
-3. **New** — derive a name from the task / plan / conversation, then `bw_open` + `bw_status`:
+3. **New** — derive a name from `<prompt>` / plan / conversation, then `bw_open` + `bw_status`:
    - Default `feat/<feature-name>` (short kebab-case).
    - Use a matching prefix when the work is clearly a fix, refactor, chore, experiment, etc. (`fix/`, `refactor/`, `chore/`, `exp/`, …).
    - If a suitable name cannot be derived, ask the user.
 
 Proceed only when `state` is `active` and `paneIdle` is true; otherwise fail fast and report the status to the user (do not auto-fix via lifecycle tools).
 
-### Task
+### Dispatch
 
-Dispatch a scoped task into a branch-workspace pane (wait for completion on the worker path).
+One pipeline. Default non-blocking. Keywords `wait` / `block` enable completion wait **on the pi path only**.
 
-1. Resolve target and obtain env (see **Target resolution**).
-2. **Task Triage (Intent Classification)**: Before dispatching, evaluate the complexity and clarity of the `<task>`:
-   - **Fast Path (Direct Dispatch)**: If the task is trivial, unambiguous, and self-contained (e.g., "fix typo in README", "bump version to 2.0", "add a specific unit test for function X"), **skip the interactive Q&A of `refine-task`**. The dispatcher should internally draft a clear, self-contained task description for the worker and proceed directly to step 3. Do not ask the user for confirmation.
-   - **Standard Path (Refine & Confirm)**: If the task is ambiguous, broad, involves multiple files, or requires architectural decisions (e.g., "refactor the auth module", "implement a new caching layer"), strictly apply the `refine-task` SKILL. The dispatcher must proactively explore the worktree to answer questions from context. If critical information is still missing, ask the user targeted questions. **Wait for explicit user confirmation** of the refined task before proceeding to step 3.
+1. Resolve target and obtain env (see **Target resolution**). Fail if not `active` + `paneIdle`.
+2. Determine how to dispatch from `<prompt>` — the dispatcher must not implement file changes itself:
 
-   After `refine-task` completes (including any clarifying exchange with the user), resume from step 3 using the refined task text as `<task>`. The dispatcher reviews the worker's output once the worker signals completion.
-3. Determine how to dispatch — the dispatcher must not implement file changes itself:
-   - **worker path** (any task whose output is file changes — writing code, docs, tests, or review comments):
-     1. Construct a `pi -p` command following the `pi-headless` SKILL **Print Mode**. Use `--no-session`. Apply **Model selection** above.
-     2. Write the refined task text to `/tmp/task/<YYYY-MM-DD-HHMMSS>-<slug>.md` (create the directory with `mkdir -p /tmp/task` if needed), where `<slug>` is a short meaningful kebab-case English phrase derived from the task content. Write the refined task text in the same language as the original `<task>` input.
-     3. **Append the Structured Handoff Instruction** to the task text:
-        ```
-        When you have completed the task, you must do the following two things in order:
-        1. Write a concise, structured summary of your work to `/tmp/task/<YYYY-MM-DD-HHMMSS>-<slug>.result.md`. The summary must include:
-           - **Files Modified**: A list of files you created or changed.
-           - **Key Changes**: A brief description of the core logic or implementation details.
-           - **Issues/Blockers**: Any unexpected problems encountered or things the user should review.
-        2. Print the exact marker `DONE:<YYYY-MM-DD-HHMMSS>-<slug>` on a line by itself in the terminal.
-        ```
-        *(Note: Ensure the `<YYYY-MM-DD-HHMMSS>-<slug>` in the instruction exactly matches the filename stem).*
-     4. Pass the task file to pi via `@/tmp/task/<filename>.md`.
-     5. Send the command to the tmux pane via the tmux SKILL **Sending input safely** (use `socket` / `paneTarget` from step 1) and use **Watching output** (poll mode) with pattern `DONE:<YYYY-MM-DD-HHMMSS>-<slug>` to wait for completion.
-     6. **Post-Execution Review**: Once the `DONE` marker is detected, **do not parse the raw tmux pane output**. Instead, read the content of `/tmp/task/<YYYY-MM-DD-HHMMSS>-<slug>.result.md` to understand the worker's output. Present this structured summary to the user.
-   - **dispatcher path** (for tasks requiring observability — running tests, executing commands, checking runtime errors): execute the command using either bash or the branch-workspace's tmux pane, capturing the output for the user.
+#### Worker path
 
-   If a task requires both (e.g. run tests then fix failures, or fix code then verify with a command), handle the observable step via the dispatcher and the file-change step via the worker — in whichever order the task demands. Pass findings between steps in the task doc.
+Any work whose output is file changes (code, docs, tests, review comments written into the tree).
 
-### Handoff-for-impl (hfi)
+**Step A — choose sub-path** (guided by conversation artifacts + what `<prompt>` asks for)
 
-Silent kickoff for implementation work whose duration is unknown. Creates or reuses a branch-workspace, sends the implementation command into its tmux pane, and does not wait for completion or capture output.
+1. **Ralph path** — if this conversation already produced Ralph `task.json` + a corresponding Ralph run command, **and** `<prompt>` is asking to run that implementation (not a different one-off):
+   - Always **async**: send that command via the tmux SKILL **Sending input safely** (`socket` / `paneTarget` from step 1). Do not wait; do not capture pane output.
+   - Report: branch-workspace `name`, that the command was sent, `monitorCmd` from `bw_status`.
+   - If the user requested `wait` / `block` → **fail fast**: wait/block is not supported for Ralph; omit wait or use the pi handoff/plan path.
+2. **pi path** — otherwise. Subdivide input source (prompt may point at an existing plan: "implement the plan above" / "implement plan.md"):
+   1. **Existing handoff doc** — handoff already generated this conversation and still matches the prompt → use that path.
+   2. **Plan doc** — user (or prompt) points at `plan.md` / `design.md` / similar, no matching handoff yet → use that path.
+   3. **Generate** — otherwise **load and follow** the `handoff-for-impl` SKILL with conversation + `<prompt>`, then use the path it writes under `.pi/handoff/`. Clear prompts still go through `handoff-for-impl` (it skips Q&A when already actionable).
 
-Use when a finalized plan already exists in the current conversation (plan doc, handoff doc, or Ralph `task.json`). Without any of these, run the `draft-impl-handoff` SKILL before dispatching.
+**Step B — pi path only: build command, send, wait fork**
 
-1. Resolve target and obtain env (see **Target resolution**).
-2. Choose the implementation command. Apply **Model selection** before constructing any `pi` command when the user asked to pick a model.
+Follow the `pi-headless` SKILL for model resolution. Always `--no-session`. Prefer `pi ... -p @<doc>` for plan and handoff (single send style for tmux). When the worker cwd is a worktree, prefer an **absolute** path for `@<doc>` so the dispatcher project's file remains readable.
 
-   **Ralph path** — if the `ralph` SKILL has been used in the current conversation and `task.json` exists on disk with a corresponding Ralph execution command:
+| Mode | Command shape |
+|------|----------------|
+| **Async (default)** + plan doc | `pi ... -p @plan.md "Implement exactly what this plan describes"` |
+| **Async (default)** + handoff doc | `pi ... -p @<handoff.md>` |
+| **Sync (`wait` / `block`)** + any pi doc | `pi ... -p @<doc> "<inline completion contract>"` |
 
-   - Send that Ralph command to the workspace pane via the tmux SKILL **Sending input safely** convention.
+**Inline completion contract** (never edit the doc file; no result file):
 
-   **plan doc path** — if the conversation references a plan document (a file the user points to, e.g. `plan.md`, `design.md`, or similar) but no handoff doc has been generated:
+```
+Implement exactly what the referenced document describes.
 
-   - Follow the `pi-headless` SKILL **Running pi as an Implementation Worker — Plan without implementation instruction** pattern to construct the command.
-   - Send the constructed command via the tmux SKILL **Sending input safely** convention.
+When you have completed the work, print a concise structured summary as your
+final reply (plain text), including:
+- **Files Modified**
+- **Key Changes**
+- **Issues/Blockers**
 
-   **handoff doc path** — if the `draft-impl-handoff` SKILL has already been run in the current conversation and produced a handoff file:
+Then print the exact marker `DONE:<stem>` on a line by itself.
+```
 
-   - Follow the `pi-headless` SKILL **Running pi as an Implementation Worker — Plan with implementation instruction** pattern to construct the command.
-   - Send the constructed command via the tmux SKILL **Sending input safely** convention.
+**Stem rules (pi path + wait only):**
 
-   **generate then run path** — otherwise (no plan doc, no handoff doc):
+- If doc is `.pi/handoff/<stem>/handoff.md`, reuse that `<stem>` for the DONE marker.
+- If doc is an external plan path, invent `<stem> = YYYYMMDD-HHMMSS-<slug>` (slug from prompt/plan topic) for the DONE marker only.
 
-   - First run the `draft-impl-handoff` SKILL to generate a handoff document, then follow the **handoff doc path** above.
+Send the command via the tmux SKILL **Sending input safely**.
 
-3. Do not wait for completion.
-4. Do not capture pane output after sending.
-5. Report only:
-   - the branch-workspace name
-   - that the command was sent
-   - the monitor command (`monitorCmd` from `bw_status`)
+**After send (pi path):**
+
+- **Async:** do not wait; do not capture pane output. Report: branch-workspace `name`, that the command was sent, `monitorCmd` from `bw_status`.
+- **Sync:** use tmux **Watching output** (poll mode) with pattern `DONE:<stem>`. Once detected, present the worker's **final printed summary from the pane** (the structured final reply immediately before the DONE line). No result file to read.
+
+#### Dispatcher path
+
+When `<prompt>` is observability-only — run tests, execute commands, check runtime errors: execute via bash or the branch-workspace's tmux pane, capture the output for the user. No handoff doc, no pi worker, no DONE contract, no Ralph.
+
+If a request needs both (e.g. run tests then fix failures), handle observable steps on the dispatcher path and file-change steps on the worker path, in the order the work demands; pass findings between steps in the handoff/plan doc.
