@@ -39,25 +39,13 @@ The worker agent performs implementation work inside the branch-workspace. It re
 | `bw_close` | Remove worktree + kill session; dirty or orphan → `needsForce`; ask the user, then retry with `force: true` |
 | `bw_status` | Read-only **status** report: `state` + env. Omit `name` → current; pass `name` for an exact target. Required for dispatch readiness after open. |
 
-## Workspace state
 
-**state** is the four-value lifecycle enum. **status** (via the `bw_status` tool) is a full report: `state` + env and related fields.
+State = worktree × session presence: `active` (both) · `idle` (worktree only) · `orphan` (session only) · `missing` (neither). `bw_status` returns full status (`state` + env).
 
-State is derived from worktree × session presence:
-
-| State | Condition |
-|-------|-----------|
-| `active` | worktree exists + session exists |
-| `idle` | worktree exists + session missing |
-| `orphan` | worktree missing + session exists |
-| `missing` | neither exists |
-
-Notes:
-
-- **`dirty` is not a state.** It is an orthogonal flag on worktrees (`active` or `idle`). Closing a dirty worktree returns `needsForce: "dirty"`; ask the user, then `bw_close` with `force: true`.
-- **Workspace `idle` ≠ pane idle/busy.** Workspace `idle` (a **state**) means no tmux session. Pane idle/busy (`paneIdle`) means whether the pane is free to accept input. Dispatch needs **active** workspace **and** an idle pane.
-- **Close gates:** never auto-resolve `dirty`/`orphan` — always get explicit user confirmation before `force: true` (see `bw_close` above).
-- **Orphan cleanup:** reopening an orphan does *not* reset the reused session's cwd — prefer `bw_close` (confirmed) then `bw_open` instead of reopening directly.
+- `dirty` is a flag, not a state — orthogonal to `active`/`idle`.
+- Workspace `idle` ≠ pane idle/busy; dispatch needs **active** state **and** idle pane.
+- Never auto-resolve `dirty`/`orphan` — confirm with user before `bw_close force: true`.
+- Reopening an orphan doesn't reset cwd — prefer close (confirmed) + reopen.
 
 ## Orchestration
 
@@ -76,18 +64,10 @@ Examples of valid prompts:
 - Concrete work: `fix typo in README`, `run the unit tests`
 - Reference prior agreement: `implement the plan above`, `implement the plan we just finalized`, `execute the design we agreed on`
 
-| Wait | Target | Example utterances |
-|------|--------|--------------------|
-| no (default) | Current | `on current bw, implement the plan above` · `on current bw, fix typo in README` |
-| no | Named | `on <name> bw, implement the auth refactor` |
-| no | New | `new bw, implement the plan above` |
-| **yes** | Current | `on current bw wait, implement the plan above` · `current bw block, fix the login bug` |
-| **yes** | Named | `on <name> bw wait, ship the plan in plan.md` |
-| **yes** | New | `new bw wait, implement the plan above` · `new bw block, add unit tests for X` |
 
-Notes:
+Target: current (default) / named `<name>` / new (derive name). Wait: default async; `wait`/`block` keyword → sync (pi path only).
 
-- **Default is non-blocking (async).** Keywords `wait` / `block` enable completion wait — **and only on the pi path**.
+e.g. `on current bw, implement the plan above` (async) · `new bw wait, implement the plan above` (sync)
 
 ### Model selection
 
@@ -111,11 +91,12 @@ Proceed only when `state` is `active` and `paneIdle` is true; otherwise fail fas
 One pipeline. Default non-blocking. Keywords `wait` / `block` enable completion wait **on the pi path only**.
 
 1. Resolve target and obtain env (see **Target resolution**). Fail if not `active` + `paneIdle`.
-2. Determine how to dispatch from `<prompt>` — the dispatcher must not implement file changes itself:
+2. Determine how to dispatch from `<prompt>` (see Role Boundaries):
 
 #### Worker path
 
 Any work whose output is file changes (code, docs, tests, review comments written into the tree).
+
 
 **Step A — choose sub-path** (guided by conversation artifacts + what `<prompt>` asks for)
 
