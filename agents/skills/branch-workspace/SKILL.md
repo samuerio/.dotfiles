@@ -40,12 +40,7 @@ The worker agent performs implementation work inside the branch-workspace. It re
 | `bw_status` | Read-only **status** report: `state` + env. Omit `name` → current; pass `name` for an exact target. Required for dispatch readiness after open. |
 
 
-State = worktree × session presence: `active` (both) · `idle` (worktree only) · `orphan` (session only) · `missing` (neither). `bw_status` returns full status (`state` + env).
-
-- `dirty` is a flag, not a state — orthogonal to `active`/`idle`.
-- Workspace `idle` ≠ pane idle/busy; dispatch needs **active** state **and** idle pane.
-- Never auto-resolve `dirty`/`orphan` — confirm with user before `bw_close force: true`.
-- Reopening an orphan doesn't reset cwd — prefer close (confirmed) + reopen.
+State = worktree × session presence: `active` (both) · `idle` (worktree only) · `orphan` (session only) · `missing` (neither, not listed by `bw_list`). `dirty` is an orthogonal flag, not a state. Dispatch requires **active** state *and* idle pane (workspace `idle` ≠ pane idle). Never auto-resolve `dirty`/`orphan` — confirm with the user before `bw_close force: true`; reopening an orphan doesn't reset cwd, so prefer close (confirmed) + reopen.
 
 ## Orchestration
 
@@ -53,7 +48,7 @@ Use the tmux SKILL only to **send input** and **watch output** with `socket` / `
 
 ### Triggers
 
-**`bw`** is short for **branch-workspace**. Match **natural language** that includes the keyword **`bw`**. Match intent from phrasing; do not require exact wording.
+Match natural language containing **`bw`** by intent, not exact wording.
 
 **Shape:** `[current | on <name> | new] bw [wait | block]? <prompt>`
 
@@ -68,10 +63,6 @@ Examples of valid prompts:
 Target: current (default) / named `<name>` / new (derive name). Wait: default async; `wait`/`block` keyword → sync (pi path only).
 
 e.g. `on current bw, implement the plan above` (async) · `new bw wait, implement the plan above` (sync)
-
-### Model selection
-
-Use the `pi-headless` SKILL defaults unless the user asks to choose a model (e.g. "pick a model", or names one) — then follow that SKILL's model-selection flow before constructing any `pi` command.
 
 ### Target resolution
 
@@ -100,10 +91,7 @@ Any work whose output is file changes (code, docs, tests, review comments writte
 
 **Step A — choose sub-path** (guided by conversation artifacts + what `<prompt>` asks for)
 
-1. **Ralph path** — if this conversation already produced Ralph `task.json` + a corresponding Ralph run command, **and** `<prompt>` is asking to run that implementation (not a different one-off):
-   - Always **async**: send that command via the tmux SKILL **Sending input safely** (`socket` / `paneTarget` from step 1). Do not wait; do not capture pane output.
-   - Report: branch-workspace `name`, that the command was sent, `monitorCmd` from `bw_status`.
-   - If the user requested `wait` / `block` → **fail fast**: wait/block is not supported for Ralph; omit wait or use the pi handoff/plan path.
+1. **Ralph path** — if this conversation already produced Ralph `task.json` + a matching Ralph run command, and `<prompt>` asks to run that implementation (not a different one-off): send it via the tmux SKILL **Sending input safely** (`socket`/`paneTarget` from step 1), **always async** (wait/block unsupported — fail fast if requested; use the pi handoff/plan path instead). Report branch-workspace `name`, that the command was sent, and `monitorCmd` from `bw_status`.
 2. **pi path** — otherwise. Subdivide input source (prompt may point at an existing plan: "implement the plan above" / "implement plan.md"):
    1. **Existing handoff doc** — handoff already generated this conversation and still matches the prompt → use that path.
    2. **Plan doc** — user (or prompt) points at `plan.md` / `design.md` / similar, no matching handoff yet → use that path.
@@ -111,7 +99,7 @@ Any work whose output is file changes (code, docs, tests, review comments writte
 
 **Step B — pi path only: build command, send, wait fork**
 
-Follow the `pi-headless` SKILL for model resolution. Always `--no-session`. Prefer `pi ... -p @<doc>` for plan and handoff (single send style for tmux). When the worker cwd is a worktree, prefer an **absolute** path for `@<doc>` so the dispatcher project's file remains readable.
+Follow the `pi-headless` SKILL for model resolution (use its defaults unless the user asks to choose a model). Always `--no-session`. Prefer `pi ... -p @<doc>` for plan and handoff (single send style for tmux). When the worker cwd is a worktree, prefer an **absolute** path for `@<doc>` so the dispatcher project's file remains readable.
 
 | Mode | Command shape |
 |------|----------------|
