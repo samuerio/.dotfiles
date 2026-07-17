@@ -24,10 +24,12 @@
 [keyboard]
 bindings = [
   { key = "N", mods = "Control | Shift", action = "CreateNewWindow" },
-  #CSI u 扩展键盘协议； Shift+Enter, Ctrl+Enter
-  #Nvim 、Pi agent 支持识别其为Shift+Enter, Ctrl+Enter；general multi-line
+  #CSI u 扩展键盘协议； Shift/Ctrl/Alt/Shift+Alt+Enter
+  #Nvim 、Pi agent 支持识别；continue.ts 需要 Shift+Alt+Enter → \e[13;4u
   { key = "Return", mods = "Control", chars = "\u001b[13;5u" },
   { key = "Return", mods = "Shift", chars = "\u001b[13;2u" },
+  { key = "Return", mods = "Alt", chars = "\u001b[13;3u" },
+  { key = "Return", mods = "Shift | Alt", chars = "\u001b[13;4u" },
   # 显式发送 Ctrl+Shift+M/W/R/O/G，使用自定义序列避免歧义
   { key = "M", mods = "Control | Shift", chars = "\u001b[5;30012~" },
   { key = "W", mods = "Control | Shift", chars = "\u001b[5;30013~" },
