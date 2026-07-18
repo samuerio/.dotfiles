@@ -3,8 +3,8 @@ name: branch-workspace
 description: >-
   Orchestrate dispatch to a branch-workspace ("bw" for short) — an isolated
   git worktree + tmux session bound to one branch. Trigger on natural language
-  containing "bw" with a prompt, e.g.: on <name> bw + prompt; new bw wait +
-  prompt (sync); on feat/foo bw, implement the plan we just agreed on.
+  containing "bw": handoff bw (new workspace, async Worker path); on <name> bw
+  + prompt (named, sync). E.g. handoff bw; on feat/foo bw, fix the failing test.
 ---
 
 ## Concept
@@ -37,7 +37,7 @@ The worker agent performs implementation work inside the branch-workspace. It re
 |------|------|
 | `bw_list` | Read-only inventory: name, state (`active`/`idle`/`orphan`), dirty. `missing` does not appear here (list is worktree ∪ session). |
 | `bw_open` | Create or reuse worktree + tmux session. Returns only `ok` / `name` / `warnings` (or `error`) — not env. Always call `bw_status` with the same name after open, before dispatch. |
-| `bw_close` | Remove worktree + kill session; dirty or orphan → `needsForce`; ask the user, then retry with `force: true` |
+| `bw_close` | Remove worktree + kill session; dirty or orphan → `needsForce`; ask the user, then retry with `force: true`. After success, frame back to main (see **Conversation framing**). |
 | `bw_status` | Read-only **status** report: `state` + env. **Requires** exact `name`. Required for dispatch readiness after open. |
 
 
@@ -51,65 +51,61 @@ Use the tmux SKILL only to **send input** and **watch output** with `socket` / `
 
 Match natural language containing **`bw`** by intent, not exact wording.
 
-**Shape:** `[on <name> | new] bw [wait | block]? <prompt>`
+| Trigger | Target | Mode | Path |
+|---------|--------|------|------|
+| **`handoff bw`** [`<optional intent>`] | **new** (derive name → open) | **async** | **Worker only** → Step A branches |
+| **`on <name> bw <prompt>`** | **named** | **sync** | Worker or Dispatcher by prompt |
 
-`<prompt>` is **always required**. It is the user's intent for this dispatch — free-form text. If the user only says `new bw` / `on <name> bw` with no prompt, ask for the prompt; do not invent work.
+Examples:
 
-Examples of valid prompts:
-
-- Concrete work: `fix typo in README`, `run the unit tests`
-- Reference prior agreement: `implement the plan above`, `implement the plan we just finalized`, `execute the design we agreed on`
-
-
-Target: named `<name>` / new (derive name). Wait: default async; `wait`/`block` keyword → sync (pi path only).
-
-e.g. `on feat/foo bw, implement the plan above` (async) · `new bw wait, implement the plan above` (sync)
+- `handoff bw`
+- `handoff bw, only implement the auth section`
+- `on feat/foo bw, fix the failing unit test`
+- `on feat/foo bw, run the unit tests` (Dispatcher path)
 
 ### Target resolution
 
-Before dispatch, resolve the workspace target from the utterance:
-
-1. **Named** — `bw_status` with exact `<name>`.
-2. **New** — derive a name from `<prompt>` / plan / conversation, then `bw_open` + `bw_status` with that same name:
+1. **`handoff bw`** — derive a name from optional intent / plan / conversation, then `bw_open` + `bw_status` with that same name:
    - Default `feat/<feature-name>` (short kebab-case).
    - Use a matching prefix when the work is clearly a fix, refactor, chore, experiment, etc. (`fix/`, `refactor/`, `chore/`, `exp/`, …).
    - If a suitable name cannot be derived, ask the user.
+2. **`on <name> bw`** — `bw_status` with exact `<name>`.
 
 Proceed only when `state` is `active` and `paneIdle` is true; otherwise fail fast and report the status to the user (do not auto-fix via lifecycle tools).
 
 ### Dispatch
 
-One pipeline. Default non-blocking. Keywords `wait` / `block` enable completion wait **on the pi path only**.
-
-1. Resolve target and obtain env (see **Target resolution**). Fail if not `active` + `paneIdle`.
-2. Determine how to dispatch from `<prompt>` (see Role Boundaries):
+1. Resolve target + mode from the trigger (see **Triggers** / **Target resolution**). Fail if not `active` + `paneIdle`.
+2. Choose path from prompt + trigger:
 
 #### Worker path
 
 Any work whose output is file changes (code, docs, tests, review comments written into the tree).
 
+**Always** for `handoff bw`. For `on <name> bw`, when the prompt is implementation (not observability-only).
 
-**Step A — choose sub-path** (guided by conversation artifacts + what `<prompt>` asks for)
+**Step A — choose sub-path** (guided by conversation artifacts + intent/`<prompt>`)
 
-1. **Ralph path** — if this conversation already produced Ralph `task.json` + a matching Ralph run command, and `<prompt>` asks to run that implementation (not a different one-off): send it via the tmux SKILL **Sending input safely** (`socket`/`paneTarget` from step 1), **always async** (wait/block unsupported — fail fast if requested; use the pi handoff/plan path instead). Report branch-workspace `name`, that the command was sent, and `monitorCmd` from `bw_status`.
-2. **pi path** — otherwise. Subdivide input source (prompt may point at an existing plan: "implement the plan above" / "implement plan.md"):
-   1. **Existing handoff doc** — handoff already generated this conversation and still matches the prompt → use that path.
+1. **Ralph path** — if this conversation already produced Ralph `task.json` + a matching Ralph run command, and the intent asks to run that implementation (not a different one-off): send it via the tmux SKILL **Sending input safely** (`socket`/`paneTarget` from step 1).
+   - **`handoff bw`**: always async — report name, that the command was sent, `monitorCmd`, then **Conversation framing** (main).
+   - **`on <name> bw`**: Ralph cannot wait — **fail fast**; use the pi handoff/plan path instead.
+2. **pi path** — otherwise. Subdivide input source:
+   1. **Existing handoff doc** — handoff already generated this conversation and still matches the intent → use that path.
    2. **Plan doc** — user (or prompt) points at `plan.md` / `design.md` / similar, no matching handoff yet → use that path.
-   3. **Generate** — otherwise **load and follow** the `handoff-for-impl` SKILL with conversation + `<prompt>`, then use the path it writes under `.pi/handoff/`. Clear prompts still go through `handoff-for-impl` (it skips Q&A when already actionable).
+   3. **Generate** — otherwise **load and follow** the `handoff-for-impl` SKILL with conversation + intent/`<prompt>`, then use the path it writes under `.pi/handoff/`. Clear intents still go through `handoff-for-impl` (it skips Q&A when already actionable).
 
-**Step B — pi path only: build command, send, wait fork**
+**Step B — pi path only: build command, send, mode fork**
 
 Follow the `pi-headless` SKILL for model resolution (use its defaults unless the user asks to choose a model). Always `--no-session`. Prefer `pi ... -p @<doc>` (file refs only when possible). The worker's cwd is the worktree, so every `@<path>` must be an **absolute** path — relative paths resolve against the worktree, not the dispatcher project.
 
 Send the full command with tmux **Sending input safely** (`send-keys -l`). Prefer a command with **no multi-line shell-quoted prompt body** (avoids zsh/bash expansion pitfalls).
 
-| Mode | Command shape |
-|------|----------------|
-| **Async (default)** + plan doc | `pi ... -p @/abs/plan.md 'Implement exactly what this plan describes'` |
-| **Async (default)** + handoff doc | `pi ... -p @/abs/handoff.md` |
-| **Sync (`wait` / `block`)** + any pi doc | `pi ... -p @/abs/doc.md @/abs/sync-done.md` |
+| Mode | When | Command shape |
+|------|------|----------------|
+| **Async** | `handoff bw` | plan: `pi ... -p @/abs/plan.md 'Implement exactly what this plan describes'`; handoff: `pi ... -p @/abs/handoff.md` |
+| **Sync** | `on <name> bw` (Worker) | `pi ... -p @/abs/doc.md @/abs/sync-done.md` |
 
-**Sync completion file (required for wait/block):** do **not** put the DONE contract inline on the shell line. Materialize it as a small temp file, then `@` it.
+**Sync completion file (required for sync):** do **not** put the DONE contract inline on the shell line. Materialize it as a small temp file, then `@` it.
 
 1. **Resolve `<stem>`**
    - Doc is `.pi/handoff/<stem>/handoff.md` → reuse that `<stem>`.
@@ -128,11 +124,23 @@ Do not edit the task doc itself. The temp file is disposable dispatch glue; opti
 
 **After send (pi path):**
 
-- **Async:** do not wait; do not capture pane output. Report: branch-workspace `name`, that the command was sent, `monitorCmd` from `bw_status`.
-- **Sync:** use tmux **Watching output** (poll mode), e.g. `wait-for-text.sh` with pattern `DONE:<stem>` (same stem as in `sync-done.md`; plain text, no backticks). Do not fall back to guessing from files or ad-hoc `sleep`+`capture-pane` unless the poll times out — then report timeout + last pane tail. Once `DONE:<stem>` is detected, present the worker's **final printed summary from the pane** (the structured final reply immediately before the DONE line). No result file to read.
+- **Async (`handoff bw`):** do not wait; do not capture pane output. Report: branch-workspace `name`, that the command was sent, `monitorCmd` from `bw_status`. Then **Conversation framing** (main).
+- **Sync (`on <name> bw`):** use tmux **Watching output** (poll mode), e.g. `wait-for-text.sh` with pattern `DONE:<stem>` (same stem as in `sync-done.md`; plain text, no backticks). Do not fall back to guessing from files or ad-hoc `sleep`+`capture-pane` unless the poll times out — then report timeout + last pane tail. Once `DONE:<stem>` is detected, present the worker's **final printed summary from the pane** (the structured final reply immediately before the DONE line). No result file to read. Then **Conversation framing** (named).
 
 #### Dispatcher path
 
-When `<prompt>` is observability-only — run tests, execute commands, check runtime errors: execute via bash or the branch-workspace's tmux pane, capture the output for the user. No handoff doc, no pi worker, no DONE contract, no Ralph.
+Only for **`on <name> bw`** when `<prompt>` is observability-only — run tests, execute commands, check runtime errors: execute via bash or the branch-workspace's tmux pane, capture the output for the user. No handoff doc, no pi worker, no DONE contract, no Ralph. Then **Conversation framing** (named).
+
+Never use Dispatcher path for `handoff bw`.
 
 If a request needs both (e.g. run tests then fix failures), handle observable steps on the dispatcher path and file-change steps on the worker path, in the order the work demands; pass findings between steps in the handoff/plan doc.
+
+### Conversation framing
+
+Soft UX after lifecycle/dispatch (keep operational facts: `name`, `monitorCmd`, summaries — then this frame):
+
+| After | Frame (paraphrase OK) |
+|-------|------------------------|
+| **`handoff bw`** (command sent) | Handed off to the branch-workspace worker (`<name>`). Back to the main workspace. What next? |
+| **`on <name> bw`** (sync done / dispatcher output) | Still on branch-workspace `<name>`. What next? |
+| **`bw_close`** success | Back to the main workspace. What next? |
