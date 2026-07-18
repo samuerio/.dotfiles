@@ -9,138 +9,83 @@ description: >-
 
 ## Concept
 
-A **branch-workspace** is an isolated execution environment bound to a single branch. It is composed of two coupled components:
+A **branch-workspace** = `<name>` bound to two coupled parts, both keyed by the same `<name>`:
 
-- a **`git worktree`**: a writable, branch-scoped filesystem where the worker agent edits code without disturbing the main checkout.
-- a **`tmux` session**: an observable, persistent execution environment for that branch. The pane is shared — the worker agent runs implementation commands there, and the dispatcher agent runs observable tasks (tests, debugging, runtime checks) there directly. The user or dispatcher can attach to watch either.
+- **`git worktree`** — writable, branch-scoped filesystem where the worker agent edits code.
+- **`tmux` session** — shared, observable execution pane: the worker runs implementation commands here; the dispatcher runs observable tasks (tests, debugging, runtime checks) here directly. Either can be attached to for watching.
 
-Each branch-workspace is identified by `<name>`. The git branch name and the tmux session name both equal `<name>`. The two components share this identity and must be managed together.
-
-**Lifecycle** (list / open / close) is provided by the `bw_list`, `bw_open`, and `bw_close` tools. This skill only orchestrates **dispatch**.
+Lifecycle (list/open/close) lives in `bw_list` / `bw_open` / `bw_close`. This skill covers **dispatch** only.
 
 ## Role Boundaries
 
-The dispatcher agent owns coordination; only the worker agent may write files:
+- **Dispatcher**: reads/inspects the worktree freely (refining prompts, reviewing results), runs observable tasks (bash or the bw tmux pane), and presents the worker's final summary after completion. **Never writes** to the worktree.
+- **Worker**: the only one who writes files. Receives a self-contained task doc and runs to completion.
 
-- **Explore freely**: the dispatcher may read and inspect files in the branch-workspace's worktree at any point — to refine a prompt with the user, to review results, or to understand context. Use bash or read-only tools directly for speed and efficiency.
-- **No direct writes**: the dispatcher must never write to or modify files in the branch-workspace's worktree, even for trivial changes. All file modifications go through the worker agent.
-- **Observable tasks**: running commands, running tests, and debugging in the worktree are the dispatcher's responsibility because it is the interaction layer with the user. The dispatcher may use either bash or the branch-workspace's tmux pane to execute these tasks.
-- **Review after completion**: after the worker agent signals completion (sync mode), the dispatcher presents the worker's final printed summary to the user.
+`<name>` must always be matched exactly (never fuzzy/shortened) — this applies wherever `<name>` is passed to a lifecycle tool. Trust worktree/session/pane fields returned by tools — don't rediscover them.
 
-The worker agent performs implementation work inside the branch-workspace. It receives a self-contained task document and runs to completion.
-
-`<name>` always means the complete branch-workspace identifier and must be matched exactly; never fuzzy-match or shorten it. When a tool result provides worktree/session/pane fields, trust them and do not rediscover.
-
-## Lifecycle tools (prefer these)
+## Lifecycle tools
 
 | Tool | Role |
 |------|------|
-| `bw_list` | Read-only inventory: name, state (`active`/`idle`/`orphan`), dirty. `missing` does not appear here (list is worktree ∪ session). |
-| `bw_open` | Create or reuse worktree + tmux session. Returns only `ok` / `name` / `warnings` (or `error`) — not env. Always call `bw_status` with the same name after open, before dispatch. |
-| `bw_close` | Remove worktree + kill session; dirty or orphan → `needsForce`; ask the user, then retry with `force: true`. After success, frame back to main (see **Conversation framing**). |
-| `bw_status` | Read-only **status** report: `state` + env. **Requires** exact `name`. Required for dispatch readiness after open. |
+| `bw_list` | Read-only inventory: name, state (`active`/`idle`/`orphan`), dirty. `missing` isn't listed (worktree ∪ session). |
+| `bw_open` | Create/reuse worktree + session. Returns `ok`/`name`/`warnings`/`error` only — no env. Always follow with `bw_status`. |
+| `bw_close` | Remove worktree + kill session. Dirty/orphan → `needsForce`; confirm with user, retry `force: true`. On success → **Conversation framing** (main). |
+| `bw_status` | Read-only status: `state` + env. Run after every open, before dispatch. |
 
+**State** = worktree × session: `active` (both) · `idle` (worktree only) · `orphan` (session only) · `missing` (neither). `dirty` is a separate flag, not a state. Never auto-resolve dirty/orphan — confirm before `bw_close force: true`; reopening an orphan doesn't reset cwd, so prefer close(confirmed)+reopen.
 
-State = worktree × session presence: `active` (both) · `idle` (worktree only) · `orphan` (session only) · `missing` (neither, not listed by `bw_list`). `dirty` is an orthogonal flag, not a state. Dispatch requires **active** state *and* idle pane (workspace `idle` ≠ pane idle). Never auto-resolve `dirty`/`orphan` — confirm with the user before `bw_close force: true`; reopening an orphan doesn't reset cwd, so prefer close (confirmed) + reopen.
+Dispatch requires **active** state *and* idle pane (workspace `idle` ≠ pane idle): proceed only if `state=active` and `paneIdle=true`; otherwise fail fast and report status — don't auto-fix via lifecycle tools.
 
 ## Orchestration
 
-Use the tmux SKILL only to **send input** and **watch output** with `socket` / `paneTarget` from `bw_status` — do not re-derive them.
+Use the tmux SKILL only to send input / watch output, via `socket`/`paneTarget` from `bw_status`.
 
-### Triggers
-
-Match natural language containing **`bw`** by intent, not exact wording.
+### Trigger → target → mode
 
 | Trigger | Target | Mode | Path |
 |---------|--------|------|------|
-| **`handoff bw`** [`<optional intent>`] | **new** (derive name → open) | **async** | **Worker only** → Step A branches |
-| **`on <name> bw <prompt>`** | **named** | **sync** | Worker or Dispatcher by prompt |
+| `handoff bw` [`<intent>`] | new → derive name, `bw_open`+`bw_status` | async | Worker only |
+| `on <name> bw <prompt>` | named → `bw_status` on exact name | sync | Worker or Dispatcher, by prompt |
 
-Examples:
-
-- `handoff bw`
-- `handoff bw, only implement the auth section`
-- `on feat/foo bw, fix the failing unit test`
-- `on feat/foo bw, run the unit tests` (Dispatcher path)
-
-### Target resolution
-
-1. **`handoff bw`** — derive a name from optional intent / plan / conversation, then `bw_open` + `bw_status` with that same name:
-   - Default `feat/<feature-name>` (short kebab-case).
-   - Use a matching prefix when the work is clearly a fix, refactor, chore, experiment, etc. (`fix/`, `refactor/`, `chore/`, `exp/`, …).
-   - If a suitable name cannot be derived, ask the user.
-2. **`on <name> bw`** — `bw_status` with exact `<name>`.
-
-Proceed only when `state` is `active` and `paneIdle` is true; otherwise fail fast and report the status to the user (do not auto-fix via lifecycle tools).
+Deriving a name for `handoff bw`: default `feat/<feature-name>` (kebab-case); swap prefix for fix/refactor/chore/exp when clearly that kind of work; ask the user if no name can be derived.
 
 ### Dispatch
 
-1. Resolve target + mode from the trigger (see **Triggers** / **Target resolution**). Fail if not `active` + `paneIdle`.
-2. Choose path from prompt + trigger:
+**Worker path** — any task whose output is file changes (code/docs/tests/review comments). Always used for `handoff bw`; used for `on <name> bw` when the prompt is implementation, not observability-only.
 
-#### Worker path
+1. **Choose sub-path**, from conversation artifacts + intent:
+   - **Ralph** — only if this conversation already produced a Ralph `task.json` + matching run command *and* the intent is to run that same implementation. Send via tmux **Sending input safely**.
+     - `handoff bw`: async only — report name, that the command was sent, `monitorCmd`, then framing (main).
+     - `on <name> bw`: Ralph can't wait sync — fail fast, use pi instead.
+   - **pi** — otherwise. Subdivide input source:
+     1. **Existing handoff doc** — handoff already generated this conversation and still matches the intent → use that path.
+     2. **Plan doc** — user (or prompt) points at `plan.md` / `design.md` / similar, no matching handoff yet → use that path.
+     3. **Generate** — otherwise **load and follow** the `handoff-for-impl` SKILL with conversation + intent/`<prompt>`, then use the path it writes under `.pi/handoff/`. Clear intents still go through `handoff-for-impl` (it skips Q&A when already actionable).
 
-Any work whose output is file changes (code, docs, tests, review comments written into the tree).
+2. **pi path — build & send command** (Step B). Resolve model per `pi-headless` SKILL defaults. Always `--no-session`; prefer `-p @<doc>` file refs, and since worker cwd = worktree, every `@<path>` must be **absolute**. Send with tmux `send-keys -l`; avoid multi-line shell-quoted prompt bodies.
 
-**Always** for `handoff bw`. For `on <name> bw`, when the prompt is implementation (not observability-only).
+   | Mode | Command shape |
+   |------|----------------|
+   | Async (`handoff bw`) | plan: `pi ... -p @/abs/plan.md 'Implement exactly what this plan describes'`; handoff: `pi ... -p @/abs/handoff.md` |
+   | Sync (`on <name> bw`) | `pi ... -p @/abs/doc.md @/abs/sync-done.md` |
 
-**Step A — choose sub-path** (guided by conversation artifacts + intent/`<prompt>`)
+   **Sync only — completion file** (never inline the DONE contract on the shell line):
+   1. Resolve `<stem>`: reuse it from `.pi/handoff/<stem>/handoff.md` if that's the doc; otherwise invent `<stem>=YYYYMMDD-HHMMSS-<slug>`.
+   2. Write `/tmp/bw-sync-done-<stem>.md` from this skill's `sync-done.template.md`, replacing `{{STEM}}` (marker is plain text `DONE:<stem>`, no backticks).
+   3. Send: `pi --no-session --model <model> --thinking <thinking> -p @/abs/doc.md @/tmp/bw-sync-done-<stem>.md`. Never edit the task doc itself; the temp file is disposable (cleanup after DONE optional).
 
-1. **Ralph path** — if this conversation already produced Ralph `task.json` + a matching Ralph run command, and the intent asks to run that implementation (not a different one-off): send it via the tmux SKILL **Sending input safely** (`socket`/`paneTarget` from step 1).
-   - **`handoff bw`**: always async — report name, that the command was sent, `monitorCmd`, then **Conversation framing** (main).
-   - **`on <name> bw`**: Ralph cannot wait — **fail fast**; use the pi handoff/plan path instead.
-2. **pi path** — otherwise. Subdivide input source:
-   1. **Existing handoff doc** — handoff already generated this conversation and still matches the intent → use that path.
-   2. **Plan doc** — user (or prompt) points at `plan.md` / `design.md` / similar, no matching handoff yet → use that path.
-   3. **Generate** — otherwise **load and follow** the `handoff-for-impl` SKILL with conversation + intent/`<prompt>`, then use the path it writes under `.pi/handoff/`. Clear intents still go through `handoff-for-impl` (it skips Q&A when already actionable).
+3. **After send:**
+   - **Async**: don't wait, don't capture pane output. Report name + sent confirmation + `monitorCmd`. → framing (main).
+   - **Sync**: poll via tmux **Watching output** (e.g. `wait-for-text.sh` for `DONE:<stem>`, plain text). No ad-hoc sleep/capture-pane unless poll times out (then report timeout + last pane tail). On match, present the worker's final printed summary (the structured reply right before the DONE line) — no result file to read. → framing (named).
 
-**Step B — pi path only: build command, send, mode fork**
+**Dispatcher path** — only for `on <name> bw` when the prompt is observability-only (run tests/commands, check runtime errors). Execute via bash or the bw tmux pane, capture output for the user. No handoff doc, no pi, no DONE contract, no Ralph. → framing (named). Never used for `handoff bw`.
 
-Follow the `pi-headless` SKILL for model resolution (use its defaults unless the user asks to choose a model). Always `--no-session`. Prefer `pi ... -p @<doc>` (file refs only when possible). The worker's cwd is the worktree, so every `@<path>` must be an **absolute** path — relative paths resolve against the worktree, not the dispatcher project.
-
-Send the full command with tmux **Sending input safely** (`send-keys -l`). Prefer a command with **no multi-line shell-quoted prompt body** (avoids zsh/bash expansion pitfalls).
-
-| Mode | When | Command shape |
-|------|------|----------------|
-| **Async** | `handoff bw` | plan: `pi ... -p @/abs/plan.md 'Implement exactly what this plan describes'`; handoff: `pi ... -p @/abs/handoff.md` |
-| **Sync** | `on <name> bw` (Worker) | `pi ... -p @/abs/doc.md @/abs/sync-done.md` |
-
-**Sync completion file (required for sync):** do **not** put the DONE contract inline on the shell line. Materialize it as a small temp file, then `@` it.
-
-1. **Resolve `<stem>`**
-   - Doc is `.pi/handoff/<stem>/handoff.md` → reuse that `<stem>`.
-   - External plan/other path → invent `<stem> = YYYYMMDD-HHMMSS-<slug>` (slug from prompt/plan topic).
-2. **Write temp `sync-done` file** (not in the worktree, not in the repo):
-   - Path e.g. `/tmp/bw-sync-done-<stem>.md` (or `mktemp` under `/tmp`).
-   - Content: copy this skill's `sync-done.template.md` and replace every `{{STEM}}` with the concrete `<stem>` (plain text marker `DONE:<stem>` — **no backticks**).
-3. **Command** (both paths absolute):
-
-```bash
-pi --no-session --model <model> --thinking <thinking> \
-  -p @/abs/path/to/doc.md @/tmp/bw-sync-done-<stem>.md
-```
-
-Do not edit the task doc itself. The temp file is disposable dispatch glue; optional cleanup after DONE is detected.
-
-**After send (pi path):**
-
-- **Async (`handoff bw`):** do not wait; do not capture pane output. Report: branch-workspace `name`, that the command was sent, `monitorCmd` from `bw_status`. Then **Conversation framing** (main).
-- **Sync (`on <name> bw`):** use tmux **Watching output** (poll mode), e.g. `wait-for-text.sh` with pattern `DONE:<stem>` (same stem as in `sync-done.md`; plain text, no backticks). Do not fall back to guessing from files or ad-hoc `sleep`+`capture-pane` unless the poll times out — then report timeout + last pane tail. Once `DONE:<stem>` is detected, present the worker's **final printed summary from the pane** (the structured final reply immediately before the DONE line). No result file to read. Then **Conversation framing** (named).
-
-#### Dispatcher path
-
-Only for **`on <name> bw`** when `<prompt>` is observability-only — run tests, execute commands, check runtime errors: execute via bash or the branch-workspace's tmux pane, capture the output for the user. No handoff doc, no pi worker, no DONE contract, no Ralph. Then **Conversation framing** (named).
-
-Never use Dispatcher path for `handoff bw`.
-
-If a request needs both (e.g. run tests then fix failures), handle observable steps on the dispatcher path and file-change steps on the worker path, in the order the work demands; pass findings between steps in the handoff/plan doc.
+Mixed requests (e.g. "run tests then fix failures"): split into dispatcher steps (observable) and worker steps (file changes) in work order; pass findings between them via the handoff/plan doc.
 
 ### Conversation framing
 
-Soft UX after lifecycle/dispatch (keep operational facts: `name`, `monitorCmd`, summaries — then this frame):
-
 | After | Frame (paraphrase OK) |
 |-------|------------------------|
-| **`handoff bw`** (command sent) | Handed off to the branch-workspace worker (`<name>`). Back to the main workspace. What next? |
-| **`on <name> bw`** (sync done / dispatcher output) | Still on branch-workspace `<name>`. What next? |
-| **`bw_close`** success | Back to the main workspace. What next? |
+| `handoff bw` sent | Handed off to the branch-workspace worker (`<name>`). Back to the main workspace. What next? |
+| `on <name> bw` sync done / dispatcher output | Still on branch-workspace `<name>`. What next? |
+| `bw_close` success | Back to the main workspace. What next? |
