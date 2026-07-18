@@ -741,13 +741,11 @@ interface ListBranchWorkspaceRow {
 	state: BranchWorkspaceState;
 	dirty?: boolean;
 	worktreePath?: string;
-	current: boolean;
 }
 
 interface ListResult {
 	ok: true;
 	branchWorkspaces: ListBranchWorkspaceRow[];
-	currentName?: string;
 	socket: string | null;
 }
 
@@ -774,25 +772,22 @@ interface CloseResult {
 
 async function listBranchWorkspaces(
 	pi: ExtensionAPI,
-	opts: { cwd?: string; query?: string } = {},
+	opts: { query?: string } = {},
 ): Promise<ListResult> {
 	let branchWorkspaces = await listAllBranchWorkspaces(pi);
 	if (opts.query) {
 		const q = opts.query.toLowerCase();
 		branchWorkspaces = branchWorkspaces.filter((w) => w.name.toLowerCase().includes(q));
 	}
-	const currentName = opts.cwd ? (await readCurrentState(opts.cwd))?.name : undefined;
 	const socket = await getTmuxSocket(pi);
 	return {
 		ok: true,
-		currentName,
 		socket,
 		branchWorkspaces: branchWorkspaces.map((w) => ({
 			name: w.name,
 			state: w.state,
 			dirty: w.dirty,
 			worktreePath: w.worktreePath,
-			current: w.name === currentName,
 		})),
 	};
 }
@@ -979,17 +974,12 @@ function formatListText(result: ListResult): string {
 	if (result.branchWorkspaces.length === 0) {
 		return "No branch-workspaces found.";
 	}
-	const lines = result.branchWorkspaces.map((w) => {
-		const marks: string[] = [];
-		if (w.dirty) marks.push("dirty");
-		if (w.current) marks.push("current");
-		const mark = marks.length > 0 ? ` (${marks.join(", ")})` : "";
-		return `- ${w.name} [${w.state}]${mark}`;
-	});
-	if (result.currentName) {
-		lines.push("", `current: ${result.currentName}`);
-	}
-	return lines.join("\n");
+	return result.branchWorkspaces
+		.map((w) => {
+			const mark = w.dirty ? " (dirty)" : "";
+			return `- ${w.name} [${w.state}]${mark}`;
+		})
+		.join("\n");
 }
 
 function formatOpenText(result: OpenResult): string {
@@ -1444,8 +1434,8 @@ export default function (pi: ExtensionAPI): void {
 		name: "bw_list",
 		label: "List branch-workspaces",
 		description:
-			"List branch-workspaces (git worktree + tmux session) with state, dirty flag, and current marker. Read-only.",
-		promptSnippet: "List branch-workspaces (active/idle/orphan, dirty, current).",
+			"List branch-workspaces (git worktree + tmux session) with state and dirty flag. Read-only.",
+		promptSnippet: "List branch-workspaces (active/idle/orphan, dirty).",
 		promptGuidelines: [
 			"Use before bw_open/bw_close when the exact name is unknown; the result provides full names for exact-match identity.",
 			"query is substring filter only, not fuzzy identity match.",
@@ -1455,9 +1445,8 @@ export default function (pi: ExtensionAPI): void {
 				Type.String({ description: "Optional substring filter on branch-workspace name (not fuzzy identity)." }),
 			),
 		}),
-		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
 			const result = await listBranchWorkspaces(pi, {
-				cwd: ctx.cwd,
 				query: typeof params.query === "string" ? params.query : undefined,
 			});
 			return {
@@ -1471,11 +1460,11 @@ export default function (pi: ExtensionAPI): void {
 		name: "bw_open",
 		label: "Open branch-workspace",
 		description:
-			"Create or reuse a branch-workspace (git worktree + tmux session) and set it as current. Returns only ok/name/warnings (or error). For state/env/dispatch readiness, call bw_status next. Recreates a missing session for idle; for orphan prefer close-then-open.",
-		promptSnippet: "Open/reuse a branch-workspace; then call bw_status for env.",
+			"Create or reuse a branch-workspace (git worktree + tmux session). Returns only ok/name/warnings (or error). For state/env/dispatch readiness, call bw_status with the same name. Recreates a missing session for idle; for orphan prefer close-then-open.",
+		promptSnippet: "Open/reuse a branch-workspace; then call bw_status with the same name for env.",
 		promptGuidelines: [
 			"Require an exact full name (e.g. feat/my-feature). Prefer names from bw_list when reusing.",
-			"On success, call bw_status (same name or omit for current) to get state/socket/paneTarget/paneIdle before dispatch.",
+			"On success, call bw_status with the same name to get state/socket/paneTarget/paneIdle before dispatch.",
 			"Does not return worktreePath, state, or env — use bw_status for those.",
 			"idle (worktree only): open recreates the session. orphan (session only): prefer bw_close after user confirm, then open — open reuses the residual session without resetting cwd.",
 			"First open in a repo may commit .gitignore via worktree.sh (existing behavior).",
@@ -1542,31 +1531,24 @@ export default function (pi: ExtensionAPI): void {
 		name: "bw_status",
 		label: "Inspect branch-workspace",
 		description:
-			"Read-only branch-workspace status report: state (active|idle|orphan|missing) + env (worktreePath, socket, session, paneTarget, paneIdle, dirty, monitorCmd). Omit name to use the current branch-workspace. No side effects.",
-		promptSnippet: "Inspect branch-workspace status (state+env); omit name for current.",
+			"Read-only branch-workspace status report: state (active|idle|orphan|missing) + env (worktreePath, socket, session, paneTarget, paneIdle, dirty, monitorCmd). Requires an exact name. No side effects.",
+		promptSnippet: "Inspect branch-workspace status (state+env) by exact name.",
 		promptGuidelines: [
-			"After bw_open, call this to get state/socket/paneTarget/paneIdle before dispatch. Also use to inspect without opening, or re-check later.",
-			"Omit name for current; pass an exact full name for a non-current branch-workspace; use bw_list when the name is unknown.",
-			"If no current is set, the tool fails with: no current branch-workspace.",
+			"After bw_open, call this with the same name to get state/socket/paneTarget/paneIdle before dispatch. Also use to inspect without opening, or re-check later.",
+			"name is required (exact full name). Use bw_list when the name is unknown; never invent a name.",
 			"Field state: active (worktree+session, ready for task), idle (worktree only → bw_open), orphan (session only → close with user confirm + force), missing (neither → bw_open to create).",
 			"status (this tool) = state + env. Branch-workspace idle ≠ paneIdle.",
 		],
 		parameters: Type.Object({
-			name: Type.Optional(
-				Type.String({ description: "Full branch-workspace name (exact match). Omit to use current." }),
-			),
+			name: Type.String({ description: "Full branch-workspace name (exact match)." }),
 		}),
-		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			let name = typeof params.name === "string" ? params.name.trim() : "";
+		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+			const name = typeof params.name === "string" ? params.name.trim() : "";
 			if (!name) {
-				const current = await readCurrentState(ctx.cwd);
-				if (!current?.name) {
-					return {
-						content: [{ type: "text" as const, text: "no current branch-workspace" }],
-						details: { ok: false, error: "no current branch-workspace" },
-					};
-				}
-				name = current.name;
+				return {
+					content: [{ type: "text" as const, text: "bw_status requires a non-empty name." }],
+					details: { ok: false, error: "name required" },
+				};
 			}
 			const env = await buildBranchWorkspaceEnv(pi, name);
 			return {

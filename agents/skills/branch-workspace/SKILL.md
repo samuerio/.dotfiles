@@ -3,9 +3,8 @@ name: branch-workspace
 description: >-
   Orchestrate dispatch to a branch-workspace ("bw" for short) — an isolated
   git worktree + tmux session bound to one branch. Trigger on natural language
-  containing "bw" with a prompt, e.g.: current bw + prompt (async); on <name>
-  bw + prompt; new bw wait + prompt (sync); on current bw, implement the plan
-  we just agreed on.
+  containing "bw" with a prompt, e.g.: on <name> bw + prompt; new bw wait +
+  prompt (sync); on feat/foo bw, implement the plan we just agreed on.
 ---
 
 ## Concept
@@ -36,10 +35,10 @@ The worker agent performs implementation work inside the branch-workspace. It re
 
 | Tool | Role |
 |------|------|
-| `bw_list` | Read-only inventory: name, state (`active`/`idle`/`orphan`), dirty, current. `missing` does not appear here (list is worktree ∪ session). |
-| `bw_open` | Create or reuse worktree + tmux session; set current. Returns only `ok` / `name` / `warnings` (or `error`) — not env. Always call `bw_status` after open, before dispatch. |
+| `bw_list` | Read-only inventory: name, state (`active`/`idle`/`orphan`), dirty. `missing` does not appear here (list is worktree ∪ session). |
+| `bw_open` | Create or reuse worktree + tmux session. Returns only `ok` / `name` / `warnings` (or `error`) — not env. Always call `bw_status` with the same name after open, before dispatch. |
 | `bw_close` | Remove worktree + kill session; dirty or orphan → `needsForce`; ask the user, then retry with `force: true` |
-| `bw_status` | Read-only **status** report: `state` + env. Omit `name` → current; pass `name` for an exact target. Required for dispatch readiness after open. |
+| `bw_status` | Read-only **status** report: `state` + env. **Requires** exact `name`. Required for dispatch readiness after open. |
 
 
 State = worktree × session presence: `active` (both) · `idle` (worktree only) · `orphan` (session only) · `missing` (neither, not listed by `bw_list`). `dirty` is an orthogonal flag, not a state. Dispatch requires **active** state *and* idle pane (workspace `idle` ≠ pane idle). Never auto-resolve `dirty`/`orphan` — confirm with the user before `bw_close force: true`; reopening an orphan doesn't reset cwd, so prefer close (confirmed) + reopen.
@@ -52,9 +51,9 @@ Use the tmux SKILL only to **send input** and **watch output** with `socket` / `
 
 Match natural language containing **`bw`** by intent, not exact wording.
 
-**Shape:** `[current | on <name> | new] bw [wait | block]? <prompt>`
+**Shape:** `[on <name> | new] bw [wait | block]? <prompt>`
 
-`<prompt>` is **always required**. It is the user's intent for this dispatch — free-form text. If the user only says `new bw` / `current bw` with no prompt, ask for the prompt; do not invent work.
+`<prompt>` is **always required**. It is the user's intent for this dispatch — free-form text. If the user only says `new bw` / `on <name> bw` with no prompt, ask for the prompt; do not invent work.
 
 Examples of valid prompts:
 
@@ -62,17 +61,16 @@ Examples of valid prompts:
 - Reference prior agreement: `implement the plan above`, `implement the plan we just finalized`, `execute the design we agreed on`
 
 
-Target: current (default) / named `<name>` / new (derive name). Wait: default async; `wait`/`block` keyword → sync (pi path only).
+Target: named `<name>` / new (derive name). Wait: default async; `wait`/`block` keyword → sync (pi path only).
 
-e.g. `on current bw, implement the plan above` (async) · `new bw wait, implement the plan above` (sync)
+e.g. `on feat/foo bw, implement the plan above` (async) · `new bw wait, implement the plan above` (sync)
 
 ### Target resolution
 
 Before dispatch, resolve the workspace target from the utterance:
 
-1. **Current** — `bw_status` (omit `name`).
-2. **Named** — `bw_status` with exact `<name>`.
-3. **New** — derive a name from `<prompt>` / plan / conversation, then `bw_open` + `bw_status`:
+1. **Named** — `bw_status` with exact `<name>`.
+2. **New** — derive a name from `<prompt>` / plan / conversation, then `bw_open` + `bw_status` with that same name:
    - Default `feat/<feature-name>` (short kebab-case).
    - Use a matching prefix when the work is clearly a fix, refactor, chore, experiment, etc. (`fix/`, `refactor/`, `chore/`, `exp/`, …).
    - If a suitable name cannot be derived, ask the user.
