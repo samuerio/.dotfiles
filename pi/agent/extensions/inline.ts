@@ -10,16 +10,16 @@ import { fileURLToPath } from "node:url";
 
 type ExtensionUI = ExtensionCommandContext["ui"];
 
-const SYSTEM_PROMPT = `You are an inline marker extractor. You receive ripgrep output that scanned a codebase for PI! and PI? comments. Your job has three steps only: filter, construct, and output all. Do NOT implement changes, answer questions, clarify, or interpret what the marker asks for.
+const SYSTEM_PROMPT = `You are an inline marker extractor. You receive ripgrep output that scanned a codebase for PI!: and PI?: inline comment markers. Your job has three steps only: filter, construct, and output all. Do NOT implement changes, answer questions, clarify, or interpret what the marker asks for.
 
 Filter:
-- Keep a match only when PI! or PI? is immediately followed by task or question content (e.g., a change request, a slash command, a question sentence).
-- Skip matches where PI!/PI? is followed by explanatory prose about the convention (e.g., "PI! for change and PI? for questions"), and skip matches inside markdown/SKILL files that merely describe the marker syntax.
+- Keep a match only when PI!: or PI?: starts a code comment (the marker is at the start of the comment text) and is immediately followed by task or question content (a change request, a slash command, or a question sentence). The kept unit is the PI!: or PI?: comment itself.
+- Skip matches where PI!:/PI?: appears inside a string literal, template string, prompt/prose text, log/notify message, or documentation that merely describes the marker syntax (e.g., "PI!: for change and PI?: for questions"), and skip matches inside markdown/SKILL files that merely describe the marker syntax.
 
 Construct:
 - For every genuine marker (after filtering), emit one <pi-task> element.
 - The element body must be the raw rg output block for that match (the surrounding lines with their exact "path:line:" or "path-line-" prefixes as produced by rg -C3 -n -H). Do not summarize, rewrite, trim, or reformat the snippet.
-- Do not include a type attribute. The PI! or PI? in the content itself indicates the nature of the task.
+- Do not include a type attribute. The PI!: or PI?: in the content itself indicates the nature of the task.
 - The file attribute is the relative file path from the rg output. The line attribute is the line number of the match line from the rg output (the scan-time line number).
 - Do NOT emit a separate comment field. The matching line in the snippet already carries the comment text.
 - Do NOT group by file. Do NOT use Markdown headings.
@@ -38,27 +38,27 @@ Output shape (multiple markers, one per genuine match). Example of realistic rg 
 <pi-task file="src/foo.ts" line="42">
 src/foo.ts-39- function bar() {
 src/foo.ts-40-   const x = 1;
-src/foo.ts:42:// PI! add error handling here
+src/foo.ts:42:// PI!: add error handling here
 src/foo.ts-43-   console.log(x);
 src/foo.ts-44- }
 </pi-task>
 
 <pi-task file="src/bar.ts" line="10">
 src/bar.ts-7-  // earlier
-src/bar.ts:10:// PI? should we rename this?
+src/bar.ts:10:// PI?: should we rename this?
 src/bar.ts-11- function baz() {}
 </pi-task>
 
 Use English for any prose. Do NOT output meta commentary, resolution rules, or output format instructions. Output ONLY the <pi-task> elements (or the NO_GENUINE_MARKERS token).`;
 
-const FRAMING_HEADER = `Found inline markers (PI!/PI?) for one file in the codebase.
+const FRAMING_HEADER = `Found inline markers (PI!:/PI?:) for one file in the codebase.
 
-Both PI! and PI? represent tasks to be executed.
+Both PI!: and PI?: represent tasks to be executed.
 
-- For a PI? task: do not modify the file that contains this marker, except to remove the marker itself.
-- For a PI! task: there is no such restriction; the task may freely modify the file containing the marker.
+- For a PI?: task: do not modify the file that contains this marker, except to delete the entire comment block that starts with the marker. If the marker spans multiple lines (a /* ... */ block, or consecutive // lines), delete the whole block; do not strip the marker token and leave the remaining comment lines behind.
+- For a PI!: task: there is no such restriction; the task may freely modify the file containing the marker.
 
-Complete the tasks. After finishing all tasks in this group, remove the corresponding markers.
+Complete the tasks. After finishing all tasks in this group, delete the entire comment block of each corresponding marker. For a multi-line marker (a /* ... */ block, or consecutive // lines starting with PI!:/PI?:), remove the whole block, not just the marker's first line.
 
 Only remove the markers explicitly listed below. Do not touch markers from other files.`;
 
@@ -379,7 +379,7 @@ export default function (pi: ExtensionAPI) {
 
         // 2. No remaining or no state -> fresh scan + new plan
         const extensionRelPath = relative(ctx.cwd, fileURLToPath(import.meta.url)).replace(/\\/g, "/");
-        const rgArgs = ["PI!|PI\\?", "-C", "3", "-n", "-H"];
+        const rgArgs = ["PI!:|PI\\?:", "-C", "3", "-n", "-H"];
         if (!extensionRelPath.startsWith("..")) {
             rgArgs.push("-g", `!${extensionRelPath}`);
         }
@@ -389,7 +389,7 @@ export default function (pi: ExtensionAPI) {
         }
         const scanOutput = rg.stdout.trim();
         if (!scanOutput) {
-            if (ctx.hasUI) ctx.ui.notify("No PI!/PI? markers found", "info");
+            if (ctx.hasUI) ctx.ui.notify("No PI!:/PI?: markers found", "info");
             setState({ groups: [], nextIndex: 0 }, pi, ctx.hasUI ? ctx.ui : undefined);
             return;
         }
@@ -465,7 +465,7 @@ export default function (pi: ExtensionAPI) {
 
     pi.registerCommand("inline", {
         description:
-            "Process inline PI!/PI? markers one file group at a time (smart continue or new batch)",
+            "Process inline PI!:/PI?: markers one file group at a time (smart continue or new batch)",
         handler: (args, ctx) => handler(args, ctx),
     });
 }
