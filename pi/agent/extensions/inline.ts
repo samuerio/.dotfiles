@@ -5,7 +5,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { BorderedLoader, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { existsSync, readFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { basename, isAbsolute, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 type ExtensionUI = ExtensionCommandContext["ui"];
@@ -254,6 +254,21 @@ function formatGroupContent(group: InlineGroup): string {
     return `${FRAMING_HEADER}\n\n${tasksText}`;
 }
 
+/** rg -g excludes for this module (cwd-relative path + basename anywhere). */
+function selfExcludeGlobs(cwd: string, moduleUrl: string): string[] {
+    const abs = fileURLToPath(moduleUrl);
+    const rel = relative(cwd, abs).replace(/\\/g, "/");
+    const globs: string[] = [];
+    // path.relative is under cwd only when not empty, not ".." outside, not absolute
+    if (rel && rel !== "." && !rel.startsWith("..") && !isAbsolute(rel)) {
+        globs.push(`!${rel}`);
+    }
+    // Always: agent-dir load yields rel like ../../.pi/... and used to skip
+    // exclude entirely, while a hardlink/copy under the project was still scanned.
+    globs.push(`!**/${basename(abs)}`);
+    return globs;
+}
+
 export default function (pi: ExtensionAPI) {
     // Reconstruct state on session load / tree navigation
     pi.on("session_start", async (_event, ctx) => {
@@ -379,10 +394,9 @@ export default function (pi: ExtensionAPI) {
         }
 
         // 2. No remaining or no state -> fresh scan + new plan
-        const extensionRelPath = relative(ctx.cwd, fileURLToPath(import.meta.url)).replace(/\\/g, "/");
         const rgArgs = ["PI!:|PI\\?:", "-C", "3", "-n", "-H"];
-        if (!extensionRelPath.startsWith("..")) {
-            rgArgs.push("-g", `!${extensionRelPath}`);
+        for (const g of selfExcludeGlobs(ctx.cwd, import.meta.url)) {
+            rgArgs.push("-g", g);
         }
         const rg = await pi.exec("rg", rgArgs, { cwd: ctx.cwd });
         if (rg.code !== 0 && rg.code !== 1) {
