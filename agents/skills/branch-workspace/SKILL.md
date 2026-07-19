@@ -64,18 +64,18 @@ Named workspace, sync. `bw_status` on the exact name first; proceed only if `sta
    1. Generate `<stem>=YYYYMMDD-HHMMSS` from the current time at send.
    2. Write `/tmp/bw-sync-done-<stem>.md` from this skill's `sync-done.template.md`, replacing `{{STEM}}` (marker is plain text `DONE:<stem>`, no backticks).
    3. Send: `pi --no-session --model <model> --thinking <thinking> -p @/abs/doc.md @/tmp/bw-sync-done-<stem>.md`. Never edit the task doc itself; the temp file is disposable (cleanup after DONE optional).
-3. **After send** — poll via tmux **Watching output** (e.g. `wait-for-text.sh` for `DONE:<stem>`, plain text). No ad-hoc sleep/capture-pane unless poll times out (then report timeout + last pane tail). On match, present the worker's final printed summary (the structured reply right before the DONE line) — no result file to read. → framing (named).
+2. **After send** — poll via tmux **Watching output** (e.g. `wait-for-text.sh` for `DONE:<stem>`, plain text). No ad-hoc sleep/capture-pane unless poll times out (then report timeout + last pane tail). On match, inspect the worktree diff (per **Role Boundaries**) and report your review findings to the user. → framing (named).
 
 ### Dispatch
 
 **Worker path** — any task whose output is file changes (code/docs/tests/review comments).
 
 1. **Choose sub-path**, from conversation artifacts + intent:
-   - **Ralph** — only if this conversation already produced a Ralph `task.json` + matching run command *and* the intent is to run that same implementation. Send via tmux **Sending input safely**. Async only (`handoff bw`); under `on <name> bw` it fails fast (see Ralph guard above).
+   - **ralph** — only if this conversation already produced a matching ralph `task.json`; build the run command per the `ralph` SKILL. Send via tmux **Sending input safely**. Async only (`handoff bw`); under `on <name> bw` it fails fast (see Ralph guard above).
    - **pi** — otherwise. Subdivide input source:
      1. **Existing handoff doc** — handoff already generated this conversation and still matches the intent → use that path.
      2. **Plan doc** — user (or prompt) points at `plan.md` / `design.md` / similar, no matching handoff yet → use that path.
-     3. **Generate** — otherwise **load and follow** the `handoff-for-impl` SKILL with conversation + intent/`<prompt>`, then use the path it writes under `.pi/handoff/`. Clear intents still go through `handoff-for-impl` (it skips Q&A when already actionable).
+     3. **Generate** — otherwise **load and follow** the `handoff-for-impl` SKILL with conversation + intent/`<prompt>`, then use the returned path. Clear intents still go through `handoff-for-impl` (it skips Q&A when already actionable).
 
 2. **pi path — build & send command.**
 
