@@ -9,4 +9,3 @@ Read the task from the message. If triggered via `/refine <task>`, the task foll
 
 Ask me questions if something is unclear, but if a question can be answered by exploring the codebase, explore it instead of asking. Do not rewrite the task yet and do not make assumptions.
 Ask clear, concrete questions. For each question, provide your recommended answer based on context from the codebase or common conventions. Wait for my confirmation or corrections before drafting any structured description.
-Once all questions are answered, summarize the refined task and wait for explicit confirmation before execution.
