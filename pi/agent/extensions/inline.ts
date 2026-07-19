@@ -58,7 +58,8 @@ Both PI!: and PI?: represent tasks to be executed.
 - For a PI?: task: do not modify the file that contains this marker, except to delete the entire comment block that starts with the marker. If the marker spans multiple lines (a /* ... */ block, or consecutive // lines), delete the whole block; do not strip the marker token and leave the remaining comment lines behind.
 - For a PI!: task: there is no such restriction; the task may freely modify the file containing the marker.
 
-Complete the tasks. After finishing all tasks in this group, delete the entire comment block of each corresponding marker. For a multi-line marker (a /* ... */ block, or consecutive // lines starting with PI!:/PI?:), remove the whole block, not just the marker's first line.
+Work through each <pi-task> in order and complete every one.
+After finishing all tasks in this group, delete the entire comment block of each corresponding marker. For a multi-line marker (a /* ... */ block, or consecutive // lines starting with PI!:/PI?:), remove the whole block, not just the marker's first line.
 
 Only remove the markers explicitly listed below. Do not touch markers from other files.`;
 
