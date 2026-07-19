@@ -11,6 +11,7 @@ linux_rime/user.yaml
 .aider.tags.cache.v4/
 # pi local state / handoffs / research drafts — never track
 /.pi/
+pi/agent/models-store.json
 **/node_modules/
 /.worktree/
 spec/
