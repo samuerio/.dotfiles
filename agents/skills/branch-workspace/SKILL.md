@@ -40,45 +40,59 @@ Dispatch requires **active** state *and* idle pane (workspace `idle` ≠ pane id
 
 Use the tmux SKILL only to send input / watch output, via `socket`/`paneTarget` from `bw_status`.
 
-### Trigger → target → mode
+### `handoff bw` [`<intent>`]
 
-| Trigger | Target | Mode | Path |
-|---------|--------|------|------|
-| `handoff bw` [`<intent>`] | new → derive name, `bw_open`+`bw_status` | async | Worker only |
-| `on <name> bw <prompt>` | named → `bw_status` on exact name | sync | Worker or Dispatcher, by prompt |
+New workspace, async, **Worker path only** (never Dispatcher). Full Worker sub-paths available: Ralph or pi.
 
-Deriving a name for `handoff bw`: default `feat/<feature-name>` (kebab-case); swap prefix for fix/refactor/chore/exp when clearly that kind of work; ask the user if no name can be derived.
+1. **Derive name** — default `feat/<feature-name>` (kebab-case); swap prefix for fix/refactor/chore/exp when clearly that kind of work; ask the user if no name can be derived. Then `bw_open` + `bw_status`.
+2. **Choose sub-path + build command** — see **Dispatch → Worker path** below. Ralph is allowed here (async); otherwise pi with async command shape.
+3. **After send** — don't wait, don't capture pane output. Report name + sent confirmation + `monitorCmd`. → framing (main).
+
+### `on <name> bw` `<prompt>`
+
+Named workspace, sync. `bw_status` on the exact name first; proceed only if `state=active` and `paneIdle=true`.
+
+**Split by prompt:**
+
+- **Implementation** (output is file changes) → Worker path below, **pi sub-path only**. **Ralph guard**: if this conversation produced a Ralph `task.json` matching the intent, fail fast — Ralph can't wait sync; use pi instead.
+- **Observability-only** (run tests/commands, check runtime errors) → **Dispatcher path** below.
+
+**Worker/sync flow:**
+
+1. Choose the task doc per **Dispatch → Worker path** (existing handoff / plan / generate).
+2. **Completion file** (never inline the DONE contract on the shell line):
+   1. Generate `<stem>=YYYYMMDD-HHMMSS` from the current time at send.
+   2. Write `/tmp/bw-sync-done-<stem>.md` from this skill's `sync-done.template.md`, replacing `{{STEM}}` (marker is plain text `DONE:<stem>`, no backticks).
+   3. Send: `pi --no-session --model <model> --thinking <thinking> -p @/abs/doc.md @/tmp/bw-sync-done-<stem>.md`. Never edit the task doc itself; the temp file is disposable (cleanup after DONE optional).
+3. **After send** — poll via tmux **Watching output** (e.g. `wait-for-text.sh` for `DONE:<stem>`, plain text). No ad-hoc sleep/capture-pane unless poll times out (then report timeout + last pane tail). On match, present the worker's final printed summary (the structured reply right before the DONE line) — no result file to read. → framing (named).
 
 ### Dispatch
 
-**Worker path** — any task whose output is file changes (code/docs/tests/review comments). Always used for `handoff bw`; used for `on <name> bw` when the prompt is implementation, not observability-only.
+**Worker path** — any task whose output is file changes (code/docs/tests/review comments).
 
 1. **Choose sub-path**, from conversation artifacts + intent:
-   - **Ralph** — only if this conversation already produced a Ralph `task.json` + matching run command *and* the intent is to run that same implementation. Send via tmux **Sending input safely**.
-     - `handoff bw`: async only — report name, that the command was sent, `monitorCmd`, then framing (main).
-     - `on <name> bw`: Ralph can't wait sync — fail fast, use pi instead.
+   - **Ralph** — only if this conversation already produced a Ralph `task.json` + matching run command *and* the intent is to run that same implementation. Send via tmux **Sending input safely**. Async only (`handoff bw`); under `on <name> bw` it fails fast (see Ralph guard above).
    - **pi** — otherwise. Subdivide input source:
      1. **Existing handoff doc** — handoff already generated this conversation and still matches the intent → use that path.
      2. **Plan doc** — user (or prompt) points at `plan.md` / `design.md` / similar, no matching handoff yet → use that path.
      3. **Generate** — otherwise **load and follow** the `handoff-for-impl` SKILL with conversation + intent/`<prompt>`, then use the path it writes under `.pi/handoff/`. Clear intents still go through `handoff-for-impl` (it skips Q&A when already actionable).
 
-2. **pi path — build & send command** (Step B). Resolve model per `pi-headless` SKILL defaults. Always `--no-session`; prefer `-p @<doc>` file refs, and since worker cwd = worktree, every `@<path>` must be **absolute**. Send with tmux `send-keys -l`; avoid multi-line shell-quoted prompt bodies.
+2. **pi path — build & send command.**
+
+   **Invariants (every send, both modes):**
+   - Resolve model per `pi-headless` SKILL defaults.
+   - `--no-session` always.
+   - `-p @<doc>` file refs preferred over inline text.
+   - Worker cwd = worktree → every `@<path>` must be **absolute**, never relative.
+   - Send via tmux `send-keys -l`.
+   - No multi-line shell-quoted prompt bodies.
 
    | Mode | Command shape |
    |------|----------------|
    | Async (`handoff bw`) | plan: `pi ... -p @/abs/plan.md 'Implement exactly what this plan describes'`; handoff: `pi ... -p @/abs/handoff.md` |
-   | Sync (`on <name> bw`) | `pi ... -p @/abs/doc.md @/abs/sync-done.md` |
+   | Sync (`on <name> bw`) | `pi ... -p @/abs/doc.md @/abs/sync-done.md` (completion file: see `on <name> bw` above) |
 
-   **Sync only — completion file** (never inline the DONE contract on the shell line):
-   1. Resolve `<stem>`: reuse it from `.pi/handoff/<stem>/handoff.md` if that's the doc; otherwise invent `<stem>=YYYYMMDD-HHMMSS-<slug>`.
-   2. Write `/tmp/bw-sync-done-<stem>.md` from this skill's `sync-done.template.md`, replacing `{{STEM}}` (marker is plain text `DONE:<stem>`, no backticks).
-   3. Send: `pi --no-session --model <model> --thinking <thinking> -p @/abs/doc.md @/tmp/bw-sync-done-<stem>.md`. Never edit the task doc itself; the temp file is disposable (cleanup after DONE optional).
-
-3. **After send:**
-   - **Async**: don't wait, don't capture pane output. Report name + sent confirmation + `monitorCmd`. → framing (main).
-   - **Sync**: poll via tmux **Watching output** (e.g. `wait-for-text.sh` for `DONE:<stem>`, plain text). No ad-hoc sleep/capture-pane unless poll times out (then report timeout + last pane tail). On match, present the worker's final printed summary (the structured reply right before the DONE line) — no result file to read. → framing (named).
-
-**Dispatcher path** — only for `on <name> bw` when the prompt is observability-only (run tests/commands, check runtime errors). Execute via bash or the bw tmux pane, capture output for the user. No handoff doc, no pi, no DONE contract, no Ralph. → framing (named). Never used for `handoff bw`.
+**Dispatcher path** — observability-only prompts under `on <name> bw`. Execute via bash or the bw tmux pane, capture output for the user. No handoff doc, no pi, no DONE contract, no Ralph. → framing (named).
 
 Mixed requests (e.g. "run tests then fix failures"): split into dispatcher steps (observable) and worker steps (file changes) in work order; pass findings between them via the handoff/plan doc.
 
