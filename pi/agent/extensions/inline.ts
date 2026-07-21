@@ -184,14 +184,12 @@ function getCurrentState(ctx: any): InlineBatchState | null {
     return inlineState;
 }
 
-function setState(newState: InlineBatchState | null, pi: ExtensionAPI, ui?: ExtensionUI): void {
+function setState(newState: InlineBatchState | null, pi: ExtensionAPI, ui: ExtensionUI): void {
     inlineState = newState;
     if (newState) {
         persistState(pi, newState);
     }
-    if (ui) {
-        updateInlineStatus(ui);
-    }
+    updateInlineStatus(ui);
 }
 
 function updateInlineStatus(ui: ExtensionUI): void {
@@ -288,22 +286,18 @@ export default function (pi: ExtensionAPI) {
 
     const handler = async (args: string, ctx: ExtensionCommandContext) => {
         const fail = (message: string): void => {
-            if (ctx.hasUI) {
-                ctx.ui.notify(message, "error");
-                return;
-            }
-            throw new Error(message);
+            ctx.ui.notify(message, "error");
         };
 
         const trimmedArgs = (args || "").trim();
         const flags = trimmedArgs.split(/\s+/).filter(Boolean);
 
+        if (!ctx.hasUI) {
+            throw new Error("/inline is only supported in TUI mode");
+        }
+
         // Handle control commands first
         if (flags.includes("-l") || flags.includes("--list")) {
-            if (!ctx.hasUI) {
-                process.stdout.write("inline batch list is only supported in TUI mode\n");
-                return;
-            }
             const state = getCurrentState(ctx);
             if (!state || !state.groups.length || state.nextIndex >= state.groups.length) {
                 ctx.ui.notify("当前没有 inline 分组计划", "info");
@@ -326,18 +320,14 @@ export default function (pi: ExtensionAPI) {
         }
 
         if (flags.includes("-r") || flags.includes("--reset")) {
-            setState({ groups: [], nextIndex: 0 }, pi, ctx.hasUI ? ctx.ui : undefined);
-            if (ctx.hasUI) {
-                ctx.ui.notify("inline batch 已重置", "info");
-            } else {
-                process.stdout.write("inline batch reset\n");
-            }
+            setState({ groups: [], nextIndex: 0 }, pi, ctx.ui);
+            ctx.ui.notify("inline batch 已重置", "info");
             return;
         }
 
         // plain /inline : smart continue or regenerate
         const state = getCurrentState(ctx);
-        if (ctx.hasUI) updateInlineStatus(ctx.ui);
+        updateInlineStatus(ctx.ui);
 
         // Resolve model/auth (needed for describe in regenerate case)
         const rushSpec = loadRushModeSpec(ctx.cwd);
@@ -376,20 +366,15 @@ export default function (pi: ExtensionAPI) {
             const group = state.groups[state.nextIndex];
             const content = formatGroupContent(group);
 
-            if (ctx.hasUI) {
-                ctx.ui.notify(
-                    `inline: 处理文件组 (${state.nextIndex + 1}/${state.groups.length}) - ${group.file} (${group.tasks.length} markers)`,
-                    "info",
-                );
-                pi.sendMessage({ customType: "inline", content, display: true }, { triggerTurn: true });
-            } else {
-                // non-TUI: output text, no trigger
-                process.stdout.write(`${content}\n`);
-            }
+            ctx.ui.notify(
+                `inline: 处理文件组 (${state.nextIndex + 1}/${state.groups.length}) - ${group.file} (${group.tasks.length} markers)`,
+                "info",
+            );
+            pi.sendMessage({ customType: "inline", content, display: true }, { triggerTurn: true });
 
             // advance
             const newState: InlineBatchState = { ...state, nextIndex: state.nextIndex + 1 };
-            setState(newState, pi, ctx.hasUI ? ctx.ui : undefined);
+            setState(newState, pi, ctx.ui);
             return;
         }
 
@@ -404,63 +389,45 @@ export default function (pi: ExtensionAPI) {
         }
         const scanOutput = rg.stdout.trim();
         if (!scanOutput) {
-            if (ctx.hasUI) ctx.ui.notify("No PI!:/PI?: markers found", "info");
-            setState({ groups: [], nextIndex: 0 }, pi, ctx.hasUI ? ctx.ui : undefined);
+            ctx.ui.notify("No PI!:/PI?: markers found", "info");
+            setState({ groups: [], nextIndex: 0 }, pi, ctx.ui);
             return;
         }
 
-        let formatted: string | null = null;
-        if (!ctx.hasUI) {
-            formatted = await describe(scanOutput);
-        } else {
-            formatted = await ctx.ui.custom<string | null>((tui, theme, _kb, done) => {
-                const loader = new BorderedLoader(tui, theme, "Scanning and describing inline markers...");
-                loader.onAbort = () => done(null);
-                describe(scanOutput, loader.signal).then(done).catch((err) => {
-                    ctx.ui.notify(`Inline failed: ${err.message}`, "error");
-                    done(null);
-                });
-                return loader;
+        const formatted: string | null = await ctx.ui.custom<string | null>((tui, theme, _kb, done) => {
+            const loader = new BorderedLoader(tui, theme, "Scanning and describing inline markers...");
+            loader.onAbort = () => done(null);
+            describe(scanOutput, loader.signal).then(done).catch((err) => {
+                ctx.ui.notify(`Inline failed: ${err.message}`, "error");
+                done(null);
             });
-        }
+            return loader;
+        });
 
         if (formatted === null) {
-            if (ctx.hasUI) ctx.ui.notify("Cancelled", "info");
+            ctx.ui.notify("Cancelled", "info");
             return;
         }
         if (!formatted) {
-            if (ctx.hasUI) ctx.ui.notify("Empty inline result", "error");
-            else throw new Error("Empty inline result");
+            ctx.ui.notify("Empty inline result", "error");
             return;
         }
         if (formatted === NO_GENUINE_MARKERS) {
-            if (ctx.hasUI) ctx.ui.notify("No genuine markers (all matches are docs)", "info");
-            else process.stdout.write("No genuine markers (all matches are docs)\n");
-            setState({ groups: [], nextIndex: 0 }, pi, ctx.hasUI ? ctx.ui : undefined);
+            ctx.ui.notify("No genuine markers (all matches are docs)", "info");
+            setState({ groups: [], nextIndex: 0 }, pi, ctx.ui);
             return;
         }
 
         const tasks = parsePiTasks(formatted);
         if (tasks.length === 0) {
-            if (ctx.hasUI) ctx.ui.notify("No genuine markers (all matches are docs)", "info");
-            setState({ groups: [], nextIndex: 0 }, pi, ctx.hasUI ? ctx.ui : undefined);
+            ctx.ui.notify("No genuine markers (all matches are docs)", "info");
+            setState({ groups: [], nextIndex: 0 }, pi, ctx.ui);
             return;
         }
 
         const newGroups = groupTasks(tasks);
         const newState: InlineBatchState = { groups: newGroups, nextIndex: 0 };
-        setState(newState, pi);  // status will show (0/N) or (1/N) depending on timing
-
-        if (!ctx.hasUI) {
-            // non-TUI: just output the first group as before (minimal support)
-            const first = newGroups[0];
-            const content = formatGroupContent(first);
-            process.stdout.write(`${content}\n`);
-            // advance for consistency (though non-TUI doesn't persist turns the same way)
-            newState.nextIndex = 1;
-            setState(newState, pi, undefined);
-            return;
-        }
+        setState(newState, pi, ctx.ui);
 
         // TUI: notify and send first group
         ctx.ui.notify(`inline: 开始新批次，共 ${newGroups.length} 个文件组`, "info");
