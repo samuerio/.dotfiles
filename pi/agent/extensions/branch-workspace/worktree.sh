@@ -82,6 +82,14 @@ fi
 
 git_common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
 if [ -z "$git_common_dir" ]; then
+  # git < 2.31 不支持 --path-format=absolute，--git-common-dir 可能返回相对路径；
+  # 用 cd + pwd -P 规整为物理绝对路径，与 --show-toplevel 在符号链接仓库下保持一致
+  git_common_dir="$(git rev-parse --git-common-dir 2>/dev/null || true)"
+  if [ -n "$git_common_dir" ]; then
+    git_common_dir="$(cd "$git_common_dir" && pwd -P)"
+  fi
+fi
+if [ -z "$git_common_dir" ]; then
   echo "error: unable to resolve git common dir" >&2
   exit 2
 fi
