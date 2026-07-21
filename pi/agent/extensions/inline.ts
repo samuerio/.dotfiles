@@ -1,7 +1,9 @@
-import { completeSimple, type UserMessage } from "@earendil-works/pi-ai";
+import { completeSimple, type AssistantMessage, type UserMessage } from "@earendil-works/pi-ai/compat";
 import type {
     ExtensionAPI,
     ExtensionCommandContext,
+    ExtensionContext,
+    SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import { BorderedLoader, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { existsSync, readFileSync } from "node:fs";
@@ -90,13 +92,6 @@ type ModeSpec = {
     modelId?: string;
     thinkingLevel?: string;
 };
-
-type ModesFile = {
-    version: 1;
-    currentMode: ModeName;
-    modes: Record<ModeName, ModeSpec>;
-};
-
 const RUSH_MODE = "rush";
 
 function getProjectModesPath(cwd: string): string {
@@ -139,7 +134,7 @@ function loadRushModeSpec(cwd: string): ModeSpec | null {
     return null;
 }
 
-function extractText(response: any): string {
+function extractText(response: AssistantMessage): string {
     return response.content
         .filter((c): c is { type: "text"; text: string } => c.type === "text")
         .map((c) => c.text)
@@ -155,7 +150,7 @@ function persistState(pi: ExtensionAPI, state: InlineBatchState): void {
     pi.appendEntry(INLINE_STATE_KEY, state);
 }
 
-function loadStateFromBranch(branch: any[]): InlineBatchState | null {
+function loadStateFromBranch(branch: SessionEntry[]): InlineBatchState | null {
     for (let i = branch.length - 1; i >= 0; i--) {
         const entry = branch[i];
         if (
@@ -172,12 +167,12 @@ function loadStateFromBranch(branch: any[]): InlineBatchState | null {
     return null;
 }
 
-function reconstructState(ctx: any): void {
+function reconstructState(ctx: ExtensionContext): void {
     const branch = ctx.sessionManager.getBranch();
     inlineState = loadStateFromBranch(branch);
 }
 
-function getCurrentState(ctx: any): InlineBatchState | null {
+function getCurrentState(ctx: ExtensionContext): InlineBatchState | null {
     if (inlineState === null) {
         reconstructState(ctx);
     }
