@@ -1,4 +1,8 @@
-import { completeSimple, type AssistantMessage, type UserMessage } from "@earendil-works/pi-ai/compat";
+import {
+    completeSimple,
+    type AssistantMessage,
+    type UserMessage,
+} from "@earendil-works/pi-ai/compat";
 import type {
     ExtensionAPI,
     ExtensionCommandContext,
@@ -12,58 +16,38 @@ import { fileURLToPath } from "node:url";
 
 type ExtensionUI = ExtensionCommandContext["ui"];
 
-const SYSTEM_PROMPT = `You are an inline marker extractor. You receive ripgrep output that scanned a codebase for PI!: and PI?: inline comment markers. Your job has three steps only: filter, construct, and output all. Do NOT implement changes, answer questions, clarify, or interpret what the marker asks for.
+const SYSTEM_PROMPT = `Extract genuine PI!: and PI?: task comments from rg -C3 -n -H output.
 
-Filter:
-- Keep a match only when PI!: or PI?: starts a code comment (the marker is at the start of the comment text) and is immediately followed by task or question content (a change request, a slash command, or a question sentence). The kept unit is the PI!: or PI?: comment itself.
-- Skip matches where PI!:/PI?: appears inside a string literal, template string, prompt/prose text, log/notify message, or documentation that merely describes the marker syntax (e.g., "PI!: for change and PI?: for questions").
+A genuine marker must:
+- Start the text of a code comment.
+- Be immediately followed by a change request, slash command, or question.
 
-Construct:
-- For every genuine marker (after filtering), emit one <pi-task> element.
-- The element body must be the raw rg output block for that match (the surrounding lines with their exact "path:line:" or "path-line-" prefixes as produced by rg -C3 -n -H). Do not summarize, rewrite, trim, or reformat the snippet.
-- Do not include a type attribute. The PI!: or PI?: in the content itself indicates the nature of the task.
-- The file attribute is the relative file path from the rg output. The line attribute is the line number of the match line from the rg output (the scan-time line number).
-- Do NOT emit a separate comment field. The matching line in the snippet already carries the comment text.
-- Do NOT group by file. Do NOT use Markdown headings.
-- Output all <pi-task> elements in the same order they appear in the rg output.
-- Do NOT XML-escape the snippet. The output is read as text, not parsed.
-- Do NOT output a summary line or any other text.
+Ignore markers inside strings, templates, prose, logs, documentation, or text that only explains the marker convention.
 
-If, after filtering, there are no genuine markers (rg matched but all matches are documentation about the convention), output exactly the token:
+For each genuine marker, output exactly:
 
-NO_GENUINE_MARKERS
-
-and nothing else.
-
-Output shape (multiple markers, one per genuine match). Example of realistic rg -C output inside the body:
-
-<pi-task file="src/foo.ts" line="42">
-src/foo.ts-39- function bar() {
-src/foo.ts-40-   const x = 1;
-src/foo.ts:42:// PI!: add error handling here
-src/foo.ts-43-   console.log(x);
-src/foo.ts-44- }
+<pi-task file="RELATIVE_PATH" line="MATCH_LINE">
+RAW_RG_BLOCK
 </pi-task>
 
-<pi-task file="src/bar.ts" line="10">
-src/bar.ts-7-  // earlier
-src/bar.ts:10:// PI?: should we rename this?
-src/bar.ts-11- function baz() {}
-</pi-task>
+Rules:
+- Preserve the complete rg block exactly, including path and line prefixes.
+- Use the matched line's path and scan-time line number.
+- Emit one element per marker, in rg order; do not group by file.
+- Do not add a type attribute, Markdown, summaries, commentary, or other fields.
+- Do not XML-escape or otherwise rewrite the block.
 
-Use English for any prose. Do NOT output meta commentary, resolution rules, or output format instructions. Output ONLY the <pi-task> elements (or the NO_GENUINE_MARKERS token).`;
+If no genuine markers remain, output exactly:
+NO_GENUINE_MARKERS`;
 
-const FRAMING_HEADER = `Found inline markers (PI!:/PI?:) for one file in the codebase.
+const FRAMING_HEADER = `The following PI!: and PI?: markers are tasks from one file. Complete every <pi-task> in order.
 
-Both PI!: and PI?: represent tasks to be executed.
+For PI!: tasks, modify the file as needed.
+For PI?: tasks, do not modify the marker's file except to remove that marker's entire comment block.
 
-- For a PI?: task: do not modify the file that contains this marker, except to delete the entire comment block that starts with the marker. If the marker spans multiple lines (a /* ... */ block, or consecutive // lines), delete the whole block; do not strip the marker token and leave the remaining comment lines behind.
-- For a PI!: task: there is no such restriction; the task may freely modify the file containing the marker.
+After completing each task, remove its entire marker comment block. For /* ... */ comments or consecutive // comment lines, remove the whole block rather than only the marker line.
 
-Work through each <pi-task> in order and complete every one.
-After finishing all tasks in this group, delete the entire comment block of each corresponding marker. For a multi-line marker (a /* ... */ block, or consecutive // lines starting with PI!:/PI?:), remove the whole block, not just the marker's first line.
-
-Only remove the markers explicitly listed below. Do not touch markers from other files.`;
+Only remove the markers listed below; leave markers from other files untouched.`;
 
 const NO_GENUINE_MARKERS = "NO_GENUINE_MARKERS";
 
@@ -84,8 +68,6 @@ interface InlineBatchState {
     groups: InlineGroup[];
     nextIndex: number;
 }
-
-type ModeName = string;
 
 type ModeSpec = {
     provider?: string;
@@ -159,7 +141,11 @@ function loadStateFromBranch(branch: SessionEntry[]): InlineBatchState | null {
             entry.data
         ) {
             const s = entry.data as InlineBatchState;
-            if (s && Array.isArray(s.groups) && typeof s.nextIndex === "number") {
+            if (
+                s &&
+                Array.isArray(s.groups) &&
+                typeof s.nextIndex === "number"
+            ) {
                 return s;
             }
         }
@@ -179,7 +165,11 @@ function getCurrentState(ctx: ExtensionContext): InlineBatchState | null {
     return inlineState;
 }
 
-function setState(newState: InlineBatchState | null, pi: ExtensionAPI, ui: ExtensionUI): void {
+function setState(
+    newState: InlineBatchState | null,
+    pi: ExtensionAPI,
+    ui: ExtensionUI,
+): void {
     inlineState = newState;
     if (newState) {
         persistState(pi, newState);
@@ -193,9 +183,7 @@ function updateInlineStatus(ui: ExtensionUI): void {
     // nextIndex = number of groups already handed off (can be 0 right after
     // batch creation). This means (0/N) is possible and acceptable.
     const hasRemaining =
-        !!s &&
-        s.groups.length > 0 &&
-        s.nextIndex < s.groups.length;
+        !!s && s.groups.length > 0 && s.nextIndex < s.groups.length;
 
     if (!hasRemaining) {
         ui.setStatus("inline", undefined);
@@ -208,8 +196,9 @@ function updateInlineStatus(ui: ExtensionUI): void {
 function parsePiTasks(text: string): InlineTask[] {
     const tasks: InlineTask[] = [];
     // Support both with and without type attribute for robustness during transition
-    const regex = /<pi-task\s+(?:type="[^"]+"\s+)?file="([^"]+)"\s+line="(\d+)"\s*>([\s\S]*?)<\/pi-task>/g;
-    let match;
+    const regex =
+        /<pi-task\s+(?:type="[^"]+"\s+)?file="([^"]+)"\s+line="(\d+)"\s*>([\s\S]*?)<\/pi-task>/g;
+    let match: RegExpExecArray | null;
     while ((match = regex.exec(text)) !== null) {
         const file = match[1];
         const line = parseInt(match[2], 10);
@@ -242,7 +231,10 @@ function groupTasks(tasks: InlineTask[]): InlineGroup[] {
 
 function formatGroupContent(group: InlineGroup): string {
     const tasksText = group.tasks
-        .map((t) => `<pi-task file="${group.file}" line="${t.line}">\n${t.content}\n</pi-task>`)
+        .map(
+            (t) =>
+                `<pi-task file="${group.file}" line="${t.line}">\n${t.content}\n</pi-task>`,
+        )
         .join("\n\n");
     return `${FRAMING_HEADER}\n\n${tasksText}`;
 }
@@ -294,7 +286,11 @@ export default function (pi: ExtensionAPI) {
         // Handle control commands first
         if (flags.includes("-l") || flags.includes("--list")) {
             const state = getCurrentState(ctx);
-            if (!state || !state.groups.length || state.nextIndex >= state.groups.length) {
+            if (
+                !state ||
+                !state.groups.length ||
+                state.nextIndex >= state.groups.length
+            ) {
                 ctx.ui.notify("当前没有 inline 分组计划", "info");
                 return;
             }
@@ -329,9 +325,14 @@ export default function (pi: ExtensionAPI) {
         if (!rushSpec) {
             return fail(`No '${RUSH_MODE}' mode in modes.json`);
         }
-        const model = ctx.modelRegistry.find(rushSpec.provider!, rushSpec.modelId!);
+        const model = ctx.modelRegistry.find(
+            rushSpec.provider!,
+            rushSpec.modelId!,
+        );
         if (!model) {
-            return fail(`Mode '${RUSH_MODE}' references unknown model ${rushSpec.provider}/${rushSpec.modelId}`);
+            return fail(
+                `Mode '${RUSH_MODE}' references unknown model ${rushSpec.provider}/${rushSpec.modelId}`,
+            );
         }
         const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
         if (!auth.ok) {
@@ -339,7 +340,10 @@ export default function (pi: ExtensionAPI) {
         }
         const { apiKey, headers } = auth;
 
-        const describe = async (scan: string, signal?: AbortSignal): Promise<string | null> => {
+        const describe = async (
+            scan: string,
+            signal?: AbortSignal,
+        ): Promise<string | null> => {
             const userMessage: UserMessage = {
                 role: "user",
                 content: [{ type: "text", text: scan }],
@@ -348,7 +352,7 @@ export default function (pi: ExtensionAPI) {
             const response = await completeSimple(
                 model,
                 { systemPrompt: SYSTEM_PROMPT, messages: [userMessage] },
-                { apiKey, headers, signal, reasoning: "off" },
+                { apiKey, headers, signal },
             );
             if (response.stopReason === "aborted") return null;
             const text = extractText(response);
@@ -365,10 +369,16 @@ export default function (pi: ExtensionAPI) {
                 `inline: 处理文件组 (${state.nextIndex + 1}/${state.groups.length}) - ${group.file} (${group.tasks.length} markers)`,
                 "info",
             );
-            pi.sendMessage({ customType: "inline", content, display: true }, { triggerTurn: true });
+            pi.sendMessage(
+                { customType: "inline", content, display: true },
+                { triggerTurn: true },
+            );
 
             // advance
-            const newState: InlineBatchState = { ...state, nextIndex: state.nextIndex + 1 };
+            const newState: InlineBatchState = {
+                ...state,
+                nextIndex: state.nextIndex + 1,
+            };
             setState(newState, pi, ctx.ui);
             return;
         }
@@ -389,15 +399,23 @@ export default function (pi: ExtensionAPI) {
             return;
         }
 
-        const formatted: string | null = await ctx.ui.custom<string | null>((tui, theme, _kb, done) => {
-            const loader = new BorderedLoader(tui, theme, "Scanning and describing inline markers...");
-            loader.onAbort = () => done(null);
-            describe(scanOutput, loader.signal).then(done).catch((err) => {
-                ctx.ui.notify(`Inline failed: ${err.message}`, "error");
-                done(null);
-            });
-            return loader;
-        });
+        const formatted: string | null = await ctx.ui.custom<string | null>(
+            (tui, theme, _kb, done) => {
+                const loader = new BorderedLoader(
+                    tui,
+                    theme,
+                    "Scanning and describing inline markers...",
+                );
+                loader.onAbort = () => done(null);
+                describe(scanOutput, loader.signal)
+                    .then(done)
+                    .catch((err) => {
+                        ctx.ui.notify(`Inline failed: ${err.message}`, "error");
+                        done(null);
+                    });
+                return loader;
+            },
+        );
 
         if (formatted === null) {
             ctx.ui.notify("Cancelled", "info");
@@ -425,7 +443,10 @@ export default function (pi: ExtensionAPI) {
         setState(newState, pi, ctx.ui);
 
         // TUI: notify and send first group
-        ctx.ui.notify(`inline: 开始新批次，共 ${newGroups.length} 个文件组`, "info");
+        ctx.ui.notify(
+            `inline: 开始新批次，共 ${newGroups.length} 个文件组`,
+            "info",
+        );
         const firstGroup = newGroups[0];
         ctx.ui.notify(
             `inline: 处理文件组 (1/${newGroups.length}) - ${firstGroup.file} (${firstGroup.tasks.length} markers)`,
@@ -433,7 +454,10 @@ export default function (pi: ExtensionAPI) {
         );
 
         const content = formatGroupContent(firstGroup);
-        pi.sendMessage({ customType: "inline", content, display: true }, { triggerTurn: true });
+        pi.sendMessage(
+            { customType: "inline", content, display: true },
+            { triggerTurn: true },
+        );
 
         // advance
         newState.nextIndex = 1;
