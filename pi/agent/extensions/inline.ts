@@ -14,7 +14,7 @@ const SYSTEM_PROMPT = `You are an inline marker extractor. You receive ripgrep o
 
 Filter:
 - Keep a match only when PI!: or PI?: starts a code comment (the marker is at the start of the comment text) and is immediately followed by task or question content (a change request, a slash command, or a question sentence). The kept unit is the PI!: or PI?: comment itself.
-- Skip matches where PI!:/PI?: appears inside a string literal, template string, prompt/prose text, log/notify message, or documentation that merely describes the marker syntax (e.g., "PI!: for change and PI?: for questions"), and skip matches inside markdown/SKILL files that merely describe the marker syntax.
+- Skip matches where PI!:/PI?: appears inside a string literal, template string, prompt/prose text, log/notify message, or documentation that merely describes the marker syntax (e.g., "PI!: for change and PI?: for questions").
 
 Construct:
 - For every genuine marker (after filtering), emit one <pi-task> element.
