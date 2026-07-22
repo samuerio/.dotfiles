@@ -12,9 +12,15 @@ import type {
 import { BorderedLoader, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 type ExtensionUI = ExtensionCommandContext["ui"];
+
+// Absolute path of this extension's own source file. Its PI!:/PI?: occurrences
+// live only inside prompt/description strings (self-referential noise), never
+// real markers. Used to filter them out of rg scan output before describing.
+const SELF_PATH = fileURLToPath(import.meta.url);
 
 const SYSTEM_PROMPT = `Extract genuine PI!: and PI?: task comments from rg -C3 -n -H output.
 
@@ -265,6 +271,44 @@ function formatGroupContent(group: InlineGroup): string {
     return `${FRAMING_HEADER}\n\n${tasksText}`;
 }
 
+// Path forms this extension's source may take in rg -H output: absolute (when
+// scanned via explicit paths) and relative to cwd (default scan).
+function selfPathVariants(cwd: string): string[] {
+    const variants: string[] = [SELF_PATH];
+    const rel = relative(cwd, SELF_PATH);
+    if (rel && !rel.startsWith("..") && !isAbsolute(rel)) {
+        variants.push(rel);
+    }
+    return variants;
+}
+
+// Drop rg -C3 -n -H blocks whose path matches the extension's own source.
+// Blocks are separated by a lone "--" line; a block is removed when any of its
+// lines carries one of selfVariants as the path prefix.
+function filterSelfFromRgScan(scan: string, selfVariants: string[]): string {
+    if (!scan || selfVariants.length === 0) return scan;
+    const pathRe = /^(.+?)(?::|-)(\d+)(?::|-)/;
+    const keptBlocks: string[][] = [];
+    let cur: string[] = [];
+    let curIsSelf = false;
+    const flush = (): void => {
+        if (cur.length && !curIsSelf) keptBlocks.push(cur);
+        cur = [];
+        curIsSelf = false;
+    };
+    for (const line of scan.split("\n")) {
+        if (line === "--") {
+            flush();
+            continue;
+        }
+        const m = line.match(pathRe);
+        if (m && selfVariants.includes(m[1])) curIsSelf = true;
+        cur.push(line);
+    }
+    flush();
+    return keptBlocks.map((b) => b.join("\n")).join("\n--\n");
+}
+
 export default function (pi: ExtensionAPI) {
     // Reconstruct state on session load / tree navigation
     pi.on("session_start", async (_event, ctx) => {
@@ -414,7 +458,16 @@ export default function (pi: ExtensionAPI) {
         if (rg.code !== 0 && rg.code !== 1) {
             return fail(`rg failed (code ${rg.code}): ${rg.stderr.trim()}`);
         }
-        const scanOutput = rg.stdout.trim();
+        let scanOutput = rg.stdout.trim();
+        // Exclude this extension's own source from the scan: its PI!:/PI?:
+        // matches are prompt/description strings (self-referential noise), not
+        // real markers. Filtering deterministically here saves describe tokens
+        // and removes any risk of the model treating them as tasks that edit
+        // the extension itself.
+        const selfVariants = selfPathVariants(ctx.cwd);
+        if (selfVariants.length) {
+            scanOutput = filterSelfFromRgScan(scanOutput, selfVariants);
+        }
         if (!scanOutput) {
             ctx.ui.notify("No PI!:/PI?: markers found", "info");
             setState({ groups: [], nextIndex: 0 }, pi, ctx.ui);
