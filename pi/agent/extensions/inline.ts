@@ -11,8 +11,8 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { BorderedLoader, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { existsSync, readFileSync } from "node:fs";
-import { basename, isAbsolute, join, relative } from "node:path";
-import { fileURLToPath } from "node:url";
+import { homedir } from "node:os";
+import { isAbsolute, join, resolve } from "node:path";
 
 type ExtensionUI = ExtensionCommandContext["ui"];
 
@@ -229,6 +229,32 @@ function groupTasks(tasks: InlineTask[]): InlineGroup[] {
     }));
 }
 
+function resolveScanPath(inputPath: string, cwd: string): string {
+    let p = inputPath;
+    if (p === "~") p = homedir();
+    else if (p.startsWith("~/")) p = join(homedir(), p.slice(2));
+    if (!isAbsolute(p)) p = resolve(cwd, p);
+    return resolve(p);
+}
+
+type ScanPathResult =
+    | { ok: true; paths: string[]; display: string[] }
+    | { ok: false; error: string };
+
+function resolveScanPaths(raw: string[], cwd: string): ScanPathResult {
+    const paths: string[] = [];
+    const display: string[] = [];
+    for (const token of raw) {
+        const abs = resolveScanPath(token, cwd);
+        if (!existsSync(abs)) {
+            return { ok: false, error: `Path not found: ${token}` };
+        }
+        paths.push(abs);
+        display.push(token);
+    }
+    return { ok: true, paths, display };
+}
+
 function formatGroupContent(group: InlineGroup): string {
     const tasksText = group.tasks
         .map(
@@ -237,21 +263,6 @@ function formatGroupContent(group: InlineGroup): string {
         )
         .join("\n\n");
     return `${FRAMING_HEADER}\n\n${tasksText}`;
-}
-
-/** rg -g excludes for this module (cwd-relative path + basename anywhere). */
-function selfExcludeGlobs(cwd: string, moduleUrl: string): string[] {
-    const abs = fileURLToPath(moduleUrl);
-    const rel = relative(cwd, abs).replace(/\\/g, "/");
-    const globs: string[] = [];
-    // path.relative is under cwd only when not empty, not ".." outside, not absolute
-    if (rel && rel !== "." && !rel.startsWith("..") && !isAbsolute(rel)) {
-        globs.push(`!${rel}`);
-    }
-    // Always: agent-dir load yields rel like ../../.pi/... and used to skip
-    // exclude entirely, while a hardlink/copy under the project was still scanned.
-    globs.push(`!**/${basename(abs)}`);
-    return globs;
 }
 
 export default function (pi: ExtensionAPI) {
@@ -277,7 +288,9 @@ export default function (pi: ExtensionAPI) {
         };
 
         const trimmedArgs = (args || "").trim();
-        const flags = trimmedArgs.split(/\s+/).filter(Boolean);
+        const tokens = trimmedArgs.split(/\s+/).filter(Boolean);
+        const flags = tokens.filter((t) => t.startsWith("-"));
+        const positionals = tokens.filter((t) => !t.startsWith("-"));
 
         if (!ctx.hasUI) {
             throw new Error("/inline is only supported in TUI mode");
@@ -320,6 +333,16 @@ export default function (pi: ExtensionAPI) {
         const state = getCurrentState(ctx);
         updateInlineStatus(ctx.ui);
 
+        // Positional paths => force fresh scan over the given scope
+        let scanScope: ScanPathResult | null = null;
+        if (positionals.length > 0) {
+            scanScope = resolveScanPaths(positionals, ctx.cwd);
+            if (!scanScope.ok) {
+                return fail(scanScope.error);
+            }
+        }
+        const hasScanPaths = scanScope !== null;
+
         // Resolve model/auth (needed for describe in regenerate case)
         const rushSpec = loadRushModeSpec(ctx.cwd);
         if (!rushSpec) {
@@ -360,8 +383,8 @@ export default function (pi: ExtensionAPI) {
             return text;
         };
 
-        // 1. Check if we can continue from existing state (no scan)
-        if (state && state.nextIndex < state.groups.length) {
+        // 1. Check if we can continue from existing state (no scan path given)
+        if (!hasScanPaths && state && state.nextIndex < state.groups.length) {
             const group = state.groups[state.nextIndex];
             const content = formatGroupContent(group);
 
@@ -383,11 +406,10 @@ export default function (pi: ExtensionAPI) {
             return;
         }
 
-        // 2. No remaining or no state -> fresh scan + new plan
+        // 2. No remaining or no state (or explicit scan path) -> fresh scan + new plan
         const rgArgs = ["PI!:|PI\\?:", "-C", "3", "-n", "-H"];
-        for (const g of selfExcludeGlobs(ctx.cwd, import.meta.url)) {
-            rgArgs.push("-g", g);
-        }
+        // Explicit paths bypass .gitignore so ignored dirs (e.g. .pi) can be targeted.
+        if (scanScope) rgArgs.push("--no-ignore", ...scanScope.paths);
         const rg = await pi.exec("rg", rgArgs, { cwd: ctx.cwd });
         if (rg.code !== 0 && rg.code !== 1) {
             return fail(`rg failed (code ${rg.code}): ${rg.stderr.trim()}`);
@@ -443,8 +465,11 @@ export default function (pi: ExtensionAPI) {
         setState(newState, pi, ctx.ui);
 
         // TUI: notify and send first group
+        const scopeLabel = scanScope
+            ? `（范围 ${scanScope.display.join(" ")}）`
+            : "";
         ctx.ui.notify(
-            `inline: 开始新批次，共 ${newGroups.length} 个文件组`,
+            `inline: 开始新批次${scopeLabel}，共 ${newGroups.length} 个文件组`,
             "info",
         );
         const firstGroup = newGroups[0];
@@ -466,7 +491,7 @@ export default function (pi: ExtensionAPI) {
 
     pi.registerCommand("inline", {
         description:
-            "Process inline PI!:/PI?: markers one file group at a time (smart continue or new batch)",
+            "Process inline PI!:/PI?: markers one file group at a time. Optional positional paths scope a fresh scan; -l/--list, -r/--reset control the batch.",
         handler: (args, ctx) => handler(args, ctx),
     });
 }
