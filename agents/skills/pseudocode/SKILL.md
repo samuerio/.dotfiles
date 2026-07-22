@@ -1,93 +1,89 @@
 ---
 name: pseudocode
-description: "Generate language-matched pseudocode from architecture research.md or design.md documents produced by the architecture skill, including component overview, grouped component logic, assumptions, error handling, and main call graph."
+description: "Generate lightweight, language-agnostic pseudocode from architecture research.md or design.md documents produced by the architecture skill, focusing only on the main flow of each component."
 ---
 
 # Pseudocode
 
-Use this skill to translate the main components from an architecture document into clear, language-agnostic pseudocode.
+Use this skill to translate the main components from an architecture document into lightweight, language-agnostic pseudocode.
 
 ## Core Behavior
 
-Pseudocode should read as the main flow of logic — the decisions, branches, and calls that matter to understanding how the component works — not a line-by-line restatement of an implementation. The reader should be able to scan a component in a few seconds and grasp what it does, not trace every field and system call. (See "Pseudocode Style" for guidance on step granularity.)
+Pseudocode should read as the main flow of logic — the decisions, branches, and calls that matter to understanding how the component works. Keep it minimal: the reader should scan a component in a few seconds and grasp what it does.
 
 First identify the input architecture document:
 
-- `research.md`: reverse-engineer the existing system. Read relevant source code and translate actual implementation behavior. Prefer code evidence over architectural intent. If details remain unclear, infer cautiously, add placeholders, and record assumptions.
-- `design.md`: forward-design the proposed system. Expand conceptual architecture into concrete pseudocode. Infer reasonable behavior from design intent, record assumptions, and use placeholders only when implementation cannot be logically derived.
+- `research.md`: reverse-engineer the existing system. Read relevant source code and translate actual implementation behavior. Prefer code evidence over architectural intent.
+- `design.md`: forward-design the proposed system. Expand conceptual architecture into concrete pseudocode based on design intent.
 
-Do not ask the user for clarification in either mode. Resolve ambiguity through the architecture document, source code context, design intent, assumptions, or explicit TODO placeholders.
+Do not ask the user for clarification in either mode. Resolve ambiguity through the architecture document, source code context, and design intent. Do not write production code unless explicitly asked.
 
-When generating pseudocode, include internal state, data structures, interactions, error handling, edge cases, and complexity only when they meet the criteria in **"Deciding What to Include"** below — default to leaving them out otherwise.
+## What to Include
 
-Do not write production code unless explicitly asked.
+Only the main flow:
 
-## Deciding What to Include (Error Handling & Edge Cases)
+- Entry logic: inputs, key decisions, branches, loops, and calls
+- Error or edge paths ONLY when they are the component's core responsibility (failover, retry, rollback, a business validation rule, a valid state transition). Express these inline in MAIN FLOW as ordinary branches, not in separate sections.
 
-Error handling and edge cases are the most common source of bloat in pseudocode — but they are sometimes the entire point of a component. Use this two-step test, in order, for every candidate error/edge case:
+Omit everything else: logging, metrics, generic error propagation, defensive checks, incidental failure handling, assumptions lists, and edge-case catalogs. If a failure path matters, it shows up as an IF branch in the main flow; if it doesn't, it's gone.
 
-```text
-STEP 1 — Is it part of the component's core responsibility or control flow?
-    Does this error/edge case change which path execution takes,
-    or represent a guarantee the component exists to provide
-    (failover, retry, rollback, a valid state transition, a business
-    validation rule)?
-        → YES: include it. It IS the main flow, not an add-on.
-        → NO:  go to Step 2.
+Step granularity: each step names one decision or action, not a line-by-line translation of code. Never restate code field-by-field or check-by-check (e.g. avoid `provider ← spec.provider if string else undefined`); merge such extraction into a single step like "extract and validate fields from modes.rush".
 
-STEP 2 — Would omitting it mislead or confuse the reader about
-          what this component does?
-        → YES: include it.
-        → NO:  omit it.
-```
-
-**Include (this is main flow, not decoration):**
-- Failover / degradation — e.g. primary fails → fall back to secondary
-- Retry with backoff, when retry logic is a core responsibility of the component
-- Rollback or transactional guarantees across multiple steps
-- Error as a valid state transition (e.g. `payment_failed` in an order lifecycle)
-- Business validation rules where each check reflects a distinct requirement
-- Any failure path that a caller must know about to use the component correctly
-
-**Omit (generic, non-local fallback — safe to leave out):**
-- Logging or metrics emitted on failure
-- Generic/default error codes with no distinguishing behavior
-- Transient external errors with no special handling beyond "propagate"
-- Defensive checks for states that should never occur
-- Restating language/runtime exceptions that don't change the component's logic
-
-When in doubt, prefer inclusion for anything a caller or maintainer would need to know to use or trust the component — and omission for anything that only protects against incidental failure.
-
-Do not invent error handling or edge cases to fill out the template — omit the section entirely when the component genuinely has none that pass the test above.
+Block length: if a single PSEUDOCODE block exceeds roughly 30 lines, either raise the abstraction level (merge defensive detail) or split independent paths into separate component blocks (e.g. "resume batch" vs "regenerate batch").
 
 ## Document Structure
 
 Save the generated document as `pseudocode.md` with this structure:
 
 1. `# [System Name] Pseudocode`
-   - A 2-4 sentence intro stating: which architecture document this was translated from (with path), the source system/module name, whether it reflects actual implementation (`research.md`) or proposed design (`design.md`), and the section ordering basis (Primary Flow or dependency order).
+   - A 1-2 sentence intro stating: which architecture document this was translated from (with path), and whether it reflects actual implementation (`research.md`) or proposed design (`design.md`).
 
 2. `## Component Overview`
    - Use a `text` code block.
-   - List extracted components and concise responsibilities.
+   - List extracted components and one-line responsibilities.
 
-3. Component sections
-   - Use `## [Index]. [Section Title]`.
-   - `[Section Title]` must be a narrative phrase, in the same language as the rest of the document's prose, describing what the section covers (English example: "Discovering named agents"), not a bare component name (e.g. not "AgentDiscovery") and not a component name followed by a colon and description. When a section groups multiple components, the title must describe the shared narrative or runtime relationship, not just list the component names.
-   - Order by `Primary Flow`; fall back to dependency order.
-   - Group components by narrative or runtime relationship, not mechanically by table rows.
-   - Immediately below the section title, add a short 1-3 sentence intro paragraph explaining what this section's components do and why they matter to the overall flow, before the first `PSEUDOCODE:` block.
-   - Closely related components may share one section, but each component must still have its own `PSEUDOCODE:` block.
-
-4. `## Main Call Graph`
+3. `## Main Call Graph`
    - Use a `text` code block.
-   - Keep it high-level: show entry point, main components, and major data/control-flow direction. Name an external call or side effect (e.g. "spawns child process") without expanding its specific arguments or flags.
-   - When the graph involves branching, conditional dispatch, parallel execution, or an independent offline/async path, brief inline annotations (a few words, not full sentences) may be added next to the arrow or branch to clarify the trigger or condition. Keep annotations terse — this is a scannable diagram, not a flow description.
-   - Use `├─►` / `└─►` style branching when multiple paths diverge from one component; plain `↓` remains the default for linear flow.
+   - High-level only: entry point, main components, and major control-flow direction. Use `↓` for linear flow, `├─►` / `└─►` for branching, with terse inline annotations (a few words) for triggers or conditions.
+   - Placed before component sections so it serves as a global map and navigation index for the details that follow.
+
+   Branching example (dispatch, parallel execution, offline/async paths):
+
+   ```text
+   Entry
+       │
+       ▼
+   Dispatcher
+       │
+       ├─► ModeA ──► Worker (serial, passes previous result forward)
+       ├─► ModeB ──► Worker ×N (parallel, concurrency-limited)
+       └─► ModeC ──► Worker (single run)
+                        │
+                        ▼
+                     ResultAggregator
+                        │
+                        ├─► on timeout/abort → partial result, status flagged
+                        ▼
+                     Output ──► caller
+
+   [Offline]
+   BackgroundSync ──► External API ──► updates local config
+   ```
+
+   Annotations stay terse (a few words, not full sentences). The `[Offline]` label marks a path independent of the main request lifecycle.
+
+4. Component sections
+   - Use `## [Index]. [Section Title]`, where the title is a short narrative phrase describing what the section covers, in the same language as the document's prose.
+   - Order by primary flow, matching the call graph; fall back to dependency order.
+   - Closely related components may share one section, but each component gets its own `PSEUDOCODE:` block.
 
 ## Output Path
 
 Save the generated pseudocode document in the same directory as the input architecture document, named `pseudocode.md`.
+
+Consistency check before finishing:
+- Every component listed in Component Overview has a matching PSEUDOCODE block, and every component section (including implicit ones like event handlers) appears in Component Overview.
+- Each component's one-line responsibility in the overview matches what its block actually does — do not attribute logic to a component that lives in another component's block.
 
 After writing the file, use this exact phrasing:
 
@@ -95,50 +91,24 @@ After writing the file, use this exact phrasing:
 
 ## Component Pseudocode Template
 
-Each component must use this block format:
+Each component uses this minimal block format:
 
 ```text
 PSEUDOCODE: component name
-PURPOSE: brief explanation
+PURPOSE: one-line explanation
 INPUT: inputName (type), ...
 OUTPUT: result or side effect
 
-ASSUMPTIONS:
-    - assumption 1
-
-MAIN FLOW:
 BEGIN
-    step-by-step logic
+    main flow steps
 END
-
-ERROR HANDLING:
-    - case → behavior
-
-EDGE CASES:
-    - case → behavior
 ```
 
-Use the single-line `INPUT: name (type), ...` form for short parameter lists; switch to a multi-line indented list, or nested sub-fields, once a single line would be hard to read.
-
-Use inline `RETURN error(...)` in MAIN FLOW for validation checks that are local and self-explanatory. Reserve the `ERROR HANDLING` section for cross-cutting, non-local, or externally caused failures (e.g. I/O errors, dependency failures, unexpected process states) that pass the test in "Deciding What to Include" and aren't already obvious from a single IF branch.
-
-Base template fields are a guideline, not a fixed schema: omit `ASSUMPTIONS`, `ERROR HANDLING`, or `EDGE CASES` when the component genuinely has none that pass the inclusion test above, rather than inventing content to fill the section.
-
-Add optional sections only when they materially improve implementation clarity:
-
-- `DATA STRUCTURE`: state, caches, queues, maps, graphs, indexes, or custom records.
-- `INTERACTIONS`: non-trivial calls to components, APIs, files, queues, or processes.
-- `HELPER ROUTINE`: reusable subroutines inside a component. Each helper must declare its own `INPUT:` and `OUTPUT:` line even when nested inside a larger component block.
-- `CONSTANTS`: fixed configuration values, thresholds, or limits referenced by the main flow.
-- `COMPLEXITY`: non-trivial algorithms or important performance constraints.
-- `STATES`, `EVENTS`, `TRANSITIONS`: lifecycle or state-machine components.
-- `REQUEST`, `RESPONSE`, `VALIDATION`, `SIDE EFFECTS`: API or gateway components.
-- `FIELDS`, `RULES`, `EXCEPTIONS`, `PRIORITY ORDER`: validation or rule components.
-- `PATTERN`: a named implementation pattern (e.g. rate limiting, strategy) that structures the whole component — see Logic Design Guidance.
+That is the entire template. No ASSUMPTIONS, ERROR HANDLING, EDGE CASES, COMPLEXITY, or other sections. Sub-logic always uses the `HELPER ROUTINE: name` form with its own `INPUT:` and `OUTPUT:` lines — whether nested inside a component block or standalone. Never invent alternative subroutine formats such as bare `ROUTINE:` blocks.
 
 ## Language & Formatting
 
-- Prose and comments must match the language of the input architecture document.
+- Prose and comments match the language of the input architecture document.
 - Component names, variable names, function names, and data structures remain in English.
 - Pseudocode control keywords use UPPERCASE ENGLISH.
 
@@ -157,153 +127,16 @@ value ← expression
 
 Use `CALL` when invoking something defined elsewhere in this document; omit it for built-in or external operations like `ReadFile(path)`.
 
-Avoid language-specific syntax such as Python, JavaScript, Java, or SQL unless explicitly requested.
+Avoid language-specific syntax (Python, JavaScript, Java, SQL) unless explicitly requested.
 
-Avoid steps so vague that a reader cannot tell what decision or action is happening (e.g. "handle the data"). A step is fine as a single line as long as it names the actual action or condition — it does not need to be broken into branches, loops, or helper routines unless that structure is genuinely part of the logic.
-
-## Logic Design Guidance
-
-Use common implementation patterns when they make the pseudocode clearer or more executable:
-
-- Decision table for prioritized business rules
-- Validation pipeline for field-level and cross-field checks
-- State machine for lifecycles
-- Hash map or set for lookup and deduplication
-- Queue or priority queue for scheduling or traversal
-- Stack for parsing, backtracking, or DFS
-- Trie for prefix search
-- Sliding window, binary search, dynamic programming, or graph traversal for algorithmic logic
-- Token bucket or leaky bucket for rate limiting
-- Strategy pattern when behavior must be interchangeable
-
-When a pattern is central to the component, include one compact block using the formats below.
-
-Example data structure block:
-
-```text
-DATA STRUCTURE: UserCache
-TYPE: LRU cache with TTL
-SIZE: 10,000 entries
-TTL: 5 minutes
-PURPOSE: Reduce repeated user lookups
-
-OPERATIONS:
-    get(userId):        O(1)
-    set(userId, data):  O(1)
-    evict():            O(1)
-```
-
-Example helper routine block:
-
-```text
-HELPER ROUTINE: LoadAgentsFromDir
-PURPOSE: Load and parse all agent definition files in a directory
-INPUT: dir (string), source (string)
-OUTPUT: agents (list of AgentConfig)
-
-BEGIN
-    IF dir does not exist THEN
-        RETURN empty list
-    END IF
-
-    FOR EACH entry IN ReadDirectory(dir)
-        IF entry is not "*.md" THEN
-            CONTINUE
-        END IF
-
-        frontmatter, body ← ParseFrontmatter(ReadFile(entry))
-
-        IF frontmatter.name missing THEN
-            CONTINUE
-        END IF
-
-        ADD AgentConfig { name: frontmatter.name, source: source } to agents
-    END FOR
-
-    RETURN agents
-END
-```
-
-Example algorithm pattern block:
-
-```text
-PATTERN: Rate Limiting — Token Bucket
-
-CONSTANTS:
-    BUCKET_SIZE = 100
-    REFILL_RATE = 10 tokens per second
-
-PSEUDOCODE: CheckRateLimit
-PURPOSE: Limit the rate of a user's repeated actions using a token bucket
-INPUT: userId (string), action (string)
-OUTPUT: allowed (boolean)
-
-MAIN FLOW:
-BEGIN
-    bucketKey ← userId + ":" + action
-    bucket ← Buckets.get(bucketKey)
-
-    IF bucket is null THEN
-        bucket ← {tokens: BUCKET_SIZE, lastRefill: Now()}
-        Buckets.set(bucketKey, bucket)
-    END IF
-
-    elapsed ← Now() - bucket.lastRefill
-    bucket.tokens ← MIN(bucket.tokens + elapsed * REFILL_RATE, BUCKET_SIZE)
-    bucket.lastRefill ← Now()
-
-    IF bucket.tokens >= 1 THEN
-        bucket.tokens ← bucket.tokens - 1
-        RETURN true
-    END IF
-
-    RETURN false
-END
-
-COMPLEXITY:
-    TIME:  O(1)
-    SPACE: O(n), where n is the number of active user/action buckets
-```
-
-Example design pattern block:
-
-```text
-PATTERN: Strategy — Authentication
-
-INTERFACE: AuthStrategy
-    AUTHENTICATE(credentials) → User or Error
-
-STRATEGY: EmailPasswordAuth
-    AUTHENTICATE(credentials):
-    BEGIN
-        CALL ValidateEmailAndPassword(credentials)
-        CALL VerifyPasswordHash(credentials)
-        RETURN user or error
-    END
-
-STRATEGY: OAuthAuth
-    AUTHENTICATE(credentials):
-    BEGIN
-        CALL ExchangeOAuthToken(credentials)
-        CALL ValidateProviderResponse(credentials)
-        RETURN user or error
-    END
-
-CONTEXT: AuthContext
-    selectedStrategy: AuthStrategy
-
-    EXECUTE(credentials):
-    BEGIN
-        RETURN selectedStrategy.AUTHENTICATE(credentials)
-    END
-```
+Each step must name an actual action or decision. Avoid vague steps like "handle the data", but don't break a clear single action into nested branches just to look thorough.
 
 ## Minimal Example
 
 ````markdown
 # RequestRouter Pseudocode
 
-This document translates the main components from `research.md` into language-agnostic pseudocode. Source system: example request routing service. Derived from actual implementation behavior, sections ordered by Primary Flow.
+Translated from `research.md`. Reflects actual implementation behavior.
 
 ## Component Overview
 
@@ -315,9 +148,17 @@ COMPONENTS:
         - Executes the selected task
 ```
 
-## 1. Routing and executing a request
+## Main Call Graph
 
-RequestRouter validates the incoming request and dispatches it to a Worker for execution.
+```text
+User
+    ↓
+RequestRouter
+    ├─► valid type   ──► Worker ──► Response
+    └─► missing type ──► error
+```
+
+## 1. Routing and executing a request
 
 ```text
 PSEUDOCODE: RequestRouter
@@ -325,69 +166,20 @@ PURPOSE: Validate request and select execution path
 INPUT: request (Request)
 OUTPUT: response (Response)
 
-ASSUMPTIONS:
-    - request has already been parsed
-
-MAIN FLOW:
 BEGIN
     IF request.type is missing THEN
         RETURN error("request.type is required")
     END IF
 
-    selectedWorker ← CALL ResolveWorker(request.type)
-    RETURN CALL Worker.Execute(selectedWorker, request.payload)
+    worker ← CALL ResolveWorker(request.type)
+    RETURN CALL Worker.Execute(worker, request.payload)
 END
-
-ERROR HANDLING:
-    - Worker.Execute fails or times out → return internal error, do not leak request payload
-
-EDGE CASES:
-    - empty payload → continue only if worker allows it
 ```
-
-## Main Call Graph
-
-```text
-User
-    ↓
-RequestRouter
-    ↓
-Worker
-    ↓
-Response
-```
-
-### Main Call Graph — Branching Example
-
-The Main Call Graph above shows the linear case. For architectures with branching dispatch, parallel execution, or independent offline/async paths, use `├─►`/`└─►` branching and brief inline annotations:
-
-```text
-Entry
-    │
-    ▼
-Dispatcher
-    │
-    ├─► ModeA ──► Worker (serial, passes previous result forward)
-    ├─► ModeB ──► Worker ×N (parallel, concurrency-limited)
-    └─► ModeC ──► Worker (single run)
-                     │
-                     ▼
-                  ResultAggregator
-                     │
-                     ├─► on timeout/abort → partial result, status flagged
-                     ▼
-                  Output ──► caller
-
-[Offline]
-BackgroundSync ──► External API ──► updates local config
-```
-
-Annotations stay terse — a few words, not full sentences. The `[Offline]` label marks a path independent of the main request lifecycle.
 ````
 
-## Example: Error Handling as Main Flow
+## Example: Error Path as Main Flow
 
-Not all error handling is peripheral. When a component's core responsibility is resilience itself, the "error path" is the main flow, not a footnote:
+When resilience IS the component's job, the error path stays inline in the main flow:
 
 ```text
 PSEUDOCODE: UserLookupService
@@ -395,7 +187,6 @@ PURPOSE: Resolve a user record, tolerating primary datastore failure
 INPUT: userId (string)
 OUTPUT: user (User) or error
 
-MAIN FLOW:
 BEGIN
     result ← CALL PrimaryDB.Query(userId)
 
@@ -410,5 +201,3 @@ BEGIN
     RETURN result
 END
 ```
-
-Here, the failover to `SecondaryDB` is not "error handling" tucked away in a separate section — it IS what this component does, so it belongs directly in `MAIN FLOW`. Compare this to a component where a failed external call simply propagates an error with no distinguishing behavior; in that case, a one-line entry under `ERROR HANDLING` (or omitting it entirely) is enough.
