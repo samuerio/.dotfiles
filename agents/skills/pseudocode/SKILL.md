@@ -1,15 +1,18 @@
 ---
 name: pseudocode
-description: "Generate lightweight, language-agnostic pseudocode from architecture research.md or design.md documents produced by the architecture skill, focusing only on the components involved in the system's main flow."
+description: "Generate lightweight, language-agnostic pseudocode from architecture research.md or design.md documents produced by the architecture skill, focusing only on the components involved in the architecture document's Primary Flow."
 ---
 
 # Pseudocode
 
-Use this skill to translate the components involved in the system's main flow, as extracted from an architecture document, into lightweight, language-agnostic pseudocode.
+Use this skill to translate the components involved in the architecture document's Primary Flow section into lightweight, language-agnostic pseudocode.
 
 ## Core Behavior
 
 Pseudocode should read as the main flow of logic — the decisions, branches, and calls that matter to understanding how the component works. Keep it minimal: the reader should scan a component in a few seconds and grasp what it does.
+
+
+The architecture document's Primary Flow is expressed through the main components' PSEUDOCODE blocks, not as a separate narrative or diagram — the Main Call Graph is only a navigation index (see below), while the actual branch logic and control flow, translated from the Primary Flow section, live inside each component's block, connected via CALL.
 
 First identify the input architecture document:
 
