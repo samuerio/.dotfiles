@@ -120,13 +120,11 @@ END
 
 That is the entire template. No ASSUMPTIONS, ERROR HANDLING, EDGE CASES, COMPLEXITY, or other sections. Sub-logic always uses the `HELPER ROUTINE: name` form with its own `INPUT:` and `OUTPUT:` lines — whether nested inside a component block or standalone. Never invent alternative subroutine formats such as bare `ROUTINE:` blocks.
 
-## Language & Formatting
+## Pseudocode Style
 
 - Prose and comments match the language of the input architecture document.
 - Component names, variable names, function names, and data structures remain in English.
 - Pseudocode control keywords use UPPERCASE ENGLISH.
-
-## Pseudocode Style
 
 Use:
 
@@ -147,7 +145,9 @@ Avoid language-specific syntax (Python, JavaScript, Java, SQL) unless explicitly
 
 Each step must name an actual action or decision. Avoid vague steps like "handle the data", but don't break a clear single action into nested branches just to look thorough.
 
-## Minimal Example
+## Examples
+
+### Minimal Example
 
 ````markdown
 # RequestRouter Pseudocode
@@ -193,7 +193,7 @@ END
 ```
 ````
 
-## Example: Error Path as Main Flow
+### Error Path as Main Flow
 
 When resilience IS the component's job, the error path stays inline in the main flow:
 
