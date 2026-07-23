@@ -1,11 +1,11 @@
 ---
 name: pseudocode
-description: "Generate lightweight, language-agnostic pseudocode from architecture research.md or design.md documents produced by the architecture skill, focusing only on the main flow of each component."
+description: "Generate lightweight, language-agnostic pseudocode from architecture research.md or design.md documents produced by the architecture skill, focusing only on the components involved in the system's main flow."
 ---
 
 # Pseudocode
 
-Use this skill to translate the main components from an architecture document into lightweight, language-agnostic pseudocode.
+Use this skill to translate the components involved in the system's main flow, as extracted from an architecture document, into lightweight, language-agnostic pseudocode.
 
 ## Core Behavior
 
@@ -24,6 +24,8 @@ Do not ask the user for clarification in either mode. Resolve ambiguity through 
 ## What to Include
 
 Only the main flow:
+
+- A component's main flow is the sequence of decisions and outbound CALLs that another engineer would need to trace when following a flow end-to-end. If a step neither branches nor calls another component nor mutates observable state, it probably doesn't belong. (Observable means a side effect visible to other components or callers, such as a store write, an emitted event, or a change to shared state; a local variable assignment that only feeds the next branch does not qualify.)
 
 - Entry logic: inputs, key decisions, branches, loops, and calls
 - Error or edge paths ONLY when they are the component's core responsibility (failover, retry, rollback, a business validation rule, a valid state transition). Express these inline in MAIN FLOW as ordinary branches, not in separate sections.
@@ -49,7 +51,8 @@ Save the generated document as `pseudocode.md` with this structure:
 
 3. `## Main Call Graph`
    - Use a `text` code block.
-   - High-level only: entry point, main components, and major control-flow direction. Use `↓` for linear flow, `├─►` / `└─►` for branching, with terse inline annotations (a few words) for triggers or conditions.
+   - High-level only: entry point, main components, and major control-flow direction. Use `↓` for linear flow, `├─►` / `└─►` for branching, with terse inline annotations (a few words).
+   - Call Graph is a navigation index, not a flow description. Annotate with trigger conditions and execution mode (serial/parallel/async) only; branch outcomes and step-level logic live in the PSEUDOCODE blocks.
    - Placed before component sections so it serves as a global map and navigation index for the details that follow.
 
    Branching example (dispatch, parallel execution, offline/async paths):
@@ -60,14 +63,14 @@ Save the generated document as `pseudocode.md` with this structure:
        ▼
    Dispatcher
        │
-       ├─► ModeA ──► Worker (serial, passes previous result forward)
+       ├─► ModeA ──► Worker (serial)
        ├─► ModeB ──► Worker ×N (parallel, concurrency-limited)
        └─► ModeC ──► Worker (single run)
                         │
                         ▼
                      ResultAggregator
                         │
-                        ├─► on timeout/abort → partial result, status flagged
+                        ├─► on timeout/abort ──► caller
                         ▼
                      Output ──► caller
 
@@ -77,9 +80,12 @@ Save the generated document as `pseudocode.md` with this structure:
 
    Annotations stay terse (a few words, not full sentences). The `[Offline]` label marks a path independent of the main request lifecycle.
 
-4. Component sections
+4. Top-level orchestrator section
+   - When a single top-level entry/orchestrator owns real branching decisions (not a thin forwarding dispatcher), its component section SHOULD come first, and its PSEUDOCODE block should express the main call sequence via CALL invocations to other components. This block is the pseudocode counterpart of the Main Call Graph, surfacing the branch conditions the diagram only annotates. Architectures with multiple independent entry points (parallel request paths, offline/background workflows) do not synthesize a wrapper; keep each entry as its own component section, ordered by primary flow.
+
+5. Component sections
    - Use `## [Index]. [Section Title]`, where the title is a short narrative phrase describing what the section covers, in the same language as the document's prose.
-   - Order by primary flow, matching the call graph; fall back to dependency order.
+   - Order remaining component sections by primary flow, matching the call graph; fall back to dependency order.
    - Closely related components may share one section, but each component gets its own `PSEUDOCODE:` block.
 
 ## Output Path
@@ -131,6 +137,8 @@ value ← expression
 ```
 
 Use `CALL` when invoking something defined elsewhere in this document; omit it for built-in or external operations like `ReadFile(path)`.
+
+When the invocation targets another component defined in this document, it MUST use `CALL ComponentName(...)` or `CALL ComponentName.Method(...)`, matching the name in Component Overview exactly. Do not write cross-component calls as bare verbs (e.g. write `CALL Dispatcher(...)` instead of `dispatch(...)`). This keeps the main call narrative consistent and traceable by name. Calls to `HELPER ROUTINE` definitions keep the bare `CALL HelperName(...)` form and are out of scope here.
 
 Avoid language-specific syntax (Python, JavaScript, Java, SQL) unless explicitly requested.
 
