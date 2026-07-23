@@ -44,6 +44,8 @@ Save the generated document as `pseudocode.md` with this structure:
 2. `## Component Overview`
    - Use a `text` code block.
    - List extracted components and one-line responsibilities.
+   - Include a component only if it owns one of the following: a meaningful entry point (with decision/branch logic, not a thin forwarding shell); a decision boundary; orchestration across other components; a state transition; or a background/offline workflow.
+   - Do not include passive data structures, constants/config holders, pure utility functions with no control-flow ownership, or thin wrappers that only forward arguments without changing flow.
 
 3. `## Main Call Graph`
    - Use a `text` code block.
