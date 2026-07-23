@@ -14,6 +14,9 @@ Pseudocode should read as the main flow of logic — the decisions, branches, an
 First identify the input architecture document:
 
 - `research.md`: reverse-engineer the existing system. Read relevant source code and translate actual implementation behavior. Prefer code evidence over architectural intent.
+  - Start from entrypoints, orchestrators, handlers, services, and state transitions referenced by the architecture document.
+  - Follow dependencies only until the main control flow is clear.
+  - Ignore tests, mocks, generated files, and utility-only modules unless they directly affect control flow.
 - `design.md`: forward-design the proposed system. Expand conceptual architecture into concrete pseudocode based on design intent.
 
 Do not ask the user for clarification in either mode. Resolve ambiguity through the architecture document, source code context, and design intent. Do not write production code unless explicitly asked.
