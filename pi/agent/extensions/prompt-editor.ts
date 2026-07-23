@@ -1037,6 +1037,27 @@ async function renameModeUI(
     }
 }
 
+// ModelSelectorComponent expects ModelRuntime but ctx exposes ModelRegistry.
+// This adapter bridges the two so we don't need to access internal runtime.
+function createModelRuntimeFromRegistry(
+    registry: ExtensionContext["modelRegistry"],
+): {
+    getAvailableSnapshot(): readonly any[];
+    getModel(provider: string, modelId: string): any | undefined;
+    refresh(options?: { signal?: AbortSignal }): Promise<{ aborted: boolean; errors: Map<string, string> }>;
+    getError(): string | undefined;
+} {
+    return {
+        getAvailableSnapshot: () => registry.getAvailable(),
+        getModel: (provider, modelId) => registry.find(provider, modelId),
+        refresh: async (_options) => {
+            await registry.refresh();
+            return { aborted: false, errors: new Map() };
+        },
+        getError: () => registry.getError(),
+    };
+}
+
 async function pickModelForModeUI(
     ctx: ExtensionContext,
     spec: ModeSpec,
@@ -1057,7 +1078,7 @@ async function pickModelForModeUI(
                 tui,
                 currentModel,
                 settingsManager,
-                ctx.modelRegistry as any,
+                createModelRuntimeFromRegistry(ctx.modelRegistry),
                 scopedModels as any,
                 (model) =>
                     done({ provider: model.provider, modelId: model.id }),
