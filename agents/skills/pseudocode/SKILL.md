@@ -152,7 +152,7 @@ Each step must name an actual action or decision, not a line-by-line translation
 ````markdown
 # RequestRouter Pseudocode
 
-Translated from `research.md`. Reflects actual implementation behavior.
+Translated from `docs/architecture/research.md`. Reflects actual implementation behavior.
 
 ## Component Overview
 
@@ -179,6 +179,7 @@ RequestRouter
 ```text
 PSEUDOCODE: RequestRouter
 PURPOSE: Validate request and select execution path
+SOURCE: src/router/request_router.ts — handleRequest
 INPUT: request (Request)
 OUTPUT: response (Response)
 
@@ -189,6 +190,30 @@ BEGIN
 
     worker ← CALL ResolveWorker(request.type)
     RETURN CALL Worker.Execute(worker, request.payload)
+END
+
+HELPER ROUTINE: ResolveWorker
+SOURCE: src/router/worker_registry.ts — resolveWorker
+INPUT: type (string)
+OUTPUT: worker (Worker instance)
+
+BEGIN
+    RETURN registry.lookup(type)
+END
+```
+
+## 2. Executing the selected task
+
+```text
+PSEUDOCODE: Worker
+PURPOSE: Execute the task assigned by RequestRouter
+SOURCE: src/worker/worker.ts — execute
+INPUT: worker (Worker instance), payload (any)
+OUTPUT: response (Response)
+
+BEGIN
+    result ← worker.run(payload)
+    RETURN result
 END
 ```
 ````
@@ -216,33 +241,3 @@ BEGIN
 END
 ```
 
-### Component and Helper Routine with SOURCE
-
-When translating from `research.md`, both a component and its helper routines may carry `SOURCE`:
-
-```text
-PSEUDOCODE: InlineScanFilter
-PURPOSE: Remove self-authored blocks from a ripgrep scan before presenting results
-SOURCE: pi/agent/extensions/inline.ts — scanForInlineMarkers
-INPUT: rawScan (string), selfVariants (string[])
-OUTPUT: filtered scan (string)
-
-BEGIN
-    filtered ← CALL FilterSelf(rawScan, selfVariants)
-    RETURN filtered
-END
-
-HELPER ROUTINE: FilterSelf
-SOURCE: pi/agent/extensions/inline.ts — filterSelfFromRgScan + selfPathVariants
-INPUT: scan (string), selfVariants (string[])
-OUTPUT: scan with self-source blocks removed
-
-BEGIN
-    FOR EACH block in scan
-        IF block.path matches any selfVariants THEN
-            remove block from scan
-        END IF
-    END FOR
-    RETURN scan
-END
-```
