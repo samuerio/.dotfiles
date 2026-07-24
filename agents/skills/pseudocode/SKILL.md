@@ -20,7 +20,7 @@ First identify the input architecture document:
   - Start from entrypoints, orchestrators, handlers, services, and state transitions referenced by the architecture document.
   - Follow dependencies only until the main control flow is clear.
   - Ignore tests, mocks, generated files, and utility-only modules unless they directly affect control flow.
-  - Record the originating file for each component via the `SOURCE:` field in its PSEUDOCODE block, so a reader can jump from pseudocode back to the real implementation.
+  - Record the source file for each component so readers can trace back to the real implementation.
 - `design.md`: forward-design the proposed system. Expand conceptual architecture into concrete pseudocode based on design intent.
 
 Do not ask the user for clarification in either mode. Resolve ambiguity through the architecture document, source code context, and design intent. Do not write production code unless explicitly asked.
@@ -29,16 +29,12 @@ Do not ask the user for clarification in either mode. Resolve ambiguity through 
 
 Only the main flow:
 
-- A component's main flow is the sequence of decisions and outbound CALLs that another engineer would need to trace when following a flow end-to-end. If a step neither branches nor calls another component nor mutates observable state, it probably doesn't belong. (Observable means a side effect visible to other components or callers, such as a store write, an emitted event, or a change to shared state; a local variable assignment that only feeds the next branch does not qualify.)
+- A component's main flow is the sequence of decisions and outbound CALLs that another engineer would need to trace when following a flow end-to-end. If a step neither branches nor calls another component nor mutates observable state, it probably doesn't belong. (Observable means a side effect visible to other components or callers, such as a store write, an emitted event, or a change to shared state; a local variable assignment that only feeds the next branch does not qualify.) If a single PSEUDOCODE block exceeds roughly 30 lines, raise the abstraction level (merge defensive detail) or split independent paths into separate component blocks (e.g. "resume batch" vs "regenerate batch").
 
 - Entry logic: inputs, key decisions, branches, loops, and calls
 - Error or edge paths ONLY when they are the component's core responsibility (failover, retry, rollback, a business validation rule, a valid state transition). Express these inline in MAIN FLOW as ordinary branches, not in separate sections.
 
 Omit everything else: logging, metrics, generic error propagation, defensive checks, incidental failure handling, assumptions lists, and edge-case catalogs. If a failure path matters, it shows up as an IF branch in the main flow; if it doesn't, it's gone.
-
-Step granularity: each step names one decision or action, not a line-by-line translation of code. Never restate code field-by-field or check-by-check (e.g. avoid `provider ← spec.provider if string else undefined`); merge such extraction into a single step like "extract and validate fields from modes.rush".
-
-Block length: if a single PSEUDOCODE block exceeds roughly 30 lines, either raise the abstraction level (merge defensive detail) or split independent paths into separate component blocks (e.g. "resume batch" vs "regenerate batch").
 
 ## Document Structure
 
@@ -147,7 +143,7 @@ When the invocation targets another component defined in this document, it MUST 
 
 Avoid language-specific syntax (Python, JavaScript, Java, SQL) unless explicitly requested.
 
-Each step must name an actual action or decision. Avoid vague steps like "handle the data", but don't break a clear single action into nested branches just to look thorough.
+Each step must name an actual action or decision, not a line-by-line translation of code. Avoid vague steps like "handle the data", and never restate code field-by-field or check-by-check (e.g. avoid `provider ← spec.provider if string else undefined`); merge such extraction into a single step like "extract and validate fields from modes.rush". Don't break a clear single action into nested branches just to look thorough.
 
 ## Examples
 
