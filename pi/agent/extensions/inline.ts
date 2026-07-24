@@ -28,8 +28,6 @@ A genuine marker must:
 - Start the text of a code comment.
 - Be immediately followed by a change request, slash command, or question.
 
-Ignore markers inside strings, templates, prose, logs, documentation, or text that only explains the marker convention.
-
 For each genuine marker, output exactly:
 
 <pi-task file="RELATIVE_PATH" line="MATCH_LINE">
