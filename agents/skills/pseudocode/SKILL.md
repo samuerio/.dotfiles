@@ -19,9 +19,11 @@ First identify the input architecture document:
 | Aspect | `research.md` (reverse-engineering) | `design.md` (forward-design) |
 |--------|------|------|
 | Approach | Read source code, translate actual implementation behavior. Prefer code evidence over architectural intent. | Expand conceptual architecture into concrete pseudocode based on design intent. |
-| Starting point | Entrypoints, orchestrators, handlers, services, state transitions referenced by the architecture document | — |
-| Scope | Follow dependencies only until main control flow is clear. Ignore tests, mocks, generated files, utility-only modules | — |
+| Starting point | Entrypoints, orchestrators, handlers, services, state transitions referenced by the architecture document | Primary Flow, component responsibilities, state transitions, API contracts, background workflows described in the design |
+| Scope | Follow dependencies only until main control flow is clear. Ignore tests, mocks, generated files, utility-only modules | Include only components participating in the proposed Primary Flow. Omit alternatives, future ideas, and implementation details not required by the flow |
 | `SOURCE:` field | Include — point to primary file so readers can trace back to real implementation (format in Template section) | Omit — no existing implementation to point to |
+
+If no architecture document is found, do not create `pseudocode.md`; report that no `research.md` or `design.md` was found.
 
 Do not ask the user for clarification in either mode. Resolve ambiguity through the architecture document, source code context, and design intent. Do not write production code unless explicitly asked.
 
