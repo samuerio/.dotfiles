@@ -16,12 +16,12 @@ The architecture document's Primary Flow is expressed through the main component
 
 First identify the input architecture document:
 
-- `research.md`: reverse-engineer the existing system. Read relevant source code and translate actual implementation behavior. Prefer code evidence over architectural intent.
-  - Start from entrypoints, orchestrators, handlers, services, and state transitions referenced by the architecture document.
-  - Follow dependencies only until the main control flow is clear.
-  - Ignore tests, mocks, generated files, and utility-only modules unless they directly affect control flow.
-  - Record the source file for each component so readers can trace back to the real implementation.
-- `design.md`: forward-design the proposed system. Expand conceptual architecture into concrete pseudocode based on design intent.
+| Aspect | `research.md` (reverse-engineering) | `design.md` (forward-design) |
+|--------|------|------|
+| Approach | Read source code, translate actual implementation behavior. Prefer code evidence over architectural intent. | Expand conceptual architecture into concrete pseudocode based on design intent. |
+| Starting point | Entrypoints, orchestrators, handlers, services, state transitions referenced by the architecture document | — |
+| Scope | Follow dependencies only until main control flow is clear. Ignore tests, mocks, generated files, utility-only modules | — |
+| `SOURCE:` field | Include — point to primary file so readers can trace back to real implementation (format in Template section) | Omit — no existing implementation to point to |
 
 Do not ask the user for clarification in either mode. Resolve ambiguity through the architecture document, source code context, and design intent. Do not write production code unless explicitly asked.
 
@@ -88,13 +88,13 @@ Save the generated document as `pseudocode.md` with this structure:
    - Order remaining component sections by primary flow, matching the call graph; fall back to dependency order.
    - Closely related components may share one section, but each component gets its own `PSEUDOCODE:` block.
 
+**Before finishing**, verify:
+- Every component listed in Component Overview has a matching PSEUDOCODE block, and every component section (including implicit ones like event handlers) appears in Component Overview.
+- Each component's one-line responsibility in the overview matches what its block actually does — do not attribute logic to a component that lives in another component's block.
+
 ## Output Path
 
 Save the generated pseudocode document in the same directory as the input architecture document, named `pseudocode.md`.
-
-Consistency check before finishing:
-- Every component listed in Component Overview has a matching PSEUDOCODE block, and every component section (including implicit ones like event handlers) appears in Component Overview.
-- Each component's one-line responsibility in the overview matches what its block actually does — do not attribute logic to a component that lives in another component's block.
 
 After writing the file, use this exact phrasing:
 
@@ -107,7 +107,7 @@ Each component uses this minimal block format:
 ```text
 PSEUDOCODE: component name
 PURPOSE: one-line explanation
-SOURCE: relative/path/to/file.ext — symbolName (research.md mode only; omit for design.md)
+SOURCE: relative/path/to/file.ext — symbolName
 INPUT: inputName (type), ...
 OUTPUT: result or side effect
 
@@ -116,7 +116,7 @@ BEGIN
 END
 ```
 
-`SOURCE` is optional and applies only when translating from `research.md`: point to the primary file where this component's or routine's logic was found, in the form `path/to/file.ext` or `path/to/file.ext — symbolName`. When a component or helper consolidates multiple functions, list them joined with ` + ` (e.g. `path/to/file.ts — filterSelfFromRgScan + selfPathVariants`). Omit it entirely in `design.md` mode, since there is no existing implementation to point to.
+`SOURCE`: format details — point to the primary file where this component's or routine's logic was found, in the form `path/to/file.ext` or `path/to/file.ext — symbolName`. When a component or helper consolidates multiple functions, list them joined with ` + ` (e.g. `path/to/file.ts — filterSelfFromRgScan + selfPathVariants`). See mode comparison table above for when to include vs omit this field.
 
 That is the entire template, aside from the optional SOURCE line above (a single line, not its own block). Sub-logic always uses the `HELPER ROUTINE: name` form with its own optional `SOURCE:`, `INPUT:`, and `OUTPUT:` lines — whether nested inside a component block or standalone.
 
@@ -194,8 +194,6 @@ END
 ````
 
 ### Error Path as Main Flow
-
-When resilience IS the component's job, the error path stays inline in the main flow:
 
 ```text
 PSEUDOCODE: UserLookupService
