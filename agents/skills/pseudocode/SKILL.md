@@ -20,6 +20,7 @@ First identify the input architecture document:
   - Start from entrypoints, orchestrators, handlers, services, and state transitions referenced by the architecture document.
   - Follow dependencies only until the main control flow is clear.
   - Ignore tests, mocks, generated files, and utility-only modules unless they directly affect control flow.
+  - Record the originating file for each component via the `SOURCE:` field in its PSEUDOCODE block, so a reader can jump from pseudocode back to the real implementation.
 - `design.md`: forward-design the proposed system. Expand conceptual architecture into concrete pseudocode based on design intent.
 
 Do not ask the user for clarification in either mode. Resolve ambiguity through the architecture document, source code context, and design intent. Do not write production code unless explicitly asked.
@@ -110,6 +111,7 @@ Each component uses this minimal block format:
 ```text
 PSEUDOCODE: component name
 PURPOSE: one-line explanation
+SOURCE: relative/path/to/file.ext — symbolName (research.md mode only; omit for design.md)
 INPUT: inputName (type), ...
 OUTPUT: result or side effect
 
@@ -118,7 +120,9 @@ BEGIN
 END
 ```
 
-That is the entire template. No ASSUMPTIONS, ERROR HANDLING, EDGE CASES, COMPLEXITY, or other sections. Sub-logic always uses the `HELPER ROUTINE: name` form with its own `INPUT:` and `OUTPUT:` lines — whether nested inside a component block or standalone. Never invent alternative subroutine formats such as bare `ROUTINE:` blocks.
+`SOURCE` is optional and applies only when translating from `research.md`: point to the primary file where this component's or routine's logic was found, in the form `path/to/file.ext` or `path/to/file.ext — symbolName`. When a component or helper consolidates multiple functions, list them joined with ` + ` (e.g. `path/to/file.ts — filterSelfFromRgScan + selfPathVariants`). Omit it entirely in `design.md` mode, since there is no existing implementation to point to.
+
+That is the entire template, aside from the optional SOURCE line above (a single line, not its own block). Sub-logic always uses the `HELPER ROUTINE: name` form with its own `INPUT:` and `OUTPUT:` lines — whether nested inside a component block or standalone. In `research.md` mode, a `HELPER ROUTINE` may carry the same optional `SOURCE:` line as a component (see template below), formatted as `path — symbol1 + symbol2` when the routine consolidates multiple functions.
 
 ## Pseudocode Style
 
