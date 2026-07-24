@@ -9,7 +9,7 @@
     },
     "rush": {
       "provider": "opencode-go",
-      "modelId": "qwen3.6-plus",
+      "modelId": "qwen3.7-plus",
       "thinkingLevel": "high"
     },
     "smart": {
