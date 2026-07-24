@@ -122,7 +122,7 @@ END
 
 `SOURCE` is optional and applies only when translating from `research.md`: point to the primary file where this component's or routine's logic was found, in the form `path/to/file.ext` or `path/to/file.ext — symbolName`. When a component or helper consolidates multiple functions, list them joined with ` + ` (e.g. `path/to/file.ts — filterSelfFromRgScan + selfPathVariants`). Omit it entirely in `design.md` mode, since there is no existing implementation to point to.
 
-That is the entire template, aside from the optional SOURCE line above (a single line, not its own block). Sub-logic always uses the `HELPER ROUTINE: name` form with its own `INPUT:` and `OUTPUT:` lines — whether nested inside a component block or standalone. In `research.md` mode, a `HELPER ROUTINE` may carry the same optional `SOURCE:` line as a component, in the same `path/to/file.ext — symbolName` form (joined with ` + ` when it consolidates multiple functions).
+That is the entire template, aside from the optional SOURCE line above (a single line, not its own block). Sub-logic always uses the `HELPER ROUTINE: name` form with its own optional `SOURCE:`, `INPUT:`, and `OUTPUT:` lines — whether nested inside a component block or standalone.
 
 ## Pseudocode Style
 
