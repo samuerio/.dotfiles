@@ -1,31 +1,37 @@
 ---
 name: pseudocode
-description: "Generate lightweight, language-agnostic pseudocode from architecture research.md or design.md documents produced by the architecture skill, focusing only on the components involved in the architecture document's Primary Flow."
+description: "Generate lightweight, language-agnostic pseudocode describing a system's Primary Flow, either from existing code (research) or a proposed design (design). Identifies which mode applies from conversation; a supporting research/design document narrows the work if referenced, but none is required."
 ---
 
 # Pseudocode
 
-Use this skill to translate the components involved in the architecture document's Primary Flow section into lightweight, language-agnostic pseudocode.
+Use this skill to translate the components involved in a Primary Flow into lightweight, language-agnostic pseudocode.
 
 ## Core Behavior
 
 Pseudocode should read as the main flow of logic — the decisions, branches, and calls that matter to understanding how the component works. Keep it minimal: the reader should scan a component in a few seconds and grasp what it does.
 
+The Primary Flow is expressed through the main components' PSEUDOCODE blocks, not as a separate narrative or diagram — the Main Call Graph is only a navigation index (see below), while the actual branch logic and control flow live inside each component's block, connected via CALL.
 
-The architecture document's Primary Flow is expressed through the main components' PSEUDOCODE blocks, not as a separate narrative or diagram — the Main Call Graph is only a navigation index (see below), while the actual branch logic and control flow, translated from the Primary Flow section, live inside each component's block, connected via CALL.
+## Step 0 — Identify Mode
 
-First identify the input architecture document:
-
-| Aspect | `research.md` (reverse-engineering) | `design.md` (forward-design) |
+| Aspect | Research | Design |
 |--------|------|------|
-| Approach | Read source code, translate actual implementation behavior. Prefer code evidence over architectural intent. | Expand conceptual architecture into concrete pseudocode based on design intent. |
-| Starting point | Entrypoints, orchestrators, handlers, services, state transitions referenced by the architecture document | Primary Flow, component responsibilities, state transitions, API contracts, background workflows described in the design |
-| Scope | Follow dependencies only until main control flow is clear. Ignore tests, mocks, generated files, utility-only modules | Include only components participating in the proposed Primary Flow. Omit alternatives, future ideas, and implementation details not required by the flow |
-| `SOURCE:` field | Include — point to primary file so readers can trace back to real implementation (format in Template section) | Omit — no existing implementation to point to |
+| Trigger | Conversation expresses intent to analyze or document an **existing codebase's actual behavior**. | Conversation expresses intent to **design a new flow, feature, or system** from a plan/spec/requirement. |
+| Approach | Read source code, translate actual implementation behavior. Prefer code evidence over stated intent — if a referenced document and the code disagree, the code wins. | Expand the proposed flow into concrete pseudocode based on design intent, using any referenced document plus conversation to fill in reasoning. |
+| Starting point | Entrypoints, orchestrators, handlers, services, state transitions — located by exploring the codebase for the flow described in conversation (and in any referenced document, if one narrows the search). | Primary Flow, component responsibilities, and state transitions — taken from conversation and any referenced document. |
+| Scope | Follow dependencies only until main control flow is clear. Ignore tests, mocks, generated files, utility-only modules. | Include only components participating in the proposed Primary Flow. Omit alternatives, future ideas, implementation details not required by the flow. |
+| `SOURCE:` field | Include — point to the file where the logic was found. | Omit — no existing implementation to point to. |
 
-If no architecture document is found, do not create `pseudocode.md`; report that no `research.md` or `design.md` was found.
+If neither trigger clearly applies, don't assume — ask the user which mode applies as part of the clarifying questions below.
 
-Do not ask the user for clarification in either mode. Resolve ambiguity through the architecture document, source code context, and design intent. Do not write production code unless explicitly asked.
+If the user references a document describing the flow (`research.md`, `design.md`, a spec, or a plan file — from any source), use it as input to whichever mode applies: it narrows exploration in research, or reduces what needs clarifying in design, and its directory becomes the default output location (see Output Path).
+
+### Clarification Rule
+
+Ask questions only when something can't be resolved by exploring the codebase or a referenced document, and would change the branch structure of the pseudocode (e.g., whether a failure path retries or aborts, which component owns a boundary decision, what triggers a state transition) — not naming, formatting, or anything else that doesn't affect control flow. If the mode itself is unclear, that's one of the questions too.
+
+Ask clear, concrete questions. For each question, provide your recommended answer based on context from the codebase or common conventions. Wait for my confirmation or corrections before drafting any structured description.
 
 ## What to Include
 
@@ -43,7 +49,7 @@ Omit everything else: logging, metrics, generic error propagation, defensive che
 Save the generated document as `pseudocode.md` with this structure:
 
 1. `# [System Name] Pseudocode`
-   - A 1-2 sentence intro stating: which architecture document this was translated from (with path), and whether it reflects actual implementation (`research.md`) or proposed design (`design.md`).
+   - A 1-2 sentence intro stating: the source of the Primary Flow — either the input document (with path), or "identified from conversation" — and whether it reflects actual implementation (research) or proposed design (design).
 
 2. `## Component Overview`
    - Use a `text` code block.
@@ -96,7 +102,8 @@ Save the generated document as `pseudocode.md` with this structure:
 
 ## Output Path
 
-Save the generated pseudocode document in the same directory as the input architecture document, named `pseudocode.md`.
+- **A referenced document exists** (research.md, design.md, spec, or plan file the user pointed to): save `pseudocode.md` in the same directory as that document.
+- **No document**: write to a timestamped directory: `.pi/pseudocode/[YYYYMMDD-HHMMSS]-[mode]-[slug]/pseudocode.md`, where the timestamp is taken when this skill runs, `[mode]` is `research` or `design`, and the kebab-case slug is derived from the identified Primary Flow (e.g., `.pi/pseudocode/20260725-143000-research-user-login-auth/pseudocode.md`).
 
 After writing the file, use this exact phrasing:
 
@@ -124,9 +131,8 @@ That is the entire template, aside from the optional SOURCE line above (a single
 
 ## Pseudocode Style
 
-- Prose and comments match the language of the input architecture document.
-- Component names, variable names, function names, and data structures remain in English.
-- Pseudocode control keywords use UPPERCASE ENGLISH.
+- Prose and comments match the language of the conversation.
+- Component names, variable names, function names, and data structures remain in English; pseudocode control keywords use UPPERCASE ENGLISH.
 
 Use:
 
@@ -242,4 +248,3 @@ BEGIN
     RETURN result
 END
 ```
-
