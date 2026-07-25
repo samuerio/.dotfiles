@@ -127,7 +127,7 @@ END
 
 `SOURCE`: format details — point to the primary file where this component's or routine's logic was found, in the form `path/to/file.ext` or `path/to/file.ext — symbolName`. When a component or helper consolidates multiple functions, list them joined with ` + ` (e.g. `path/to/file.ts — filterSelfFromRgScan + selfPathVariants`). See mode comparison table above for when to include vs omit this field.
 
-That is the entire template, aside from the optional SOURCE line above (a single line, not its own block). Sub-logic always uses the `HELPER ROUTINE: name` form with its own optional `SOURCE:`, `INPUT:`, and `OUTPUT:` lines — whether nested inside a component block or standalone.
+That is the entire template, aside from the optional SOURCE line above (a single line, not its own block). Sub-logic always uses the `HELPER ROUTINE: name` form with its own optional `PURPOSE:`, `SOURCE:`, `INPUT:`, and `OUTPUT:` lines — whether nested inside a component block or standalone.
 
 ## Pseudocode Style
 
@@ -201,6 +201,7 @@ BEGIN
 END
 
 HELPER ROUTINE: ResolveWorker
+PURPOSE: Look up the correct worker instance from the registry based on type
 SOURCE: src/router/worker_registry.ts — resolveWorker
 INPUT: type (string)
 OUTPUT: worker (Worker instance)
