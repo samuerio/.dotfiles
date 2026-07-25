@@ -269,42 +269,19 @@ function formatGroupContent(group: InlineGroup): string {
     return `${FRAMING_HEADER}\n\n${tasksText}`;
 }
 
-// Path forms this extension's source may take in rg -H output: absolute (when
-// scanned via explicit paths) and relative to cwd (default scan).
-function selfPathVariants(cwd: string): string[] {
-    const variants: string[] = [SELF_PATH];
+// Glob patterns that tell rg to skip this extension's own source. Its
+// PI!:/PI?: occurrences live only inside prompt/description strings
+// (self-referential noise), never real markers. Excluding at scan time is
+// cheaper and more reliable than filtering rg output after the fact.
+function selfExcludeGlobs(cwd: string): string[] {
+    const globs: string[] = [];
+    const basename = SELF_PATH.split("/").pop();
+    if (basename) globs.push(`!${basename}`);
     const rel = relative(cwd, SELF_PATH);
     if (rel && !rel.startsWith("..") && !isAbsolute(rel)) {
-        variants.push(rel);
+        globs.push(`!${rel}`);
     }
-    return variants;
-}
-
-// Drop rg -C3 -n -H blocks whose path matches the extension's own source.
-// Blocks are separated by a lone "--" line; a block is removed when any of its
-// lines carries one of selfVariants as the path prefix.
-function filterSelfFromRgScan(scan: string, selfVariants: string[]): string {
-    if (!scan || selfVariants.length === 0) return scan;
-    const pathRe = /^(.+?)(?::|-)(\d+)(?::|-)/;
-    const keptBlocks: string[][] = [];
-    let cur: string[] = [];
-    let curIsSelf = false;
-    const flush = (): void => {
-        if (cur.length && !curIsSelf) keptBlocks.push(cur);
-        cur = [];
-        curIsSelf = false;
-    };
-    for (const line of scan.split("\n")) {
-        if (line === "--") {
-            flush();
-            continue;
-        }
-        const m = line.match(pathRe);
-        if (m && selfVariants.includes(m[1])) curIsSelf = true;
-        cur.push(line);
-    }
-    flush();
-    return keptBlocks.map((b) => b.join("\n")).join("\n--\n");
+    return globs;
 }
 
 export default function (pi: ExtensionAPI) {
@@ -452,20 +429,18 @@ export default function (pi: ExtensionAPI) {
         const rgArgs = ["PI!:|PI\\?:", "-C", "3", "-n", "-H"];
         // Explicit paths bypass .gitignore so ignored dirs (e.g. .pi) can be targeted.
         if (scanScope) rgArgs.push("--no-ignore", ...scanScope.paths);
+        // Exclude this extension's own source at scan time: its PI!:/PI?:
+        // matches live only inside prompt/description strings (self-referential
+        // noise). Filtering here saves describe tokens and removes any risk of
+        // the model treating them as tasks that edit the extension itself.
+        for (const g of selfExcludeGlobs(ctx.cwd)) {
+            rgArgs.push("--glob", g);
+        }
         const rg = await pi.exec("rg", rgArgs, { cwd: ctx.cwd });
         if (rg.code !== 0 && rg.code !== 1) {
             return fail(`rg failed (code ${rg.code}): ${rg.stderr.trim()}`);
         }
-        let scanOutput = rg.stdout.trim();
-        // Exclude this extension's own source from the scan: its PI!:/PI?:
-        // matches are prompt/description strings (self-referential noise), not
-        // real markers. Filtering deterministically here saves describe tokens
-        // and removes any risk of the model treating them as tasks that edit
-        // the extension itself.
-        const selfVariants = selfPathVariants(ctx.cwd);
-        if (selfVariants.length) {
-            scanOutput = filterSelfFromRgScan(scanOutput, selfVariants);
-        }
+        const scanOutput = rg.stdout.trim();
         if (!scanOutput) {
             ctx.ui.notify("No PI!:/PI?: markers found", "info");
             setState({ groups: [], nextIndex: 0 }, pi, ctx.ui);
