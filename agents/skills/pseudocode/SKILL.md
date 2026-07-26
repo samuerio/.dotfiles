@@ -1,6 +1,6 @@
 ---
 name: pseudocode
-description: "Generate lightweight, language-agnostic pseudocode describing a system's Primary Flow, either from existing code (research) or a proposed design (design). Identifies which mode applies from conversation; a supporting research/design document narrows the work if referenced, but none is required."
+description: "Generate lightweight, language-agnostic pseudocode describing a system's Primary Flow, either from existing code (research) or a proposed design (design). Identifies which mode applies from conversation; a supporting research/design document narrows the work if referenced, but none is required. Use when the user wants to express a flow or logic as pseudocode."
 ---
 
 # Pseudocode
