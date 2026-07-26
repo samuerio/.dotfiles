@@ -46,8 +46,8 @@ NO_GENUINE_MARKERS`;
 
 const FRAMING_HEADER = `The following PI!: and PI?: markers are tasks from one file. Complete every <pi-task> in order.
 
-For PI!: tasks, modify the file as needed.
-For PI?: tasks, do not modify the marker's file except to remove that marker's entire comment block.
+For PI!: tasks, complete the work the marker requests; modify files as needed to do so.
+For PI?: tasks, do what the marker asks; do not modify the marker's own file except to remove that marker's entire comment block afterwards.
 
 After completing each task, remove its entire marker comment block. For /* ... */ comments or consecutive // comment lines, remove the whole block rather than only the marker line.
 
