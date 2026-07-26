@@ -22,7 +22,9 @@ type ExtensionUI = ExtensionCommandContext["ui"];
 // real markers. Used to filter them out of rg scan output before describing.
 const SELF_PATH = fileURLToPath(import.meta.url);
 
-const SYSTEM_PROMPT = `Extract genuine PI!: and PI?: task comments from rg -C3 -n -H output.
+const SYSTEM_PROMPT = `Identify genuine PI!: and PI?: task comments in rg -C3 -n -H output.
+
+The input contains rg context blocks. A block is the matched line plus the lines around it printed by '-C3', i.e. up to 3 lines before and after the match, delimited from neighboring blocks by a '--' separator line. Treat a block as the whole span of context for its marker, including the '--' separator and any blank line the '-C3' spanning includes.
 
 A genuine marker must:
 - Start the text of a code comment.
@@ -35,7 +37,7 @@ RAW_RG_BLOCK
 </pi-task>
 
 Rules:
-- Preserve the complete rg block exactly, including path and line prefixes.
+- Preserve the complete rg block exactly, including path and line prefixes, the '-C3' context lines, and the '--' separator line. Do not strip the context lines down to only the matched line.
 - Use the matched line's path and scan-time line number.
 - Emit one element per marker, in rg order; do not group by file.
 - Do not add a type attribute, Markdown, summaries, commentary, or other fields.
