@@ -18,9 +18,9 @@
       "thinkingLevel": "xhigh"
     },
     "deep": {
-      "provider": "openai-codex",
-      "modelId": "gpt-5.5",
-      "thinkingLevel": "medium"
+      "provider": "opencode-go",
+      "modelId": "qwen3.7-max",
+      "thinkingLevel": "xhigh"
     }
   }
 }
