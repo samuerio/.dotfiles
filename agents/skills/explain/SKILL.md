@@ -15,61 +15,37 @@ This skill contains 9 independent subcommands, each corresponding to a different
 
 **Output rules**
 - Respond in Chinese.
-- Keep the structure flexible: use headings, examples, diagrams, or step-by-step explanations only when they aid understanding — don't force a fixed template.
-- Match the depth of the response to the complexity of the target and how the user phrased the request.
+
 
 ---
 
 ## /explain-what
 
-Explain **what** the target is and what problem it solves:
-- What it is
-- Why it exists / what problem it solves
-- A one-line summary of its core value or purpose
-
-Don't go deep into implementation details or history — focus on "what it is and why."
+Explain what it is and what problem it solves.
 
 ## /explain-13y
 
-Explain it in a way **a 13-year-old can understand**:
-- Avoid jargon; if it must be used, explain it simply first
-- Use everyday analogies and examples
-- Keep the tone light and engaging, but stay accurate — don't distort facts for the sake of simplicity
+Explain this in a way a 13-year-old can understand.
 
 ## /explain-ascii
 
-Use **ASCII diagrams** to aid the explanation of structure or flow:
-- Diagrams should focus on structure, flow, or data movement — only draw one where it genuinely clarifies things
-- Diagrams must be paired with text explanation, not stand alone
-- Keep diagrams simple; avoid overly complex ASCII art
+Explain this using ASCII art diagrams.
 
 ## /explain-hist
 
-Explain the target's **development history**, including relevant major papers and books:
-- Be accurate about papers, books, authors, and dates
-- **Never invent** papers, books, authors, dates, or chronology; if unsure, say so explicitly ("I'm not certain about this")
-- Organize the content chronologically and explain why key milestones matter
+Explain the development history, including the major papers and books involved.
 
 ## /explain-impl
 
-Explain **how it is implemented**:
-- Describe how it works under the hood and what the key mechanisms are
-- May include pseudocode, key steps, or core algorithms
-- Focus on "how it's built," not "how it's used"
+Explain how it is implemented.
 
 ## /explain-prac
 
-Explain how it can be **applied in engineering practice**:
-- Give real-world use cases, common patterns, and things to watch out for
-- May include code examples, best practices, and common pitfalls
-- Focus on "how to use it and apply it," not low-level implementation details
+Explain how this can be implemented in engineering.
 
 ## /explain-shape
 
-Explain the target's **input/output shape, data flow, or transformation shape**:
-- Clarify what shape the input takes and what shape the output takes
-- Describe what transformation or flow happens in between
-- Diagrams or structured descriptions work well here for illustrating data flow
+Explain the input/output shape.
 
 ## /explain-ind
 
