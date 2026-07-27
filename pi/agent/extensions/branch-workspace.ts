@@ -1465,7 +1465,6 @@ export default function (pi: ExtensionAPI): void {
 		promptGuidelines: [
 			"Require an exact full name (e.g. feat/my-feature). Prefer names from bw_list when reusing.",
 			"On success, call bw_status with the same name to get state/socket/paneTarget/paneIdle before dispatch.",
-			"Does not return worktreePath, state, or env — use bw_status for those.",
 			"idle (worktree only): open recreates the session. orphan (session only): prefer bw_close after user confirm, then open — open reuses the residual session without resetting cwd.",
 			"First open in a repo may commit .gitignore via worktree.sh (existing behavior).",
 		],
