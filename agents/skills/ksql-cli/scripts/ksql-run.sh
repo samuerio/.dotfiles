@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -lt 1 ]]; then
-  echo "usage: $0 <sql-or-ksql-meta-command>" >&2
+if [[ $# -ne 2 ]]; then
+  echo "usage: $0 -c <sql> | -f <sql-file>" >&2
   exit 2
 fi
 
@@ -26,4 +26,9 @@ if [[ ${#missing[@]} -gt 0 ]]; then
 fi
 
 DATABASE_PARAM="user=${KB_USER} password=${KB_PWD} host=${KB_HOST} port=${KB_PORT} dbname=${KB_DBNAME}"
-ksql "$DATABASE_PARAM" -P pager=off -Aq -c "$1"
+
+case "$1" in
+  -c) ksql "$DATABASE_PARAM" -P pager=off -Aq -c "$2" ;;
+  -f) ksql "$DATABASE_PARAM" -P pager=off -Aq -f "$2" ;;
+  *) echo "usage: $0 -c <sql> | -f <sql-file>" >&2; exit 2 ;;
+esac
