@@ -44,10 +44,10 @@ Use the tmux SKILL only to send input / watch output, via `socket`/`paneTarget` 
 
 **Always a new workspace**, async, **Worker path only** (never Dispatcher). Full Worker sub-paths available: ralph or pi.
 
-**Never reuse** an existing branch-workspace — including one already open/active in this conversation, even if `state=active` and `paneIdle=true`. Reuse is only for `on <name> bw`. If a derived name already exists (listed by `bw_list` or `bw_status` ≠ missing), derive a different unused name or ask the user; do not `bw_open` that existing name for handoff dispatch.
+Always create a new workspace. If the derived name already exists, derive a different unused name or ask the user.
 
 1. **Derive name** — default `feat/<feature-name>` (kebab-case); swap prefix for fix/refactor/chore/exp when clearly that kind of work; ask the user if no name can be derived. Ensure the name is unused, then `bw_open` + `bw_status`.
-2. **Choose sub-path + build command** — see **Dispatch → Worker path** below. ralph is allowed here (async); otherwise pi with async command shape.
+2. **Choose sub-path + build command** — see **Dispatch → Worker path** below.
 3. **After send** — don't wait, don't capture pane output. Report name + sent confirmation + `monitorCmd`. → framing (main).
 
 ### `on <name> bw` `<prompt>`
