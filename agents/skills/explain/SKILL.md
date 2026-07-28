@@ -49,18 +49,8 @@ Explain the input/output shape.
 
 ## /explain-ind
 
-Explain the target through the lens of the **history of the industry it belongs to** — i.e. its position within the broader industry cycle, competitive landscape, and market evolution:
-- What stage of industry development gave rise to this target, and what industry-level pain point it addressed
-- How it relates to what came before and after it in the industry (what it replaced, what it enabled)
-- Key companies, products, or market shifts relevant to that context
-
-**Distinction from /explain-hist**: `/explain-hist` covers the technical/academic lineage of the target itself (papers, books, authors, version history). `/explain-ind` covers the industry/market context surrounding it (industry stage, competitive dynamics, market drivers). Do not conflate the two.
-
-As with `/explain-hist`, **never invent** companies, products, dates, or market events; if unsure, say so explicitly rather than guessing.
+Explain the target through the lens of the **history of the industry it belongs to** — i.e. its position within the broader industry cycle, competitive landscape, and market evolution.
 
 ## /explain-aes
 
-Explain whether the target is designed with **beauty and harmony**, and where that shows up concretely:
-- Point to specific, verifiable design qualities — e.g. consistency, orthogonality, simplicity, symmetry, composability, the principle of least surprise — rather than vague praise
-- Explain *why* a particular design choice is more elegant than plausible alternatives (contrasting with "what if it had been designed differently" often helps make the point concrete)
-- If the design is in fact rough, compromised, or burdened by historical baggage, say so honestly. Do not manufacture "beauty" that isn't there — avoid empty flattery of the subject.
+Explain whether the target is designed with **beauty and harmony**, and where that shows up concretely.
