@@ -1,6 +1,6 @@
 ---
 name: explain
-description: "Explain a target, providing 9 independently-triggered subcommands for different explanation angles. Triggers: /explain-what, /explain-13y, /explain-ascii, /explain-hist, /explain-impl, /explain-prac, /explain-shape, /explain-ind, /explain-aes, each optionally followed by <target>; also supports the <target> /explain-xxx form. These commands are independent of each other and are not meant to be combined."
+description: "9 independent subcommands for explaining a target from different angles. Triggers: /explain-what, /explain-13y, /explain-ascii, /explain-hist, /explain-impl, /explain-prac, /explain-shape, /explain-ind, /explain-aes. Each command is independent; do not combine them."
 ---
 
 # Explain Commands
@@ -10,8 +10,7 @@ This skill contains 9 independent subcommands, each corresponding to a different
 ## Common rules (apply to all 9 commands below)
 
 **Target parsing**
-- Two forms are supported: `/explain-<mode> [target]` (target follows the command, optional) or `<target> /explain-<mode>` (target precedes the command).
-- If the target is missing, try to infer it from recent conversation context. If it still can't be determined, ask the user one concise clarifying question rather than proceeding with a guess.
+- Infer the target from the command input and/or conversation context. If unclear, ask the user one concise clarifying question.
 
 **Output rules**
 - Respond in Chinese.
