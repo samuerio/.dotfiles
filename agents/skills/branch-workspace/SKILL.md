@@ -38,6 +38,12 @@ Dispatch requires **active** state *and* idle pane (workspace `idle` ≠ pane id
 
 ## Orchestration
 
+**Pre-dispatch checklist** (both paths):
+
+1. `bw_status` on the exact `<name>` → confirm `state=active`, `paneIdle=true`.
+2. Read `socket`, `paneTarget`, `monitorCmd` from `bw_status` output — use these for tmux send-keys and for the report footer.
+3. If `state` is not active or `paneIdle` is false, **stop** and report current status to the user. Do not auto-fix.
+
 Use the tmux SKILL only to send input / watch output, via `socket`/`paneTarget` from `bw_status`.
 
 ### `handoff bw` [`<intent>`]
@@ -48,7 +54,7 @@ Always create a new workspace. If the derived name already exists, derive a diff
 
 1. **Derive name** — default `feat/<feature-name>` (kebab-case); swap prefix for fix/refactor/chore/exp when clearly that kind of work; ask the user if no name can be derived. Check availability with `bw_list` (bw_open's tool return omits create-vs-reuse), pick a different name if taken, then `bw_open` + `bw_status`.
 2. **Choose sub-path + build command** — see **Dispatch → Worker path** below.
-3. **After send** — don't wait, don't capture pane output. Report name + sent confirmation + `monitorCmd`. → framing (main).
+3. **After send** — don't wait, don't capture pane output. Report: workspace `<name>` + sent confirmation + `monitorCmd` (from `bw_status` footer). → framing (main).
 
 ### `on <name> bw` `<prompt>`
 
@@ -71,11 +77,15 @@ Named workspace, sync. `bw_status` on the exact name first; proceed only if `sta
 **Worker path** — any task whose output is file changes (code/docs/tests/review comments).
 
 1. **Choose sub-path**, from conversation artifacts + intent:
-   - **ralph** — only if this conversation already produced a matching ralph `task.json`; build the run command per the `ralph` SKILL. Send via tmux **Sending input safely**.
-   - **pi** — otherwise. Subdivide input source:
-     1. **Existing handoff doc** — handoff already generated this conversation and still matches the intent → use that path.
-     2. **Plan doc** — user (or prompt) points at `plan.md` / `design.md` / similar, no matching handoff yet → use that path.
-     3. **Generate** — otherwise **load and follow** the `handoff-for-impl` SKILL with conversation + intent/`<prompt>`, then use the returned path. Clear intents still go through `handoff-for-impl` (it skips Q&A when already actionable).
+
+   | Condition | Sub-path | How to build command |
+   |-----------|----------|---------------------|
+   | This conversation already produced a matching ralph `task.json` | **ralph** | Per the `ralph` SKILL. Send via tmux **Sending input safely**. |
+   | Handoff already generated this conversation and still matches intent | **pi** (existing handoff doc) | `-p @<doc>` with absolute path |
+   | User/prompt points at `plan.md` / `design.md` / similar, no matching handoff yet | **pi** (plan doc) | `-p @<doc>` with absolute path |
+   | Otherwise | **pi** (generate) | **Load and follow** the `handoff-for-impl` SKILL with conversation + intent/`<prompt>`, then use the returned path |
+
+   Clear intents still go through `handoff-for-impl` (it skips Q&A when already actionable).
 
 2. **Build & send command.**
 
@@ -96,6 +106,17 @@ Named workspace, sync. `bw_status` on the exact name first; proceed only if `sta
 **Dispatcher path** — observability-only prompts under `on <name> bw`. Execute via bash or the bw tmux pane, capture output for the user. No handoff doc, no pi, no DONE contract, no ralph. → framing (named).
 
 Mixed requests (e.g. "run tests then fix failures"): split into dispatcher steps (observable) and worker steps (file changes) in work order; pass findings between them via the handoff/plan doc.
+
+**Example:** "Run tests, then fix whatever fails" → (1) dispatcher: run tests, capture failures; (2) worker: handoff doc describes failures, worker fixes code.
+
+### Failure modes
+
+| Scenario | Action |
+|----------|--------|
+| `state` not active or `paneIdle` false at dispatch time | Stop, report status to user. Do not auto-fix via lifecycle tools. |
+| Worker pi/ralph exits non-zero (sync path) | `DONE:<stem>` still fires (shell `&&` skipped → marker never appears). Poll times out. Report timeout + last pane tail. Inspect worktree diff for partial changes. |
+| Worker crashes mid-run (pane goes idle without `DONE:<stem>`) | Same as timeout: report timeout + pane tail. Do not restart automatically. |
+| Dispatcher-path command fails | Capture output, report to user. No DONE contract. |
 
 ### Conversation framing
 
