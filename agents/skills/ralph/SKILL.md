@@ -99,23 +99,9 @@ For UI tasks:
 ## After generation
 
 1. Write `task.json` to the same directory as the plan file.
-2. Ensure Ralph is installed in the current working directory:
-   - check for `ralph/ralph.sh`
-   - check for `ralph/RALPH.md`
-3. If either file is missing:
-   - create `ralph/` if needed
-   - copy `ralph.sh` and `RALPH.md` from this skill into `<cwd>/ralph/`
-4. Then tell the user:
+2. Then tell the user:
 
-   Note: Use the absolute path to the directory containing `task.json`.
-
-   ```bash
-   ./ralph/ralph.sh <absolute-path-to-dir-containing-task.json>
-   ```
-
-   Use this exact phrasing:
-
-   > Next step — run Ralph to execute the tasks:
+   > Next step, run Ralph to execute the tasks:
    > ```bash
-   > ./ralph/ralph.sh <absolute-path-to-dir-containing-task.json>
+   > {baseDir}/ralph.sh <absolute-path-to-dir-containing-task.json>
    > ```
