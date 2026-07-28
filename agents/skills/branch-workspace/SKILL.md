@@ -46,7 +46,7 @@ Use the tmux SKILL only to send input / watch output, via `socket`/`paneTarget` 
 
 Always create a new workspace. If the derived name already exists, derive a different unused name or ask the user.
 
-1. **Derive name** — default `feat/<feature-name>` (kebab-case); swap prefix for fix/refactor/chore/exp when clearly that kind of work; ask the user if no name can be derived. Ensure the name is unused, then `bw_open` + `bw_status`.
+1. **Derive name** — default `feat/<feature-name>` (kebab-case); swap prefix for fix/refactor/chore/exp when clearly that kind of work; ask the user if no name can be derived. Check availability with `bw_list` (bw_open's tool return omits create-vs-reuse), pick a different name if taken, then `bw_open` + `bw_status`.
 2. **Choose sub-path + build command** — see **Dispatch → Worker path** below.
 3. **After send** — don't wait, don't capture pane output. Report name + sent confirmation + `monitorCmd`. → framing (main).
 
