@@ -91,23 +91,17 @@ Two-step: inspect first, then execute.
 {baseDir}/scripts/ksql-run.sh -c "SELECT schema.func_name(arg1, arg2);"
 ```
 
-**Procedures (no return value)**
+**Procedures (CALL)**
+
+Kingbase's `CALL` requires the argument count to match the signature, and `OUT` /`INOUT` parameters do not accept direct expressions (including `NULL`). Use the appropriate method based on parameter types:
+
+**IN-only parameters** - use `-c` with literal values directly:
 
 ```sh
-{baseDir}/scripts/ksql-run.sh -c "CALL schema.proc_name(arg1, arg2);"
+{baseDir}/scripts/ksql-run.sh -c "CALL schema.proc_name('str_val', 123);"
 ```
 
-Literal conventions: strings use single quotes `'...'`, numbers are bare, `NULL` is written `NULL`.
-
-**OUT / INOUT parameters**
-
-- OUT parameters: when calling directly, leave OUT positions without an actual argument; Kingbase returns them as output columns.
-
-```sh
-{baseDir}/scripts/ksql-run.sh -c "CALL schema.proc_name(in1, in2);"
-```
-
-- To capture OUT/INOUT values for further use, run a PL/pgSQL anonymous block that declares variables for the OUT/INOUT slots, calls the procedure, and reports the results. Write the block to a temp file and use `-f` mode:
+**Procedures with OUT / INOUT parameters** - use an anonymous PL/pgSQL block with `-f` mode, declaring variables for OUT/INOUT slots:
 
 ```sh
 sql_file=$(mktemp /tmp/ksql-XXXXXX.sql)
@@ -117,16 +111,17 @@ DECLARE
   v_out1 result_type1;
   v_out2 result_type2;
 BEGIN
-  CALL schema.proc_name(in1, v_out1, v_out2);
-  RAISE NOTICE 'v_out1=%', v_out1;
-  RAISE NOTICE 'v_out2=%', v_out2;
+  CALL schema.proc_name(int_arg1, v_out1, v_out2);
+  RAISE NOTICE 'v_out1=%', 'v_out2=%', v_out1, v_out2;
 END $$;
 EOF
 # If SQL contains mutations, prompt user: run `code <tempfile>` to review before executing
 {baseDir}/scripts/ksql-run.sh -f "$sql_file"
 ```
 
-- INOUT parameters are both input and output. Pass the initial value and read back the rewritten value with the same file-based pattern:
+**INOUT parameters**
+
+INOUT serves as both input and output. Initialize in `DECLARE`, then pass to `CALL`;
 
 ```sh
 sql_file=$(mktemp /tmp/ksql-XXXXXX.sql)
