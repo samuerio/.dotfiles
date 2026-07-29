@@ -1051,6 +1051,12 @@ export default function (pi: ExtensionAPI): void {
 		if (state) updateStatusBar(ctx.ui, state.name);
 	});
 
+	// Clear bw-log / bw-status widgets when a new turn starts so they don't block conversation output.
+	pi.on("turn_start", async (_event, ctx) => {
+		ctx.ui.setWidget("bw-log", undefined);
+		ctx.ui.setWidget("bw-status", undefined);
+	});
+
 	// ── /bw-open [-b name] ──
 	pi.registerCommand("bw-open", {
 		description: "Open a branch-workspace (git worktree + tmux session). Usage: /bw-open [name]",
