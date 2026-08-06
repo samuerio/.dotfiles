@@ -43,10 +43,10 @@ gui:
   commandLogSize: 8
   splitDiff: 'auto' # one of 'auto' | 'always'
 git:
-  pagers:
+  diffRenderers:
     - colorArg: always
       useConfig: false
-      pager: delta --light --syntax-theme "Monokai Extended Light" --paging=never --24-bit-color=never
+      command: delta --light --syntax-theme "Monokai Extended Light" --paging=never --24-bit-color=never
   commit:
     signOff: false
   merging:

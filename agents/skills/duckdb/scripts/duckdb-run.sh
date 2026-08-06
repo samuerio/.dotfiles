@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ $# -lt 1 ]]; then
-  echo "usage: $0 [-csv|-json|...] [db-file] <sql>" >&2
+  echo "usage: $0 [-csv|-json|...] <sql>" >&2
   exit 2
 fi
 
@@ -13,29 +13,17 @@ if [[ -f .env ]]; then
   set +a
 fi
 
-db_file=""
-sql=""
 flags=()
+sql=""
 
 for arg in "$@"; do
   if [[ "$arg" == -* ]]; then
     flags+=("$arg")
-  elif [[ -z "$sql" ]]; then
-    if [[ -z "$db_file" ]]; then
-      db_file="$arg"
-    else
-      sql="$arg"
-    fi
+  else
+    sql="$arg"
   fi
 done
 
-if [[ -z "$sql" ]]; then
-  sql="$db_file"
-  db_file="${DUCKDB_FILE:-}"
-fi
+db_file="${DUCKDB_FILE:?error: DUCKDB_FILE not set. Check .env or export DUCKDB_FILE=/path/to/file.db}"
 
-if [[ -n "$db_file" ]]; then
-  duckdb "$db_file" "${flags[@]}" -c "$sql"
-else
-  duckdb "${flags[@]}" -c "$sql"
-fi
+duckdb "$db_file" "${flags[@]}" -c "$sql"

@@ -24,8 +24,8 @@ vim.g['fzf_action'] = {
 
 vim.g.fzf_history_dir = '~/.local/share/fzf-history'
 
--- 只显示 git 跟踪的文件（自动排除 .gitignore 中的路径）
-vim.env.FZF_DEFAULT_COMMAND = 'git ls-files'
+-- 使用 ripgrep 列出文件，自动尊重 .gitignore，git 和非 git 目录均可用
+vim.env.FZF_DEFAULT_COMMAND = 'rg --files --hidden --glob "!.git"'
 
 utils.nmap('<leader>f', ':Files <CR>')
 utils.nmap('<leader>h', ':Ag <CR>')
