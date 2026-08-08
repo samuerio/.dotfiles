@@ -34,15 +34,16 @@ Lifecycle (list/open/close) lives in `bw_list` / `bw_open` / `bw_close`. This sk
 
 **State** = worktree × session: `active` (both) · `idle` (worktree only) · `orphan` (session only) · `missing` (neither). `dirty` is a separate flag, not a state. Never auto-resolve dirty/orphan — confirm before `bw_close force: true`; reopening an orphan doesn't reset cwd, so prefer close(confirmed)+reopen.
 
-Dispatch requires **active** state *and* idle pane (workspace `idle` ≠ pane idle): proceed only if `state=active` and `paneIdle=true`; otherwise fail fast and report status — don't auto-fix via lifecycle tools.
+Dispatch requires **active** state, and the pane must be idle before sending. Verify pane readiness per the tmux SKILL (**Checking pane readiness**). Workspace `idle` (state) ≠ pane idle. If state is not active or the pane is busy, fail fast and report status — don't auto-fix via lifecycle tools.
 
 ## Orchestration
 
 **Pre-dispatch checklist** (both paths):
 
-1. `bw_status` on the exact `<name>` → confirm `state=active`, `paneIdle=true`.
+1. `bw_status` on the exact `<name>` → confirm `state=active`.
 2. Read `socket`, `paneTarget`, `monitorCmd` from `bw_status` output — use these for tmux send-keys and for the report footer.
-3. If `state` is not active or `paneIdle` is false, **stop** and report current status to the user. Do not auto-fix.
+3. Verify the pane is ready per the tmux SKILL (**Checking pane readiness**) before sending.
+4. If `state` is not active or the pane is busy, **stop** and report current status to the user. Do not auto-fix.
 
 Use the tmux SKILL only to send input / watch output, via `socket`/`paneTarget` from `bw_status`.
 
@@ -58,7 +59,7 @@ Always create a new workspace. If the derived name already exists, derive a diff
 
 ### `on <name> bw` `<prompt>`
 
-Named workspace, sync. `bw_status` on the exact name first; proceed only if `state=active` and `paneIdle=true`.
+Named workspace, sync. `bw_status` on the exact name first; proceed only if `state=active` and the pane is ready per the tmux SKILL (**Checking pane readiness**).
 
 **Split by prompt:**
 
@@ -113,7 +114,7 @@ Mixed requests (e.g. "run tests then fix failures"): split into dispatcher steps
 
 | Scenario | Action |
 |----------|--------|
-| `state` not active or `paneIdle` false at dispatch time | Stop, report status to user. Do not auto-fix via lifecycle tools. |
+| `state` not active, or pane busy at dispatch time | Stop, report status to user. Do not auto-fix via lifecycle tools. |
 | Worker pi/ralph exits non-zero (sync path) | `DONE:<stem>` still fires (shell `&&` skipped → marker never appears). Poll times out. Report timeout + last pane tail. Inspect worktree diff for partial changes. |
 | Worker crashes mid-run (pane goes idle without `DONE:<stem>`) | Same as timeout: report timeout + pane tail. Do not restart automatically. |
 | Dispatcher-path command fails | Capture output, report to user. No DONE contract. |

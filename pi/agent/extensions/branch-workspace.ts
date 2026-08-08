@@ -1,9 +1,7 @@
-import { completeSimple, type UserMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Container, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { existsSync, readFileSync, promises as fs } from "node:fs";
+import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -39,8 +37,8 @@ async function copyToClipboard(pi: ExtensionAPI, text: string): Promise<boolean>
 const BLANK_ROW = "\u200B";
 
 /** Programmatic pane log tail density: batch overview vs single drill-down. */
-const BATCH_ANALYZE_RAW_TAIL = 5;
-const SINGLE_ANALYZE_RAW_TAIL = 15;
+const BATCH_RAW_TAIL = 10;
+const SINGLE_RAW_TAIL = 15;
 
 function buildWidget(lines: string[], footer?: string) {
 	return (_tui: { width: number }, theme: { fg: (color: string, text: string) => string }) => {
@@ -353,172 +351,13 @@ async function capturePaneOutput(
 	return allLines.slice(-lines).join("\n");
 }
 
-function isPaneIdle(output: string): boolean {
-	const lines = output.trim().split("\n").filter((l) => l.trim().length > 0);
-	if (lines.length === 0) return true;
-	const last = lines[lines.length - 1];
-	return /[\$%>❯]\s*$/.test(last);
-}
+// ─── Pane Log Widgets ─────────────────────────────────────────────
 
 /**
- * Raw batch tags = current pane state only: idle | busy.
- * (Last-command outcome tags belong to analyze mode: done | error | busy.)
+ * Append the last rawTailLines of pane output to lines. Caller supplies the
+ * banner (────── name ──────); shared by batch and single /bw-log views.
  */
-function classifyRawPane(output: string): { tag: "idle" | "busy"; snippet: string } {
-	if (!output.trim() || output === "(empty)") {
-		return { tag: "idle", snippet: "(no output)" };
-	}
-	if (output === "(no pane)") {
-		return { tag: "idle", snippet: "(no pane target)" };
-	}
-	const nonEmpty = output
-		.trim()
-		.split("\n")
-		.map((l) => l.trim())
-		.filter((l) => l.length > 0);
-	const last = nonEmpty[nonEmpty.length - 1] ?? "";
-	if (isPaneIdle(output)) {
-		return { tag: "idle", snippet: last || "(shell prompt)" };
-	}
-	return { tag: "busy", snippet: last || "(running)" };
-}
-
-function formatBatchRawLines(captures: Array<{ name: string; output: string }>): string[] {
-	// Spacer rows (not ""): title ↔ first block, and between branch-workspace blocks
-	const lines: string[] = [`Batch · ${captures.length} active`, BLANK_ROW];
-
-	captures.forEach((c, i) => {
-		if (i > 0) lines.push(BLANK_ROW);
-		const { tag } = classifyRawPane(c.output);
-		lines.push(formatBatchNameHeader(c.name, tag));
-		if (!c.output.trim() || c.output === "(empty)" || c.output === "(no pane)") {
-			lines.push(c.output.trim() || "(no output)");
-			return;
-		}
-		const tail = c.output.split("\n").slice(-BATCH_ANALYZE_RAW_TAIL);
-		for (const row of tail) {
-			lines.push(row.length === 0 ? BLANK_ROW : row);
-		}
-	});
-	return lines;
-}
-
-// ─── Rush Mode Resolution ─────────────────────────────────────────
-
-type ModeSpec = {
-	provider?: string;
-	modelId?: string;
-	thinkingLevel?: string;
-};
-
-const RUSH_MODE = "rush";
-
-function loadRushModeSpec(cwd: string): ModeSpec | null {
-	const candidates = [path.join(cwd, ".pi", "modes.json"), path.join(getAgentDir(), "modes.json")];
-	for (const p of candidates) {
-		if (!existsSync(p)) continue;
-		let parsed: unknown;
-		try {
-			parsed = JSON.parse(readFileSync(p, "utf8"));
-		} catch {
-			continue;
-		}
-		const modes = parsed && typeof parsed === "object" ? (parsed as { modes?: unknown }).modes : undefined;
-		if (!modes || typeof modes !== "object") continue;
-		const spec = (modes as Record<string, unknown>)[RUSH_MODE];
-		if (!spec || typeof spec !== "object") continue;
-		const obj = spec as Record<string, unknown>;
-		const provider = typeof obj.provider === "string" ? obj.provider : undefined;
-		const modelId = typeof obj.modelId === "string" ? obj.modelId : undefined;
-		const thinkingLevel = typeof obj.thinkingLevel === "string" ? obj.thinkingLevel : undefined;
-		if (!provider || !modelId) continue;
-		return { provider, modelId, thinkingLevel };
-	}
-	return null;
-}
-
-// ─── LLM Status Analysis ─────────────────────────────────────────
-
-/**
- * Shared -a analyzer: structured fields only. Raw pane tail is attached in code.
- * Used by single /bw-log -a and by batch /bw-log -b -a (N parallel calls).
- */
-const STATUS_SYSTEM_PROMPT = `You are a branch-workspace status analyzer for a single coding branch-workspace TUI widget.
-
-Given terminal pane output, analyze ONLY the last executed command and its output. Do not summarize the branch, project, or overall session.
-
-TAG vocabulary (last-command outcome — do NOT use "idle"):
-  - busy: the last command is still running
-  - error: the last command failed (non-zero exit, Error/failed/panic/traceback, etc.) — NEVER use done if it failed
-  - done: the last command finished successfully, OR there is no useful last command (shell prompt only)
-
-Reply with EXACTLY three lines, each with a fixed prefix:
-
-status: <done|error|busy>
-cmd: <command after shell prompt only>
-summary: <one short Simplified Chinese outcome>
-
-Rules for each field:
-- status: exactly one of done | error | busy (lowercase)
-- cmd: ONLY the command portion after the shell prompt (❯ $ % >). Example: if the log has "~/path ❯ echo foo; true", write "echo foo; true". Copy from the log; do not invent. Do not include the path/prompt. If there is no command, write "(none)".
-- summary: Simplified Chinese, max ~40 chars. Do NOT start with "最后命令". State the result only (e.g. "成功，输出 LAST_CMD_OK"). If status is error, you MUST quote key failure text from the log (e.g. include "Error: simulated failure").
-- Do NOT guess shell control-flow semantics (no "because there was no next command", no inventing exit codes you cannot see).
-- No markdown, no code fences, no bullets, no blank lines, no extra lines.
-- Do NOT paste raw pane log — the UI attaches that separately.`;
-
-type AnalyzeFields = { status: string; cmd: string; summary: string };
-
-/**
- * Normalize LLM analyze text into status/cmd/summary.
- * Tolerates missing prefixes when the model returns bare 3-line shape.
- */
-function parseAnalyzeFields(analysis: string): AnalyzeFields {
-	const raw = analysis
-		.trim()
-		.split("\n")
-		.map((l) => l.trim())
-		.filter((l) => l.length > 0);
-
-	let status = "";
-	let cmd = "";
-	let summary = "";
-
-	for (const line of raw) {
-		const m = line.match(/^(status|cmd|summary)\s*:\s*(.*)$/i);
-		if (m) {
-			const key = m[1].toLowerCase();
-			const val = m[2].trim();
-			if (key === "status") status = val;
-			else if (key === "cmd") cmd = val;
-			else summary = val;
-		}
-	}
-
-	// Bare three-line fallback: tag / cmd / summary
-	if (!status && raw.length >= 1) {
-		const m = raw[0].match(/^(idle|busy|error|done)\b/i);
-		if (m) {
-			status = m[1].toLowerCase() === "idle" ? "done" : m[1].toLowerCase();
-			if (raw.length >= 2 && !cmd) cmd = raw[1].replace(/^cmd\s*:\s*/i, "");
-			if (raw.length >= 3 && !summary) summary = raw[2].replace(/^summary\s*:\s*/i, "");
-		}
-	}
-
-	if (status === "idle") status = "done";
-	if (!status) status = "?";
-	if (!cmd) cmd = "(none)";
-	if (!summary) {
-		summary =
-			raw.find(
-				(l) => !/^(status|cmd|summary)\s*:/i.test(l) && !/^(idle|busy|error|done)$/i.test(l),
-			) ?? "(no summary)";
-	}
-
-	return { status, cmd, summary };
-}
-
-function appendRawTail(lines: string[], paneOutput: string, rawTailLines: number): void {
-	lines.push(BLANK_ROW, "── raw ──");
+function appendRawTailLines(lines: string[], paneOutput: string, rawTailLines: number): void {
 	const cleaned = paneOutput.replace(/\s+$/, "");
 	if (
 		!cleaned.trim() ||
@@ -539,150 +378,28 @@ function appendRawTail(lines: string[], paneOutput: string, rawTailLines: number
 	}
 }
 
-/** Batch branch-workspace banner — longer rules so it doesn't look like ── raw ──. */
-function formatBatchNameHeader(name: string, status: string): string {
-	return `────── ${name} · ${status} ──────`;
+/** Branch-workspace banner. */
+function formatBatchNameHeader(name: string): string {
+	return `────── ${name} ──────`;
 }
 
-/**
- * Single /bw-log without -a: current pane idle|busy + raw tail + Monitor (footer).
- */
-function formatSingleRawWidget(paneOutput: string): string[] {
-	const { tag } = classifyRawPane(paneOutput);
-	const lines = [`status: ${tag}`];
-	appendRawTail(lines, paneOutput, SINGLE_ANALYZE_RAW_TAIL);
-	return lines;
-}
+/** Batch /bw-log -b: name banner + short raw tail per active workspace. */
+function formatBatchRawLines(captures: Array<{ name: string; output: string }>): string[] {
+	// Spacer rows (not ""): title ↔ first block, and between branch-workspace blocks
+	const lines: string[] = [`Batch · ${captures.length} active`, BLANK_ROW];
 
-/**
- * Analyze widget body + programmatic raw.
- * - Single (no name): status: / cmd: / summary:  then raw (15)
- * - Batch (with name): ────── name · status ──────, then cmd: / summary: only, then raw (5)
- */
-function formatAnalyzeWidget(
-	analysis: string,
-	paneOutput: string,
-	rawTailLines: number,
-	name?: string,
-): string[] {
-	const { status, cmd, summary } = parseAnalyzeFields(analysis);
-	const lines: string[] = [];
-	if (name) {
-		// Batch: status in banner header; raw keeps short ── raw ──
-		lines.push(formatBatchNameHeader(name, status));
-		lines.push(`cmd: ${cmd}`, `summary: ${summary}`);
-	} else {
-		lines.push(`status: ${status}`, `cmd: ${cmd}`, `summary: ${summary}`);
-	}
-	appendRawTail(lines, paneOutput, rawTailLines);
-	return lines;
-}
-
-/** Local fields when pane is missing/empty — skip LLM. */
-function fallbackAnalyzeFields(output: string): string {
-	if (output === "(no pane)") {
-		return "status: done\ncmd: (none)\nsummary: 无 pane";
-	}
-	if (!output.trim() || output === "(empty)") {
-		return "status: done\ncmd: (none)\nsummary: 无输出";
-	}
-	return "status: done\ncmd: (none)\nsummary: 仅 shell 提示符，无最近命令";
-}
-
-async function analyzeStatus(
-	pi: ExtensionAPI,
-	ctx: ExtensionCommandContext,
-	paneOutput: string,
-): Promise<AnalysisResult> {
-	const rushSpec = loadRushModeSpec(ctx.cwd);
-	if (!rushSpec) {
-		return { error: "No rush mode configured in modes.json." };
-	}
-
-	const model = ctx.modelRegistry.find(rushSpec.provider!, rushSpec.modelId!);
-	if (!model) {
-		return { error: `Rush model ${rushSpec.provider}/${rushSpec.modelId} not found in registry.` };
-	}
-
-	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-	if (!auth.ok) {
-		return { error: `API key missing for provider ${rushSpec.provider}.` };
-	}
-
-	const userMessage: UserMessage = {
-		role: "user",
-		content: [{ type: "text", text: paneOutput }],
-		timestamp: Date.now(),
-	};
-
-	const response = await completeSimple(
-		model,
-		{
-			systemPrompt: STATUS_SYSTEM_PROMPT,
-			messages: [userMessage],
-		},
-		{
-			apiKey: auth.apiKey,
-			headers: auth.headers,
-			signal: ctx.signal,
-			reasoning: "off",
-		},
-	);
-
-	const text = response.content
-		.filter((c): c is { type: "text"; text: string } => c.type === "text")
-		.map((c) => c.text)
-		.join("\n")
-		.trim();
-	return { analysis: text };
-}
-
-/**
- * Analyze each active branch-workspace in parallel with the shared STATUS_SYSTEM_PROMPT,
- * then render status/cmd/summary + short raw (5 lines) per branch-workspace.
- */
-async function analyzeBatchStatusParallel(
-	pi: ExtensionAPI,
-	ctx: ExtensionCommandContext,
-	items: Array<{ name: string; output: string }>,
-): Promise<string[]> {
-	const results = await Promise.all(
-		items.map(async (item) => {
-			if (!item.output.trim() || item.output === "(no pane)" || item.output === "(empty)") {
-				return {
-					name: item.name,
-					analysis: fallbackAnalyzeFields(item.output || "(empty)"),
-					output: item.output || "(empty)",
-				};
-			}
-			try {
-				const result = await analyzeStatus(pi, ctx, item.output);
-				if ("analysis" in result) {
-					return { name: item.name, analysis: result.analysis, output: item.output };
-				}
-				return {
-					name: item.name,
-					analysis: `status: error\ncmd: (none)\nsummary: 分析失败：${result.error}`,
-					output: item.output,
-				};
-			} catch (err) {
-				const msg = err instanceof Error ? err.message : String(err);
-				return {
-					name: item.name,
-					analysis: `status: error\ncmd: (none)\nsummary: 分析失败：${msg}`,
-					output: item.output,
-				};
-			}
-		}),
-	);
-
-	const lines: string[] = [`Batch · ${results.length} active`, BLANK_ROW];
-	results.forEach((r, i) => {
+	captures.forEach((c, i) => {
 		if (i > 0) lines.push(BLANK_ROW);
-		lines.push(
-			...formatAnalyzeWidget(r.analysis, r.output, BATCH_ANALYZE_RAW_TAIL, r.name),
-		);
+		lines.push(formatBatchNameHeader(c.name), BLANK_ROW);
+		appendRawTailLines(lines, c.output, BATCH_RAW_TAIL);
 	});
+	return lines;
+}
+
+/** Single /bw-log: name banner + raw tail + Monitor (footer). */
+function formatSingleRawWidget(paneOutput: string, name: string): string[] {
+	const lines = [formatBatchNameHeader(name), BLANK_ROW];
+	appendRawTailLines(lines, paneOutput, SINGLE_RAW_TAIL);
 	return lines;
 }
 
@@ -731,7 +448,6 @@ interface BranchWorkspaceEnv {
 	paneTarget: string | null;
 	state: BranchWorkspaceState;
 	dirty?: boolean;
-	paneIdle?: boolean;
 	preValidated: boolean;
 	monitorCmd?: string;
 }
@@ -796,15 +512,8 @@ async function buildBranchWorkspaceEnv(pi: ExtensionAPI, name: string): Promise<
 	const bw = await resolveBranchWorkspaceState(pi, name);
 	const socket = await getTmuxSocket(pi);
 	let paneTarget: string | null = null;
-	let paneIdle: boolean | undefined;
-	if (socket && (bw.state === "active" || bw.state === "idle")) {
-		if (bw.state === "active") {
-			paneTarget = await discoverPaneTarget(pi, socket, name);
-			if (paneTarget) {
-				const out = await capturePaneOutput(pi, socket, paneTarget, 20);
-				paneIdle = isPaneIdle(out);
-			}
-		}
+	if (socket && bw.state === "active") {
+		paneTarget = await discoverPaneTarget(pi, socket, name);
 	}
 	const preValidated = !!(socket && paneTarget && bw.state === "active");
 	const hasSession = bw.state === "active" || bw.state === "orphan";
@@ -817,7 +526,6 @@ async function buildBranchWorkspaceEnv(pi: ExtensionAPI, name: string): Promise<
 		paneTarget,
 		state: bw.state,
 		dirty: bw.dirty,
-		paneIdle,
 		preValidated,
 		// Attach only when a tmux session exists (active / orphan). Idle has no session.
 		monitorCmd: hasSession && socket ? `tmux -S ${socket} attach -t ${name}` : undefined,
@@ -1037,7 +745,6 @@ function formatStatusText(env: BranchWorkspaceEnv): string {
 		`socket: ${env.socket ?? ""}`,
 		`session: ${env.session}`,
 		`paneTarget: ${env.paneTarget ?? ""}`,
-		`paneIdle: ${env.paneIdle ?? "?"}`,
 		`preValidated: ${env.preValidated}`,
 		`monitorCmd: ${env.monitorCmd ?? ""}`,
 	].join("\n");
@@ -1193,15 +900,13 @@ export default function (pi: ExtensionAPI): void {
 		},
 	});
 
-	// ── /bw-log [-b|--batch] [name] [-s] [-a|--analyze] ──  (pane log; not /bw-status)
+	// ── /bw-log [-b|--batch] [name] [-s] ──  (pane log; not /bw-status)
 	pi.registerCommand("bw-log", {
-		description: "Show pane log and last-command outcome (not branch-workspace status — use /bw-status). Usage: /bw-log [-b|--batch] [name] [-s] [-a|--analyze]",
+		description: "Show pane log (not branch-workspace status — use /bw-status). Usage: /bw-log [-b|--batch] [name] [-s]",
 		handler: async (args, ctx) => {
-			const analyze = /(^|\s)(--analyze|-a)\b/.test(args);
 			const selectFlag = /(^|\s)-s\b/.test(args);
 			const batch = /(^|\s)(-b|--batch)\b/.test(args);
 			const flagPatterns = [
-				/(^|\s)(--analyze|-a)\b/g,
 				/(^|\s)-s\b/g,
 				/(^|\s)(-b|--batch)\b/g,
 			];
@@ -1228,38 +933,18 @@ export default function (pi: ExtensionAPI): void {
 						captures.push({ name: bw.name, output: "(no pane)" });
 						continue;
 					}
-					// Match single branch-workspace capture depth when analyzing so each parallel call gets full context
-					const capLines = analyze ? 200 : 12;
-					const output = await capturePaneOutput(pi, socket, target, capLines);
+					const output = await capturePaneOutput(pi, socket, target, 12);
 					captures.push({ name: bw.name, output: output || "(empty)" });
 				}
 
 				// Batch is an overview only — no fake multi-target attach line.
 				// Drill down with /bw-log <name> (single mode copies a real attach cmd).
-				if (!analyze) {
-					const lines = formatBatchRawLines(captures);
-					ctx.ui.setWidget("bw-log", buildWidget(lines), { placement: "aboveEditor" });
-					return;
-				}
-
-				ctx.ui.setWidget(
-					"bw-log",
-					buildWidget([`Analyzing ${captures.length} branch-workspaces in parallel...`]),
-					{ placement: "aboveEditor" },
-				);
-
-				try {
-					const lines = await analyzeBatchStatusParallel(pi, ctx, captures);
-					ctx.ui.setWidget("bw-log", buildWidget(lines), { placement: "aboveEditor" });
-				} catch (err) {
-					const msg = err instanceof Error ? err.message : String(err);
-					ctx.ui.setWidget("bw-log", undefined);
-					ctx.ui.notify(`LLM batch analysis failed: ${msg}`, "warning");
-				}
+				const lines = formatBatchRawLines(captures);
+				ctx.ui.setWidget("bw-log", buildWidget(lines), { placement: "aboveEditor" });
 				return;
 			}
 
-			// Single branch-workspace (existing behavior)
+			// Single branch-workspace
 			const resolved = await resolveNameOrSelect(pi, branchName, ctx.cwd, ctx, selectFlag);
 			if (!resolved) return;
 			const { name } = resolved;
@@ -1282,8 +967,7 @@ export default function (pi: ExtensionAPI): void {
 				return;
 			}
 
-			const captureLines = analyze ? 200 : 15;
-			const paneOutput = await capturePaneOutput(pi, socket, paneTarget, captureLines);
+			const paneOutput = await capturePaneOutput(pi, socket, paneTarget, SINGLE_RAW_TAIL);
 			if (!paneOutput.trim()) {
 				ctx.ui.notify(`Pane output is empty for "${name}".`, "warning");
 				return;
@@ -1293,40 +977,8 @@ export default function (pi: ExtensionAPI): void {
 			const copied = await copyToClipboard(pi, rawCmd);
 			const monitorCmd = `Monitor: ${rawCmd}${copied ? " (copied)" : ""}`;
 
-			if (!analyze) {
-				const lines = formatSingleRawWidget(paneOutput);
-				ctx.ui.setWidget("bw-log", buildWidget(lines, monitorCmd), { placement: "aboveEditor" });
-				return;
-			}
-
-			ctx.ui.setWidget("bw-log", buildWidget([`Analyzing pane log for "${name}"...`]), { placement: "aboveEditor" });
-
-			let result: AnalysisResult;
-			try {
-				result = await analyzeStatus(pi, ctx, paneOutput);
-			} catch (err) {
-				const msg = err instanceof Error ? err.message : String(err);
-				ctx.ui.setWidget("bw-log", undefined);
-				ctx.ui.notify(`LLM analysis failed: ${msg}`, "warning");
-				return;
-			}
-
-			if ("analysis" in result) {
-				const lines = formatAnalyzeWidget(
-					result.analysis,
-					paneOutput,
-					SINGLE_ANALYZE_RAW_TAIL,
-				);
-				ctx.ui.setWidget("bw-log", buildWidget(lines, monitorCmd), { placement: "aboveEditor" });
-			} else {
-				ctx.ui.setWidget("bw-log", undefined);
-				const lines = paneOutput.trim().split("\n");
-				const tail = lines.slice(-SINGLE_ANALYZE_RAW_TAIL).join("\n");
-				ctx.ui.notify(
-					`${result.error} Raw output for "${name}":\n${tail}`,
-					"warning",
-				);
-			}
+			const lines = formatSingleRawWidget(paneOutput, name);
+			ctx.ui.setWidget("bw-log", buildWidget(lines, monitorCmd), { placement: "aboveEditor" });
 		},
 	});
 
@@ -1390,13 +1042,6 @@ export default function (pi: ExtensionAPI): void {
 				return;
 			}
 
-			// Check if already idle
-			const currentOutput = await capturePaneOutput(pi, socket, paneTarget, 20);
-			if (isPaneIdle(currentOutput)) {
-				ctx.ui.notify(`No running process in branch-workspace "${name}".`, "info");
-				return;
-			}
-
 			const proceed = await ctx.ui.confirm(
 				"Interrupt Process",
 				`Send C-c to branch-workspace "${name}"?`,
@@ -1416,18 +1061,7 @@ export default function (pi: ExtensionAPI): void {
 				return;
 			}
 
-			// Wait briefly then check
-			await new Promise((r) => setTimeout(r, 2000));
-			const afterOutput = await capturePaneOutput(pi, socket, paneTarget, 5);
-
-			if (isPaneIdle(afterOutput)) {
-				ctx.ui.notify(`Process in "${name}" interrupted.`, "info");
-			} else {
-				ctx.ui.notify(
-					`Sent C-c to "${name}". Process may still be terminating; check with /bw-log.`,
-					"warning",
-				);
-			}
+			ctx.ui.notify(`Sent C-c to "${name}". Check with /bw-log to confirm.`, "info");
 		},
 	});
 
@@ -1470,7 +1104,7 @@ export default function (pi: ExtensionAPI): void {
 		promptSnippet: "Open/reuse a branch-workspace; then call bw_status with the same name for env.",
 		promptGuidelines: [
 			"Require an exact full name (e.g. feat/my-feature). Prefer names from bw_list when reusing.",
-			"On success, call bw_status with the same name to get state/socket/paneTarget/paneIdle before dispatch.",
+			"On success, call bw_status with the same name to get state/socket/paneTarget before dispatch.",
 			"idle (worktree only): open recreates the session. orphan (session only): prefer bw_close after user confirm, then open — open reuses the residual session without resetting cwd.",
 			"First open in a repo may commit .gitignore via worktree.sh (existing behavior).",
 		],
@@ -1536,13 +1170,13 @@ export default function (pi: ExtensionAPI): void {
 		name: "bw_status",
 		label: "Inspect branch-workspace",
 		description:
-			"Read-only branch-workspace status report: state (active|idle|orphan|missing) + env (worktreePath, socket, session, paneTarget, paneIdle, dirty, monitorCmd). Requires an exact name. No side effects.",
+			"Read-only branch-workspace status report: state (active|idle|orphan|missing) + env (worktreePath, socket, session, paneTarget, dirty, monitorCmd). Requires an exact name. No side effects.",
 		promptSnippet: "Inspect branch-workspace status (state+env) by exact name.",
 		promptGuidelines: [
-			"After bw_open, call this with the same name to get state/socket/paneTarget/paneIdle before dispatch. Also use to inspect without opening, or re-check later.",
+			"After bw_open, call this with the same name to get state/socket/paneTarget before dispatch. Also use to inspect without opening, or re-check later.",
 			"name is required (exact full name). Use bw_list when the name is unknown; never invent a name.",
 			"Field state: active (worktree+session, ready for task), idle (worktree only → bw_open), orphan (session only → close with user confirm + force), missing (neither → bw_open to create).",
-			"status (this tool) = state + env. Branch-workspace idle ≠ paneIdle.",
+			"status (this tool) = state + env. Check pane readiness via the tmux SKILL (Checking pane readiness) before dispatching.",
 		],
 		parameters: Type.Object({
 			name: Type.String({ description: "Full branch-workspace name (exact match)." }),
