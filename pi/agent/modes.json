@@ -9,12 +9,12 @@
     },
     "rush": {
       "provider": "opencode-go",
-      "modelId": "qwen3.7-plus",
+      "modelId": "deepseek-v4-flash",
       "thinkingLevel": "high"
     },
     "smart": {
       "provider": "opencode-go",
-      "modelId": "glm-5.2",
+      "modelId": "qwen3.7-max",
       "thinkingLevel": "xhigh"
     },
     "deep": {
