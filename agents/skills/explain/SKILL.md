@@ -1,13 +1,13 @@
 ---
 name: explain
-description: "7 independent subcommands for explaining a target from different angles. Triggers: /explain-what, /explain-13y, /explain-ascii, /explain-hist, /explain-impl, /explain-shape, /explain-ind. Each command is independent; do not combine them."
+description: "8 independent subcommands for explaining a target from different angles. Triggers: /explain-what, /explain-13y, /explain-ascii, /explain-hist, /explain-impl, /explain-shape, /explain-ind, /explain-learn. Each command is independent; do not combine them."
 ---
 
 # Explain Commands
 
-This skill contains 7 independent subcommands, each corresponding to a different explanation angle. The user triggers only one command at a time; the commands are not meant to be combined.
+This skill contains 8 independent subcommands, each corresponding to a different explanation angle. The user triggers only one command at a time; the commands are not meant to be combined.
 
-## Common rules (apply to all 7 commands below)
+## Common rules (apply to all 8 commands below)
 
 **Target parsing**
 - Infer the target from the command input and/or conversation context. If unclear, ask the user one concise clarifying question.
@@ -32,7 +32,7 @@ Explain this using ASCII art diagrams.
 
 ## /explain-hist
 
-Explain the development history, including the major papers and books involved.
+Explain the development history as a motivation chain — walk through each generation along its evolution path and describe what problem each step was created to solve.
 
 ## /explain-impl
 
@@ -45,3 +45,12 @@ Explain the input/output shape.
 ## /explain-ind
 
 Explain the target through the lens of the **history of the industry it belongs to** — i.e. its position within the broader industry cycle, competitive landscape, and market evolution.
+
+## /explain-learn
+
+Explain the learning path — lay out the steps for learning this target from the underlying principles up to the high-level abstraction.
+
+Examples:
+
+Git: hand-written commands -> object model (commit/tree/blob) -> branch mechanics -> GUI.
+Database: SQL -> indexes -> execution plans -> ORM.
