@@ -53,11 +53,11 @@ Database: SQL -> indexes -> execution plans -> ORM.
 
 ## /explain-cmp
 
-Explain by horizontal comparison — pick 2–4 peers that solve the same underlying problem, contrast how each approaches it, and surface the shared problem underneath.
+Explain by horizontal comparison — pick 2–4 peers that solve the same underlying problem, contrast how each approaches it, and extract the transferable model underneath so the knowledge carries across systems.
 
 Examples:
 
 Go Mutex: Go Mutex vs Java synchronized vs Rust Mutex vs C++ mutex
-  → shared: memory model, atomicity, visibility, scheduling, lock contention.
-Goroutine: goroutine vs Java thread vs Python asyncio vs Rust async
-  → shared: scheduling cost, stack model, concurrency primitive design.
+  → model: memory model, atomicity, visibility, scheduling, lock contention.
+Go sync.Map: sync.Map vs Java ConcurrentHashMap vs Rust DashMap
+  → model: concurrent map tradeoffs among fine-grained locks, atomics, and read-mostly strategies.
