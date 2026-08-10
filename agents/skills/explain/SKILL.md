@@ -1,6 +1,6 @@
 ---
 name: explain
-description: "8 independent subcommands for explaining a target from different angles. Triggers: /explain-what, /explain-13y, /explain-ascii, /explain-hist, /explain-impl, /explain-shape, /explain-ind, /explain-learn. Each command is independent; do not combine them."
+description: "8 independent subcommands for explaining a target from different angles. Triggers: /explain-what, /explain-13y, /explain-ascii, /explain-hist, /explain-impl, /explain-shape, /explain-learn, /explain-cmp. Each command is independent; do not combine them."
 ---
 
 # Explain Commands
@@ -42,10 +42,6 @@ Explain how it is implemented.
 
 Explain the input/output shape.
 
-## /explain-ind
-
-Explain the target through the lens of the **history of the industry it belongs to** — i.e. its position within the broader industry cycle, competitive landscape, and market evolution.
-
 ## /explain-learn
 
 Explain the learning path — lay out the steps for learning this target from the underlying principles up to the high-level abstraction.
@@ -54,3 +50,14 @@ Examples:
 
 Git: hand-written commands -> object model (commit/tree/blob) -> branch mechanics -> GUI.
 Database: SQL -> indexes -> execution plans -> ORM.
+
+## /explain-cmp
+
+Explain by horizontal comparison — pick 2–4 peers that solve the same underlying problem, contrast how each approaches it, and surface the shared problem underneath.
+
+Examples:
+
+Go Mutex: Go Mutex vs Java synchronized vs Rust Mutex vs C++ mutex
+  → shared: memory model, atomicity, visibility, scheduling, lock contention.
+Goroutine: goroutine vs Java thread vs Python asyncio vs Rust async
+  → shared: scheduling cost, stack model, concurrency primitive design.
