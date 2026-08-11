@@ -57,7 +57,7 @@ Explain by horizontal comparison.
 
 1. Pick 2–4 representative peers. Prefer peers that expose different design choices rather than several nearly identical alternatives.
 2. Establish a small set of shared comparison dimensions first, such as core abstraction, consistency, persistence, concurrency model, latency/throughput, scaling, and typical use cases. Choose only dimensions relevant to the target.
-3. For each peer, state its **design philosophy** in one short line before comparing (e.g. "extreme minimalism = extreme speed"). Then compare it against the target from the perspective of **design choice → consequence → suitable workload**. Do not merely enumerate features.
+3. For each peer, open with its **design philosophy**: a one-line summary followed by 3–5 concrete supporting characteristics (e.g. "extreme minimalism = extreme speed" → multi-threaded, slab allocation, no replication, single data type). This is a summary framing, not the full comparison — then compare the peer against the target from the perspective of **design choice → consequence → suitable workload**. Do not merely enumerate features.
 4. Frame each pairwise comparison as the question a reader would actually ask (e.g. "both do X, so where's the real difference?"), not a flat "A vs B" label.
 5. For important differences, give a concrete code snippet, command, or operation — not just a described scenario — that makes the distinction tangible.
 6. Where a wrong choice is common, add a short misuse/anti-pattern example: show the incorrect usage and the corrected one side by side.
