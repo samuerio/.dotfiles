@@ -57,10 +57,12 @@ Explain by horizontal comparison.
 
 1. Pick 2–4 representative peers. Prefer peers that expose different design choices rather than several nearly identical alternatives.
 2. Establish a small set of shared comparison dimensions first, such as core abstraction, consistency, persistence, concurrency model, latency/throughput, scaling, and typical use cases. Choose only dimensions relevant to the target.
-3. Compare each peer against the target from the perspective of **design choice → consequence → suitable workload**. Do not merely enumerate features.
-4. For important differences, give a concrete example, operation, or scenario that makes the distinction tangible.
-5. State the central tradeoff explicitly: what capability or guarantee is gained, and what cost or constraint is accepted in exchange.
-6. End with 2–5 transferable rules that generalize beyond the named products. Phrase them as decision principles the reader can reuse in another system.
+3. For each peer, state its **design philosophy** in one short line before comparing (e.g. "extreme minimalism = extreme speed"). Then compare it against the target from the perspective of **design choice → consequence → suitable workload**. Do not merely enumerate features.
+4. Frame each pairwise comparison as the question a reader would actually ask (e.g. "both do X, so where's the real difference?"), not a flat "A vs B" label.
+5. For important differences, give a concrete code snippet, command, or operation — not just a described scenario — that makes the distinction tangible.
+6. Where a wrong choice is common, add a short misuse/anti-pattern example: show the incorrect usage and the corrected one side by side.
+7. State the central tradeoff explicitly: what capability or guarantee is gained, and what cost or constraint is accepted in exchange.
+8. End with 2–5 transferable rules that generalize beyond the named products. Phrase them as decision principles the reader can reuse in another system, and illustrate at least the non-obvious ones with a short code/pseudocode block.
 
 Keep the target as the center of the comparison. The goal is to explain **why these systems differ and when those differences matter**, not to rank them globally.
 
@@ -69,9 +71,10 @@ When a claim depends strongly on version, configuration, workload, or deployment
 Suggested output shape:
 
 - comparison dimensions / compact table
-- target vs each peer
-- overall tradeoff map or decision axes
-- transferable rules
+- target vs each peer, one subsection per pair, framed as a question
+- overall tradeoff map or decision axes (an ASCII diagram works well when the axes are spatial, e.g. latency vs durability)
+- misuse/anti-pattern example, if a common wrong choice exists
+- transferable rules, code-illustrated where non-obvious
 
 Examples:
 
