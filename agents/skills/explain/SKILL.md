@@ -53,7 +53,25 @@ Database: SQL -> indexes -> execution plans -> ORM.
 
 ## /explain-cmp
 
-Explain by horizontal comparison — pick 2–4 peers, contrast how each approaches it, contrast each against the target, state the tradeoff and a transferable rule so the knowledge carries across systems.
+Explain by horizontal comparison.
+
+1. Pick 2–4 representative peers. Prefer peers that expose different design choices rather than several nearly identical alternatives.
+2. Establish a small set of shared comparison dimensions first, such as core abstraction, consistency, persistence, concurrency model, latency/throughput, scaling, and typical use cases. Choose only dimensions relevant to the target.
+3. Compare each peer against the target from the perspective of **design choice → consequence → suitable workload**. Do not merely enumerate features.
+4. For important differences, give a concrete example, operation, or scenario that makes the distinction tangible.
+5. State the central tradeoff explicitly: what capability or guarantee is gained, and what cost or constraint is accepted in exchange.
+6. End with 2–5 transferable rules that generalize beyond the named products. Phrase them as decision principles the reader can reuse in another system.
+
+Keep the target as the center of the comparison. The goal is to explain **why these systems differ and when those differences matter**, not to rank them globally.
+
+When a claim depends strongly on version, configuration, workload, or deployment topology, qualify it instead of presenting a benchmark number or implementation detail as universal.
+
+Suggested output shape:
+
+- comparison dimensions / compact table
+- target vs each peer
+- overall tradeoff map or decision axes
+- transferable rules
 
 Examples:
 
