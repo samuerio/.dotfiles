@@ -407,6 +407,10 @@ install_feh() {
     install_platform_dotfile "feh" "Linux" "Linux" "feh" "${HOME}/.config/feh"
 }
 
+install_flameshot() {
+    install_platform_dotfile "flameshot" "Linux" "Linux" "flameshot" "${HOME}/.config/flameshot"
+}
+
 install_mimeapps() {
     install_platform_dotfile "mimeapps" "Linux" "Linux" "mimeapps.list" "${HOME}/.config/mimeapps.list"
 }
@@ -507,6 +511,7 @@ main() {
         install_zathura
         install_dunst
         install_feh
+        install_flameshot
         install_mimeapps
         install_systemd_user
         install_local_bin
