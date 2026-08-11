@@ -53,7 +53,7 @@ Database: SQL -> indexes -> execution plans -> ORM.
 
 ## /explain-cmp
 
-Explain by horizontal comparison — pick 2–4 peers, contrast how each approaches it, state the tradeoff and a transferable rule so the knowledge carries across systems.
+Explain by horizontal comparison — pick 2–4 peers, contrast how each approaches it, contrast each against the target, state the tradeoff and a transferable rule so the knowledge carries across systems.
 
 Examples:
 
