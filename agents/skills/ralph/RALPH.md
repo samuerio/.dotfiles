@@ -4,7 +4,7 @@ You are an autonomous coding agent working on a software project.
 
 ## Process
 
-1. Read `@{{SPEC_DIR}}/progress.txt`, `@{{SPEC_DIR}}/plan.md`, `@{{SPEC_DIR}}/design.md`, and `@{{SPEC_DIR}}/task.json`.
+1. Read `@{{SPEC_DIR}}/progress.txt`, `@{{SPEC_DIR}}/plan.md`, and `@{{SPEC_DIR}}/task.json`.
    - Read the `## Codebase Patterns` section in `@{{SPEC_DIR}}/progress.txt` first.
 2. Select the highest-priority task in `task.json` where `passes: false`.
 3. Implement only that one task, keeping changes focused and minimal.
