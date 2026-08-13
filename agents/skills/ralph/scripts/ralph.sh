@@ -21,6 +21,21 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROGRESS_FILE="$SPEC_DIR/progress.txt"
 
+# Resolve model/thinking from pi's `smart` mode in modes.json.
+mapfile -t cfg < <("$SCRIPT_DIR/resolve-default.py")
+model="${cfg[0]:-}"
+thinking="${cfg[1]:-}"
+if [[ -z "$model" ]]; then
+  echo "ralph: error: no 'smart' mode resolved from modes.json" >&2
+  echo "Configure modes.smart with provider and modelId in <cwd>/.pi/modes.json or ~/.pi/agent/modes.json" >&2
+  echo "List available models with: pi --list-models" >&2
+  exit 1
+fi
+args=(pi --no-session --model "$model")
+if [[ -n "$thinking" ]]; then
+  args+=(--thinking "$thinking")
+fi
+
 # Initialize progress file if it doesn't exist
 if [ ! -f "$PROGRESS_FILE" ]; then
   echo "# Ralph Progress Log" > "$PROGRESS_FILE"
@@ -34,7 +49,7 @@ for i in $(seq 1 $MAX_ITERATIONS); do
   echo "  Ralph Iteration $i of $MAX_ITERATIONS"
   echo "==============================================================="
   # Run pi agent
-  OUTPUT=$(cat "$SCRIPT_DIR/RALPH.md" | sed "s|{{SPEC_DIR}}|$SPEC_DIR|g" | pi -p 2>&1 | tee /dev/stderr) || true
+  OUTPUT=$(cat "$SCRIPT_DIR/../references/RALPH.md" | sed "s|{{SPEC_DIR}}|$SPEC_DIR|g" | "${args[@]}" -p 2>&1 | tee /dev/stderr) || true
   
   # Check for completion signal
   if echo "$OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then

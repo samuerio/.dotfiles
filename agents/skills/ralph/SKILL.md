@@ -5,9 +5,9 @@ description: "Convert a plan and optional design into task.json for Ralph autono
 
 # Ralph Task Generator
 
-Generate `task.json` from a plan and optional design.
+Generate `task.json` from a plan.
 
-Ralph will have access to the original plan and design during execution, so tasks should describe **what to implement**, not **how to implement it**. Do not repeat architecture, file paths, function names, or type definitions unless absolutely necessary.
+Ralph will have access to the original plan during execution, so tasks should describe **what to implement**, not **how to implement it**. Do not repeat architecture, file paths, function names, or type definitions unless absolutely necessary. If the plan references design.md or pseudocode.md, Ralph reaches them through the plan's Session Continuity references, so tasks must not repeat their content either.
 
 ## Output
 
@@ -45,7 +45,7 @@ Write a `task.json` file in this format:
 - Do not include:
   - file paths
   - function/type names
-  - low-level implementation details already covered by the plan/design
+  - low-level implementation details already covered by the plan
 
 ### Acceptance criteria rules
 
@@ -103,5 +103,5 @@ For UI tasks:
 
    > Next step, run Ralph to execute the tasks:
    > ```bash
-   > {baseDir}/ralph.sh <absolute-path-to-dir-containing-task.json>
+   > {baseDir}/scripts/ralph.sh <path-to-dir-containing-task.json>
    > ```
