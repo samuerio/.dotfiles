@@ -40,4 +40,9 @@ After writing the plan file, use this exact phrasing:
 
 Update the plan to instruct yourself which files to read in full so you get up to speed in a new session immediately.
 
-Automatically infer relevant files from the discussion (source files, entry points, types, tests, docs) ordered by importance, and also include design.md and pseudocode.md when they exist in the plan directory. Append a **Session Continuity** section -- do not rewrite the rest of the plan. If no plan file exists yet, notify the user to run draft first.
+Automatically infer relevant files from the discussion (source files, entry points, types, tests, docs) ordered by importance. Append a **Session Continuity** section -- do not rewrite the rest of the plan. Inside it, use two subsections:
+
+- **Design docs** -- if design.md and/or pseudocode.md exist in the plan directory, list them here first as required reading.
+- **Files to read** -- the inferred relevant files, ordered by importance.
+
+If no plan file exists yet, notify the user to run draft first.
