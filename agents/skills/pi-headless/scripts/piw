@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# piw: wrapper around `pi` for skill-driven runs.
+#
+# Injects the model/thinking resolved at run time from pi's
+# `smart` mode in modes.json (project <cwd>/.pi/modes.json takes precedence,
+# then global ~/.pi/agent/modes.json). The caller never picks a model.
+#
+# Fails fast when no `smart` mode is configured instead of falling back to pi
+# defaults, so the caller always knows which model a run used.
+#
+# Usage: piw [pi flags and prompt...]
+#   piw --no-session -p "task"
+#   piw --no-session --mode json "task"
+#   piw --no-session --no-skills --skill /path/to/skill -p "task"
+# --no-session is NOT injected; pass it when the run must not persist a session.
+# Without -p/--print/--mode, pi starts its interactive TUI (same injections).
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+mapfile -t cfg < <("$script_dir/resolve-default.py")
+
+model="${cfg[0]:-}"
+thinking="${cfg[1]:-}"
+
+if [[ -z "$model" ]]; then
+  echo "piw: error: no 'smart' mode resolved from modes.json" >&2
+  echo "Configure modes.smart with provider and modelId in one of:" >&2
+  echo "  <cwd>/.pi/modes.json   (project, takes precedence)" >&2
+  echo "  ~/.pi/agent/modes.json (global)" >&2
+  echo "List available models with: pi --list-models" >&2
+  exit 1
+fi
+
+args=(pi --model "$model")
+if [[ -n "$thinking" ]]; then
+  args+=(--thinking "$thinking")
+fi
+
+exec "${args[@]}" "$@"
