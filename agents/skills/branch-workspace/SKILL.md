@@ -70,8 +70,8 @@ Any task whose output is file changes (code/docs/tests/review comments).
 2. **Build & send command.**
 
    **Invariants (every send):**
-   - pi path: invoke through the `piw` wrapper (`~/.agents/skills/pi-headless/scripts/piw`) per the `pi-headless` SKILL. Never pass `--model`/`--thinking` — the wrapper injects both from the `smart` mode. `--no-session` always. The inline implementation instruction is mandatory: `plan.md` is a pure plan, without it the worker won't implement.
-   - ralph path: invoke via the `ralph` SKILL wrapper (`~/.agents/skills/ralph/scripts/ralph.sh`); it injects model/thinking itself.
+   - pi path: invoke through the `piw` wrapper per the `pi-headless` SKILL. Never pass `--model`/`--thinking` — the wrapper injects both from the `smart` mode. `--no-session` always. The inline implementation instruction is mandatory: `plan.md` is a pure plan, without it the worker won't implement.
+   - ralph path: invoke via the `ralph` SKILL wrapper; it injects model/thinking itself.
    - Worker cwd = worktree → every `@<path>` must be **absolute**, never relative. Use `<worktree>/.bw/spec/current/...` as given, don't rediscover it.
    - ralph writes `progress.txt` and updates `task.json` `passes` inside the spec dir; through the symlink this lands in the main workspace spec dir (`.pi/` is gitignored). This is a feature: progress is visible to the main session without entering the worktree.
    - Send via tmux `send-keys -l`.
