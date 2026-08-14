@@ -31,16 +31,16 @@ Lifecycle (list/open/close) lives in `bw_list` / `bw_open` / `bw_close`. This sk
 
 **State** = worktree × session: `active` (both) · `idle` (worktree only) · `orphan` (session only) · `missing` (neither). `dirty` is a separate flag, not a state. Never auto-resolve dirty/orphan — confirm before `bw_close force: true`; reopening an orphan doesn't reset cwd, so prefer close(confirmed)+reopen.
 
-Dispatch requires **active** state, and the pane must be idle before sending. Verify pane readiness per the tmux SKILL (**Checking pane readiness**). Workspace `idle` (state) ≠ pane idle. If state is not active or the pane is busy, fail fast and report status — don't auto-fix via lifecycle tools.
+Dispatch requires **active** state, and the pane must be idle before sending. Verify pane readiness per the tmux SKILL (**Checking pane readiness**). Workspace `idle` (state) ≠ pane idle. Either check failing means fail fast.
 
 ## Orchestration
 
 **Pre-dispatch checklist:**
 
-1. `bw_status` on the exact `<name>` → confirm `state=active`. If not active, **stop** and report status to the user. Do not auto-fix.
+1. `bw_status` on the exact `<name>` → confirm `state=active`. Not active → fail fast (see **Failure modes**).
 2. Read `socket`, `paneTarget`, `monitorCmd` from `bw_status` output — use these for tmux send-keys and for the report footer.
-3. **Mount the spec dir** — `.pi/spec/<ts>-<slug>` via `mkdir -p <worktree>/.bw/spec && ln -sfn "$(pwd)/.pi/spec/<ts>-<slug>" <worktree>/.bw/spec/current` (absolute target required; re-dispatch re-links with `ln -sfn`). Missing → **Failure modes**, stop.
-4. Verify the pane is ready per the tmux SKILL (**Checking pane readiness**) before sending. If the pane is busy, **stop** and report status to the user. Do not auto-fix.
+3. **Mount the spec dir** — `.pi/spec/<ts>-<slug>` via `mkdir -p <worktree>/.bw/spec && ln -sfn "$(pwd)/.pi/spec/<ts>-<slug>" <worktree>/.bw/spec/current` (absolute target required; re-dispatch re-links with `ln -sfn`). Missing → fail fast (see **Failure modes**).
+4. Verify the pane is ready per the tmux SKILL (**Checking pane readiness**) before sending. Busy → fail fast (see **Failure modes**).
 
 Use the tmux SKILL only to send input, via `socket`/`paneTarget` from `bw_status`.
 
