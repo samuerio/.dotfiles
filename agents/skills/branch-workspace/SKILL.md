@@ -65,7 +65,7 @@ Any task whose output is file changes (code/docs/tests/review comments).
    | Path | When | Payload |
    |------|------|---------|
    | **ralph** | A matching ralph `task.json` already exists this conversation — the further-refined artifact; takes priority over the pi path when both exist | `<worktree>/.bw/spec/current` |
-   | **pi** (plan doc) | No `task.json` yet, but the spec dir has `plan.md` | `@<worktree>/.bw/spec/current/plan.md` + inline instruction: "Implement exactly what this plan describes. When done, write a completion summary to <worktree>/.bw/spec/current/summary.txt starting with COMPLETE or FAILED on the first line." |
+   | **pi** (plan doc) | No `task.json` yet, but the spec dir has `plan.md` | `@<worktree>/.bw/spec/current/plan.md` + inline instruction: "Implement exactly what this plan describes. When done, write a completion summary to <worktree>/.bw/spec/current/summary.txt." |
 
 2. **Build & send command.**
 
@@ -82,14 +82,7 @@ Any task whose output is file changes (code/docs/tests/review comments).
 
 ### Result review
 
-Dispatch is async; results surface in the spec dir (readable from the main workspace through the symlink) and in the worktree diff. When the user asks to review results:
-
-| Path | Artifacts | Completion signal |
-|------|-----------|-------------------|
-| pi | `.pi/spec/<ts>-<slug>/summary.txt` + worktree diff | First line of `summary.txt`: `COMPLETE` / `FAILED` |
-| ralph | `.pi/spec/<ts>-<slug>/task.json` + `progress.txt` + worktree diff | All `passes: true` in `task.json` |
-
-`summary.txt` is best-effort: a worker that crashes or exits non-zero may leave none. Never treat its absence as success; combine it with the worktree diff and `monitorCmd` output.
+Dispatch is async; results surface in the spec dir (readable from the main workspace through the symlink) and in the worktree diff. When the user asks to review results, read `.pi/spec/<ts>-<slug>/summary.txt` (pi, best-effort. A crashed worker may leave none) or `task.json`/`progress.txt` (ralph, check `passes: true`) alongside the worktree diff and `monitorCmd` output. Never treat a missing `summary.txt` as success.
 
 ### Failure modes
 
