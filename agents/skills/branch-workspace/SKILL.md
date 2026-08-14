@@ -79,10 +79,12 @@ Dispatch is async; results surface in the spec dir (readable from the main works
 
 ### `review bw` [`<name>`]
 
+Reviews the worker's actual execution against the plan, not just its self-reported summary.
+
 1. `bw_status` on the exact `<name>` → confirm the workspace exists (state ≠ `missing`). Missing → fail fast (see **Failure modes**).
-2. **Gather** — read the plan (`plan.md` and/or `task.json`) in the mounted spec dir, plus the completion artifacts per **Result review** (`summary.txt` for pi, `task.json` `passes` + `progress.txt` for ralph).
-3. **Compare** — check the completion artifacts against the plan: coverage (planned items marked complete in `summary.txt` / `passes: true`), deviations noted by the worker, gaps between what the plan asked for and what the worker reported doing.
-4. **Report** — summarize what was implemented vs planned, flag deviations or incomplete items, note test/typecheck status if visible in the artifacts.
+2. **Gather** — read the plan (`plan.md` and/or `task.json`) in the mounted spec dir. Treat the completion artifacts per **Result review** (`summary.txt` for pi, `task.json` `passes` + `progress.txt` for ralph) as the worker's own account, not as verified fact.
+3. **Verify** — check what the plan asked for against the worktree itself (read the changed files, run tests/typecheck if applicable). Don't rely solely on the worker's self-report. Note where the worker's account and the actual state disagree.
+4. **Report** — present findings from step 3: what's done, what's missing or diverges, and any verification results.
 
 ### Failure modes
 
