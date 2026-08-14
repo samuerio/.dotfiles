@@ -1,11 +1,13 @@
 ---
 name: branch-workspace
 description: >-
-  Orchestrate dispatch to a branch-workspace ("bw" for short) — an isolated
-  git worktree + tmux session bound to one branch. Trigger on natural language
-  containing "bw" as a handoff: handoff bw <intent> — always creates a new
-  workspace and dispatches async to a Worker. E.g. "handoff bw, add rate
-  limiting to the API".
+  Orchestrate dispatch to and review of a branch-workspace ("bw" for short) —
+  an isolated git worktree + tmux session bound to one branch. Trigger on
+  natural language containing "bw" as a handoff for an existing plan:
+  handoff bw — always creates a new workspace and dispatches async to a
+  Worker. Also trigger as a review: review bw <name> — reviews an existing
+  workspace's implementation against its plan. E.g. "handoff bw for the
+  rate-limiting plan" / "review bw feat/rate-limiting".
 ---
 
 ## Concept
@@ -44,21 +46,14 @@ Dispatch requires **active** state, and the pane must be idle before sending. Ve
 
 Use the tmux SKILL only to send input, via `socket`/`paneTarget` from `bw_status`.
 
-### `handoff bw` [`<intent>`]
+### `handoff bw`
 
-**Always a new workspace**, async. Paths available: ralph or pi.
+**Always a new workspace**, async. Paths available: ralph or pi. Any task whose output is file changes (code/docs/tests/review comments).
 
 Always create a new workspace. If the derived name already exists, derive a different unused name or ask the user.
 
-1. **Derive name** — default `feat/<feature-name>` (kebab-case); swap prefix for fix/refactor/chore/exp when clearly that kind of work; ask the user if no name can be derived. Check availability with `bw_list` (bw_open's tool return omits create-vs-reuse), pick a different name if taken, then `bw_open` + `bw_status`.
-2. **Choose path + build command** — see **Dispatch** below.
-3. **After send** — don't wait, don't capture pane output. Report: workspace `<name>` + sent confirmation + `monitorCmd` (from `bw_status` footer). → framing.
-
-### Dispatch
-
-Any task whose output is file changes (code/docs/tests/review comments).
-
-1. **Choose path + build command** — see table below.
+1. **Derive name** — default `feat/<slug>` (kebab-case) from the plan's spec-dir slug (`.pi/spec/<ts>-<slug>/`); swap prefix for fix/refactor/chore/exp when clearly that kind of work; ask the user if no name can be derived. Check availability with `bw_list` (bw_open's tool return omits create-vs-reuse), pick a different name if taken, then `bw_open` + `bw_status`.
+2. **Choose path + build command.**
 
    Both paths draw on the same planning pipeline: `plan-spec` produces `plan.md`, and `ralph` optionally converts that plan into a granular `task.json` in the same spec dir. When both artifacts exist, prefer the more refined one. Both paths read inputs through the `.bw/spec/current` mount (checklist step 3).
 
@@ -67,8 +62,6 @@ Any task whose output is file changes (code/docs/tests/review comments).
    | **ralph** | A matching ralph `task.json` already exists this conversation — the further-refined artifact; takes priority over the pi path when both exist | `<worktree>/.bw/spec/current` |
    | **pi** (plan doc) | No `task.json` yet, but the spec dir has `plan.md` | `@<worktree>/.bw/spec/current/plan.md` + inline instruction: "Implement exactly what this plan describes. When done, write a completion summary to <worktree>/.bw/spec/current/summary.txt." |
 
-2. **Build & send command.**
-
    **Invariants (every send):**
    - pi path: invoke through the `piw` wrapper per the `pi-headless` SKILL. Never pass `--model`/`--thinking` — the wrapper injects both from the `smart` mode. `--no-session` always. The inline implementation instruction is mandatory: `plan.md` is a pure plan, without it the worker won't implement.
    - ralph path: invoke via the `ralph` SKILL wrapper; it injects model/thinking itself.
@@ -76,21 +69,31 @@ Any task whose output is file changes (code/docs/tests/review comments).
    - ralph writes `progress.txt` and updates `task.json` `passes` inside the spec dir; through the symlink this lands in the main workspace spec dir (`.pi/` is gitignored). This is a feature: progress is visible to the main session without entering the worktree.
    - Send via tmux `send-keys -l`.
    - No multi-line shell-quoted prompt bodies.
-   - Command shape: `<worker command>` (async — no completion marker; monitor via `monitorCmd` instead).
+   - Command shape: `<worker command>` (async — no completion marker; monitor via `monitorCmd` instead), where `<worker command>` is the full pi or ralph invocation per the chosen path.
 
-   Where `<worker command>` is the full pi or ralph invocation per the chosen path.
+3. **After send** — don't wait, don't capture pane output. Report: workspace `<name>` + sent confirmation + `monitorCmd` (from `bw_status` footer). → framing.
 
 ### Result review
 
 Dispatch is async; results surface in the spec dir (readable from the main workspace through the symlink) and in the worktree diff. When the user asks to review results, read `.pi/spec/<ts>-<slug>/summary.txt` (pi, best-effort. A crashed worker may leave none) or `task.json`/`progress.txt` (ralph, check `passes: true`) alongside the worktree diff and `monitorCmd` output. Never treat a missing `summary.txt` as success.
 
+### `review bw` [`<name>`]
+
+1. `bw_status` on the exact `<name>` → confirm the workspace exists (state ≠ `missing`). Missing → fail fast (see **Failure modes**).
+2. **Gather** — read the plan (`plan.md` and/or `task.json`) in the mounted spec dir, plus the completion artifacts per **Result review** (`summary.txt` for pi, `task.json` `passes` + `progress.txt` for ralph).
+3. **Compare** — check the completion artifacts against the plan: coverage (planned items marked complete in `summary.txt` / `passes: true`), deviations noted by the worker, gaps between what the plan asked for and what the worker reported doing.
+4. **Report** — summarize what was implemented vs planned, flag deviations or incomplete items, note test/typecheck status if visible in the artifacts.
+5. **Fix (if issues found)** — if the workspace is `active` and the user wants issues addressed, dispatch a fix directly: build and send a command per **Invariants** in `handoff bw`, using a fix-scoped instruction (describe the specific gaps/deviations found) instead of the initial implementation instruction. No new workspace, no re-derive name — reuse `<name>`'s existing worktree/session. If the workspace isn't active, fail fast (see **Failure modes**) rather than reopening implicitly.
+
 ### Failure modes
 
 | Scenario | Action |
 |----------|--------|
-| No usable planning artifact (spec dir missing, or spec dir has neither `task.json` nor `plan.md`) | Stop. Don't generate a doc, invent a path, or dispatch without inputs. Ask the user for a plan doc, or point them at another way to proceed. |
+| No plan doc / `task.json` to dispatch from | Stop. Don't generate a doc or dispatch. Ask the user for a plan doc, or point them at another way to proceed. |
 | `state` not active, or pane busy at dispatch time | Stop, report status to user. Do not auto-fix via lifecycle tools. |
 | Worker pi/ralph exits non-zero | Not observed synchronously — surfaces only if the user later checks via `monitorCmd` or inspects the worktree. Don't assume success from the send alone. |
+| `review bw <name>` — workspace doesn't exist | Stop. Report to the user; do not fabricate a review from memory. |
+| `review bw <name>` — fix requested but workspace not `active` | Stop, report status to user. Do not reopen or auto-fix via lifecycle tools. |
 
 ### Conversation framing
 
