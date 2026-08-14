@@ -18,7 +18,7 @@ A **branch-workspace** = `<name>` bound to two coupled parts, both keyed by the 
 - **`tmux` session** — execution pane bound to the worktree. Can be attached to for watching or running commands.
 - **`.bw/spec/current`** — symlink inside the worktree pointing at the current task's spec dir (a `plan-spec` artifact in the main workspace). The worker's single source of inputs; results (summary/progress) flow back through the same link.
 
-Lifecycle (list/open/close) lives in `bw_list` / `bw_open` / `bw_close`. This skill covers **dispatch** only.
+Lifecycle (list/open/close) lives in `bw_list` / `bw_open` / `bw_close`. This skill covers **dispatch and review**.
 
 `<name>` must always be matched exactly (never fuzzy/shortened) — this applies wherever `<name>` is passed to a lifecycle tool. Trust worktree/session/pane fields returned by tools — don't rediscover them.
 
@@ -73,7 +73,7 @@ Always create a new workspace. If the derived name already exists, derive a diff
 
 3. **After send** — don't wait, don't capture pane output. Report: workspace `<name>` + sent confirmation + `monitorCmd` (from `bw_status` footer). → framing.
 
-### `review bw` [`<name>`]
+### `review bw` `<name>`
 
 Reviews the worker's actual execution against the plan, not just its self-reported summary.
 
