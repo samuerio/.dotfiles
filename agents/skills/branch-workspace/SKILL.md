@@ -88,11 +88,9 @@ Dispatch is async; results surface in the spec dir (readable from the main works
 
 | Scenario | Action |
 |----------|--------|
-| Neither ralph `task.json` nor plan doc exists (bare `<intent>` text) | Stop. Don't generate a doc or dispatch. Ask the user for a plan doc, or point them at another way to proceed. |
-| Spec dir to mount doesn't exist at dispatch time | Stop. Report to the user; do not invent a path or dispatch without inputs. |
+| No usable planning artifact (spec dir missing, or spec dir has neither `task.json` nor `plan.md`) | Stop. Don't generate a doc, invent a path, or dispatch without inputs. Ask the user for a plan doc, or point them at another way to proceed. |
 | `state` not active, or pane busy at dispatch time | Stop, report status to user. Do not auto-fix via lifecycle tools. |
 | Worker pi/ralph exits non-zero | Not observed synchronously — surfaces only if the user later checks via `monitorCmd` or inspects the worktree. Don't assume success from the send alone. |
-| Worker won't write files (fresh worktree, project trust) | Non-interactive mode skips the trust prompt and follows global `defaultProjectTrust`; a worktree the project doesn't trust may block edits. Trust the project interactively first or configure trust; see `pi-headless` Pitfalls. |
 
 ### Conversation framing
 
