@@ -73,16 +73,12 @@ Always create a new workspace. If the derived name already exists, derive a diff
 
 3. **After send** — don't wait, don't capture pane output. Report: workspace `<name>` + sent confirmation + `monitorCmd` (from `bw_status` footer). → framing.
 
-### Result review
-
-Dispatch is async; results surface in the spec dir (readable from the main workspace through the symlink) and in the worktree diff. When the user asks to review results, read `.pi/spec/<ts>-<slug>/summary.txt` (pi, best-effort. A crashed worker may leave none) or `task.json`/`progress.txt` (ralph, check `passes: true`) alongside the worktree diff and `monitorCmd` output. Never treat a missing `summary.txt` as success.
-
 ### `review bw` [`<name>`]
 
 Reviews the worker's actual execution against the plan, not just its self-reported summary.
 
 1. `bw_status` on the exact `<name>` → confirm the workspace exists (state ≠ `missing`). Missing → fail fast (see **Failure modes**).
-2. **Gather** — read the plan (`plan.md` and/or `task.json`) in the mounted spec dir. Treat the completion artifacts per **Result review** (`summary.txt` for pi, `task.json` `passes` + `progress.txt` for ralph) as the worker's own account, not as verified fact.
+2. **Gather** — read the plan (`plan.md` and/or `task.json`) in the mounted spec dir. Treat `summary.txt` (pi, best-effort: a crashed worker may leave none, which is not itself a success signal) or `task.json`/`progress.txt` (ralph) as the worker's own account, not as verified fact.
 3. **Verify** — check what the plan asked for against the worktree itself (read the changed files, run tests/typecheck if applicable). Don't rely solely on the worker's self-report. Note where the worker's account and the actual state disagree.
 4. **Report** — present findings from step 3: what's done, what's missing or diverges, and any verification results.
 
