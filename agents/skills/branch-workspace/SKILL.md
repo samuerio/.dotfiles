@@ -62,10 +62,10 @@ Any task whose output is file changes (code/docs/tests/review comments).
 
    Both paths draw on the same planning pipeline: `plan-spec` produces `plan.md`, and `ralph` optionally converts that plan into a granular `task.json` in the same spec dir. When both artifacts exist, prefer the more refined one. Both paths read inputs through the `.bw/spec/current` mount (checklist step 3).
 
-   | Path | When | Command shape |
-   |------|------|---------------|
-   | **ralph** | A matching ralph `task.json` already exists this conversation — the further-refined artifact; takes priority over the pi path when both exist | `~/.agents/skills/ralph/scripts/ralph.sh <worktree>/.bw/spec/current` |
-   | **pi** (plan doc) | No `task.json` yet, but the spec dir has `plan.md` | `~/.agents/skills/pi-headless/scripts/piw --no-session -p @<worktree>/.bw/spec/current/plan.md "Implement exactly what this plan describes. When done, write a completion summary to <worktree>/.bw/spec/current/summary.txt: first line COMPLETE or FAILED plus a one-line summary, followed by files changed, verification run, and known issues."` |
+   | Path | When | Payload |
+   |------|------|---------|
+   | **ralph** | A matching ralph `task.json` already exists this conversation — the further-refined artifact; takes priority over the pi path when both exist | `<worktree>/.bw/spec/current` |
+   | **pi** (plan doc) | No `task.json` yet, but the spec dir has `plan.md` | `@<worktree>/.bw/spec/current/plan.md` + inline instruction: "Implement exactly what this plan describes. When done, write a completion summary to <worktree>/.bw/spec/current/summary.txt starting with COMPLETE or FAILED on the first line." |
 
 2. **Build & send command.**
 
