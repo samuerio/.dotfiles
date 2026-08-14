@@ -13,8 +13,8 @@
       "thinkingLevel": "high"
     },
     "smart": {
-      "provider": "opencode-go",
-      "modelId": "qwen3.7-max",
+      "provider": "deepseek",
+      "modelId": "deepseek-v4-flash",
       "thinkingLevel": "xhigh"
     },
     "deep": {
