@@ -803,7 +803,7 @@ const openPath = async (
         return;
     }
 
-    const command = process.platform === "darwin" ? "open" : "xdg-open";
+    const command = process.platform === "darwin" ? "open" : "code";
     const result = await pi.exec(command, [target.resolvedPath]);
     if (result.code !== 0) {
         const errorMessage =
