@@ -1015,6 +1015,56 @@ const addFileToPrompt = (ctx: ExtensionContext, target: FileEntry): void => {
     ctx.ui.notify(`Added ${mention} to prompt`, "info");
 };
 
+const runActionForFile = async (
+    pi: ExtensionAPI,
+    ctx: ExtensionContext,
+    selected: FileEntry,
+    gitRoot: string | null,
+): Promise<void> => {
+    const canQuickLook =
+        process.platform === "darwin" && !selected.isDirectory;
+    const editCheck = getEditableContent(selected);
+    const canDiff =
+        selected.isTracked && !selected.isDirectory && Boolean(gitRoot);
+
+    const action = await showActionSelector(ctx, {
+        canQuickLook,
+        canEdit: editCheck.allowed,
+        canDiff,
+    });
+    if (!action) {
+        return;
+    }
+
+    switch (action) {
+        case "quicklook":
+            await quickLookPath(pi, ctx, selected);
+            break;
+        case "open":
+            await openPath(pi, ctx, selected);
+            break;
+        case "edit":
+            if (!editCheck.allowed || editCheck.content === undefined) {
+                ctx.ui.notify(
+                    editCheck.reason ?? "File cannot be edited",
+                    "warning",
+                );
+                break;
+            }
+            await editPath(ctx, selected, editCheck.content);
+            break;
+        case "addToPrompt":
+            addFileToPrompt(ctx, selected);
+            break;
+        case "diff":
+            await openDiff(pi, ctx, selected, gitRoot);
+            break;
+        default:
+            await revealPath(pi, ctx, selected);
+            break;
+    }
+};
+
 const showFileSelector = async (
     ctx: ExtensionContext,
     files: FileEntry[],
@@ -1213,53 +1263,12 @@ const runFileBrowser = async (
 
         lastSelectedPath = selected.canonicalPath;
 
-        const canQuickLook =
-            process.platform === "darwin" && !selected.isDirectory;
-        const editCheck = getEditableContent(selected);
-        const canDiff =
-            selected.isTracked && !selected.isDirectory && Boolean(gitRoot);
-
         if (quickAction === "diff") {
             await openDiff(pi, ctx, selected, gitRoot);
             continue;
         }
 
-        const action = await showActionSelector(ctx, {
-            canQuickLook,
-            canEdit: editCheck.allowed,
-            canDiff,
-        });
-        if (!action) {
-            continue;
-        }
-
-        switch (action) {
-            case "quicklook":
-                await quickLookPath(pi, ctx, selected);
-                break;
-            case "open":
-                await openPath(pi, ctx, selected);
-                break;
-            case "edit":
-                if (!editCheck.allowed || editCheck.content === undefined) {
-                    ctx.ui.notify(
-                        editCheck.reason ?? "File cannot be edited",
-                        "warning",
-                    );
-                    break;
-                }
-                await editPath(ctx, selected, editCheck.content);
-                break;
-            case "addToPrompt":
-                addFileToPrompt(ctx, selected);
-                break;
-            case "diff":
-                await openDiff(pi, ctx, selected, gitRoot);
-                break;
-            default:
-                await revealPath(pi, ctx, selected);
-                break;
-        }
+        await runActionForFile(pi, ctx, selected, gitRoot);
     }
 };
 
@@ -1278,44 +1287,8 @@ export default function (pi: ExtensionAPI): void {
         },
     });
 
-    pi.registerShortcut("ctrl+shift+f", {
-        description: "Reveal the latest file reference in Finder",
-        handler: async (ctx) => {
-            const entries = ctx.sessionManager.getBranch();
-            const latest = findLatestFileReference(entries, ctx.cwd);
-
-            if (!latest) {
-                ctx.ui.notify(
-                    "No file reference found in the session",
-                    "warning",
-                );
-                return;
-            }
-
-            const canonical = toCanonicalPath(latest.path);
-            if (!canonical) {
-                ctx.ui.notify(`File not found: ${latest.display}`, "error");
-                return;
-            }
-
-            await revealPath(pi, ctx, {
-                canonicalPath: canonical.canonicalPath,
-                resolvedPath: canonical.canonicalPath,
-                displayPath: latest.display,
-                exists: true,
-                isDirectory: canonical.isDirectory,
-                status: undefined,
-                inRepo: false,
-                isTracked: false,
-                isReferenced: true,
-                hasSessionChange: false,
-                lastTimestamp: 0,
-            });
-        },
-    });
-
     pi.registerShortcut("ctrl+shift+r", {
-        description: "Quick Look the latest file reference",
+        description: "Open actions for the latest file reference",
         handler: async (ctx) => {
             const entries = ctx.sessionManager.getBranch();
             const latest = findLatestFileReference(entries, ctx.cwd);
@@ -1334,19 +1307,39 @@ export default function (pi: ExtensionAPI): void {
                 return;
             }
 
-            await quickLookPath(pi, ctx, {
-                canonicalPath: canonical.canonicalPath,
-                resolvedPath: canonical.canonicalPath,
-                displayPath: latest.display,
-                exists: true,
-                isDirectory: canonical.isDirectory,
-                status: undefined,
-                inRepo: false,
-                isTracked: false,
-                isReferenced: true,
-                hasSessionChange: false,
-                lastTimestamp: 0,
-            });
+            const gitRoot = await getGitRoot(pi, ctx.cwd);
+            let isTracked = false;
+            if (gitRoot && !canonical.isDirectory) {
+                const relativePath = path
+                    .relative(gitRoot, canonical.canonicalPath)
+                    .split(path.sep)
+                    .join("/");
+                const trackedResult = await pi.exec(
+                    "git",
+                    ["ls-files", "-z", "--error-unmatch", "--", relativePath],
+                    { cwd: gitRoot },
+                );
+                isTracked = trackedResult.code === 0;
+            }
+
+            await runActionForFile(
+                pi,
+                ctx,
+                {
+                    canonicalPath: canonical.canonicalPath,
+                    resolvedPath: canonical.canonicalPath,
+                    displayPath: latest.display,
+                    exists: true,
+                    isDirectory: canonical.isDirectory,
+                    status: undefined,
+                    inRepo: gitRoot !== null,
+                    isTracked,
+                    isReferenced: true,
+                    hasSessionChange: false,
+                    lastTimestamp: 0,
+                },
+                gitRoot,
+            );
         },
     });
 }
