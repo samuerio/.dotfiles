@@ -1,6 +1,6 @@
 ---
 name: session-notes
-description: Turn the current conversation, or a user-specified portion of it, into a reusable structured Markdown note under `.pi/note/`. Use whenever the user asks to take notes, save/write/log the discussion, summarize and save it, merge it into notes, or otherwise preserve conversation content as a reusable note. Automatically decide whether to create a new note or merge into one existing related note unless the user explicitly specifies the filename or asks for a new note.
+description: Turn the conversation (or a user-specified part) into a structured Markdown note under `.pi/note/`. Use when the user asks to take notes, save/log/summarize the discussion, or merge it into notes. Defaults to auto-choosing new vs. existing note unless the user specifies a filename or requests a new note.
 ---
 
 # Session Notes
@@ -9,16 +9,9 @@ Distill the current conversation into a useful Markdown note and save it under `
 
 ## Rules
 
-- Store notes in `.pi/note/`; create the directory if needed.
-- Use `<topic-slug>.md` as the filename.
-  - Match the conversation language.
-  - Keep the slug short, descriptive, and free of spaces.
-- Distill rather than transcribe:
-  - Remove small talk, failed detours, and tool mechanics.
-  - Keep conclusions, methods, useful code, decisions, and action items.
-- Choose headings and structure freely based on the content.
-- Keep rewritten paragraphs concise; target at most 240 characters each.
-- Never modify unrelated notes.
+- Store notes in `.pi/note/` (create if needed) as `<topic-slug>.md`, with a short, descriptive, space-free slug matching the conversation's language.
+- Distill rather than transcribe: drop small talk, failed detours, and tool mechanics; keep conclusions, methods, useful code, decisions, and action items.
+- Choose headings/structure freely; keep rewritten paragraphs concise (≤240 chars each).
 
 ## Workflow
 
@@ -35,8 +28,6 @@ For complex or multi-topic material:
 - Avoid unnecessary outline confirmation; ask only when the intended organization is genuinely ambiguous.
 
 ### 2. Choose new note vs. existing note
-
-If the user specifies a filename/slug, use it directly.
 
 If the user explicitly asks for a new note or says not to merge, create a new file. If the filename already exists, disambiguate it, for example with a date.
 
