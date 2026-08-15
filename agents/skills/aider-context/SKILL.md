@@ -63,24 +63,26 @@ tmux capture-pane -p -J -t "$AIDER_PANE" -S -20    # confirm "Dropping all files
 
 Order matters: `/clear` must come before `/drop` so the history referencing those files is wiped before the file set itself changes.
 
-### Step 3. Aggressively gather context files
+### Step 3. Gather context files via the `context-scout` subagent
 
-Goal: **do not miss anything relevant**. No upper bound. Use relative paths. Strategy:
+Step 3 runs in an **isolated context** through the `subagent` tool, using the preset agent `context-scout` (user-level, `~/.pi/agent/agents/context-scout.md`; read-only toolset plus `bash` for search pipelines). This keeps the flood of `rg` output out of the main context — the main agent consumes only the final file list. The preset implements the full gathering strategy (keywords → direct hits → reverse-reference expansion with no depth cap → adjacent artifacts; breadth over precision, no upper bound, relative paths, dedup + sort).
 
-1. Extract candidate symbols/keywords from `<task>`: identifiers, file/module names, domain nouns, error strings.
-2. For each keyword, run `rg -l --hidden -g '!.git' '<keyword>'` in `cwd` to find direct hits.
-3. For each hit file, **expand reverse references fully** (no depth cap):
-   - find files that import / require / reference it by basename or module path
-   - recurse on each newly discovered file the same way
-   - keep a visited set to avoid loops; stop only when no new files appear
-4. Pull in adjacent artifacts:
-   - matching test files (`*_test.*`, `*.test.*`, `tests/**`, `__tests__/**`)
-   - sibling files in the same module/directory if the directory is small (≤ ~10 files)
-   - `ARCHITECTURE.md`, `AGENTS.md`, `README.md` if they reference any hit file
-   - relevant config (`package.json`, `tsconfig*.json`, `pyproject.toml`, `Cargo.toml`, etc.) only if the task touches build/deps
-5. Normalize all paths to be **relative to `cwd`**. Deduplicate. Sort for deterministic batches.
+Invoke:
 
-The user explicitly chose breadth over precision. Err on the side of inclusion.
+```
+subagent { agent: "context-scout", task: <task>, cwd: <pi's cwd>, timeoutMs: 300000 }
+```
+
+**Parse the result strictly.** Success requires all of:
+
+1. envelope `status=done`
+2. a `KEYWORDS: ...` line
+3. exactly one fenced code block, one relative path per line (the file list)
+
+**On any failure → fast fail.** Do **not** fall back to inline gathering — it would flood the main context with search output, defeating the delegation. Abort the whole `/aider` run and report to the user:
+
+- the envelope `status=` value and `errorMessage` (if any)
+- the `session=` JSONL path, with the resume suggestion: `subagent { resume: <path>, task: <steering prompt> }` — the child keeps its gathered progress, so resuming is usually cheaper than a fresh re-run
 
 ### Step 4. Send /add in batches
 
@@ -126,6 +128,8 @@ Always include:
 ## Failure modes
 
 - **Not in tmux** → abort with clear message.
+- **`context-scout` subagent fails** (envelope `status=` is not `done`, or the `KEYWORDS:` line / code block is missing) → **fast fail**: abort the run, report `status`, `errorMessage`, and the `session=` path; suggest resume or re-run. Never fall back to inline gathering.
+- **`subagent` tool unavailable** → abort with a clear message telling the user the skill depends on the `subagent` extension (`eggmasonvalue/pi-subagent`) and the preset agent `~/.pi/agent/agents/context-scout.md`.
 - **Multiple aider panes** → abort, list them, ask user to pick (no flag yet to disambiguate).
 - **`wait-aider-ready.sh` times out (spawn only)** → capture the pane and surface it. Common cause: aider failed to start (missing API key, bad model name).
 - **Aider stuck in a confirmation prompt** after `/add` (e.g. `Add … to chat? (Y)n)`) → send `y` + Enter, re-capture, continue.
