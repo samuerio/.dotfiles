@@ -29,9 +29,7 @@ For complex or multi-topic material:
 
 ### 2. Choose new note vs. existing note
 
-If the user explicitly asks for a new note or says not to merge, create a new file. If the filename already exists, disambiguate it, for example with a date.
-
-Otherwise, decide freely whether to write into an existing related note or create a new one, based on your judgment of topic relevance.
+Default to creating a new note. Only merge into an existing note if the user points to one. If the intended slug already exists, ask the user whether to merge into it or save under a different name.
 
 ### 3. Write the note
 
@@ -41,7 +39,7 @@ Create `.pi/note/<slug>.md` with a structure appropriate to the content.
 
 #### Existing note
 
-Read the full note and update relevant content in place rather than simply appending — beyond that, use your judgment on how best to integrate the new information.
+Read the full note and integrate new content in place (not just appended), using judgment on structure.
 
 ### 4. Report
 
