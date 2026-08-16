@@ -10,110 +10,59 @@ Drive an interactive `aider` REPL in a sibling tmux pane to refresh its file con
 
 **Trigger**: user message of the form `/aider <task description>`.
 
-## Important: tmux socket
+## tmux socket & preconditions
 
-Aider runs in the user's everyday tmux session, **not** the agent's private socket from the `tmux` SKILL. Therefore every tmux command in this skill uses the **default socket** (no `-S` flag). Do not import the `claude-tmux-sockets` convention here.
+Aider runs in the user's everyday tmux session, so every tmux command in this skill uses the **default socket** (no `-S` flag; ignore the `tmux` SKILL's private-socket convention). Pi must be running inside tmux (`$TMUX` non-empty). The aider pane (if any) must be in the **same session and same window** as pi. Aider's working directory equals pi's `cwd` (assumed; do not verify).
 
-## Preconditions
+## Send-capture pattern
 
-1. Pi must be running inside tmux. If `$TMUX` is empty, abort with an error.
-2. The aider pane (if any) must be in the **same session and same window** as pi.
-3. Aider's working directory must equal pi's `cwd` (assumed; do not verify).
-
-## Workflow
-
-### Step 1. Locate or spawn the aider pane
-
-Run `scripts/find-aider-pane.sh`. It identifies aider panes by `pane_title` (which the shell's title hook sets to the launching command, e.g. `aider --model ...`). It does **not** scrape pane content, so historical `aider` text in scrollback won't cause false positives.
-
-Behavior by exit code:
-
-- **0**: stdout has one `pane_id`. Use it as `$AIDER_PANE`.
-- **1**: not in tmux. Abort and tell the user.
-- **2**: no aider pane found. **Spawn one**:
-  1. Identify pi's own pane via the `$TMUX_PANE` environment variable (do **not** use `tmux display-message -p '#{pane_id}'` without a target; that returns the active pane, which may not be pi's pane).
-  2. `tmux split-window -v -t "$TMUX_PANE"` (vertical split, new pane below pi).
-  3. The newly created pane becomes active. Capture its id: `NEW_PANE=$(tmux display-message -p -t '{last}' '#{pane_id}')` (or read from `tmux split-window -P -F '#{pane_id}'` directly when spawning).
-  4. Send the launch command to that pane:
-     `tmux send-keys -t "$NEW_PANE" -l -- 'aider --model openai/deepseek-v4-flash --no-gitignore'`
-     then `tmux send-keys -t "$NEW_PANE" Enter`.
-  5. **Re-focus pi's pane**: `tmux select-pane -t "$TMUX_PANE"`.
-  6. Wait for the aider banner with `scripts/wait-aider-ready.sh -t "$NEW_PANE" -T 60` (this is the only step that needs polling, because aider startup is slow).
-  7. Use `$NEW_PANE` as `$AIDER_PANE`.
-- **3**: multiple aider panes detected. Abort and report the pane ids; ask the user to disambiguate.
-
-### Step 2. Drop existing context
-
-Before gathering, clear aider's current file set **and** chat history. Aider's slash-commands are synchronous and near-instant; do **not** poll for the prompt (that races with the previous idle prompt). Just send, brief sleep, capture.
-
-Run `/clear` **first** to wipe chat history, then `/drop` to remove all files:
+Every interaction with the aider pane follows one pattern:
 
 ```bash
-# 1. Clear chat history
-tmux send-keys -t "$AIDER_PANE" -l -- '/clear'
+tmux send-keys -t "$AIDER_PANE" -l -- '<command>'
 tmux send-keys -t "$AIDER_PANE" Enter
-sleep 0.3
-
-# 2. Drop all files from the chat
-tmux send-keys -t "$AIDER_PANE" -l -- '/drop'
-tmux send-keys -t "$AIDER_PANE" Enter
-sleep 0.3
-tmux capture-pane -p -J -t "$AIDER_PANE" -S -20    # confirm "Dropping all files"
+sleep <brief>                                       # 0.3 for /clear & /drop, 0.5 for /add & /ls
+tmux capture-pane -p -J -t "$AIDER_PANE" -S -<N>    # inspect echoed output
 ```
 
-Order matters: `/clear` must come before `/drop` so the history referencing those files is wiped before the file set itself changes.
+Aider's slash-commands are synchronous and near-instant. Do **not** poll for the prompt (that races with the previous idle prompt); just send, brief sleep, capture.
 
-### Step 3. Gather context files via the `scout` subagent
+## Step 1. Locate or spawn the aider pane
 
-Step 3 runs in an **isolated context** through the `subagent` tool, using the preset agent `scout` (user-level, `~/.pi/agent/agents/context-scout.md`; read-only toolset plus `bash` for search pipelines). This keeps the flood of `rg` output out of the main context — the main agent consumes only the final file list. The preset implements the full gathering strategy (keywords → direct hits → reverse-reference expansion with no depth cap → adjacent artifacts; breadth over precision, no upper bound, relative paths, dedup + sort).
+Run `scripts/find-aider-pane.sh`. It matches panes by `pane_title` (the shell's title hook sets it to the launching command), not by pane content, so historical aider text in scrollback won't cause false positives. Exit codes:
 
-Invoke:
+- **0**: one `pane_id` on stdout. Use it as `$AIDER_PANE`.
+- **1**: not in tmux. Abort.
+- **2**: no aider pane found. Spawn one via `scripts/spawn-aider.sh -T 60` (splits below pi's pane, launches aider, re-focuses pi, waits for the startup banner; prints the new `pane_id`). Use it as `$AIDER_PANE`. On timeout, capture the pane and surface it to the user; common causes: aider failed to start (missing API key, bad model name).
+- **3**: multiple aider panes (ids on stdout). Abort, list them, ask the user to disambiguate.
+
+## Step 2. Drop existing context
+
+Clear aider's chat history and file set. Order matters: `/clear` first (wipes the history referencing the files), then `/drop` (removes all files). Use the send-capture pattern with a 0.3s sleep; confirm "Dropping all files" in the capture.
+
+## Step 3. Gather context files via the `scout` subagent
+
+Run in an isolated context through the `subagent` tool, using the preset agent `scout` (user-level, `~/.pi/agent/agents/context-scout.md`; read-only toolset plus `bash`). The preset owns the full gathering strategy; the main agent consumes only the final file list. Never fall back to inline gathering: the flood of `rg` output belongs in the child's context, not the main one.
 
 ```
 subagent { agent: "scout", task: <task>, cwd: <pi's cwd>, timeoutMs: 300000 }
 ```
 
-**Parse the result strictly.** Success requires all of:
+Parse the result strictly. Success requires all of: envelope `status=done`, a `KEYWORDS: ...` line, and exactly one fenced code block with one relative path per line (the file list).
 
-1. envelope `status=done`
-2. a `KEYWORDS: ...` line
-3. exactly one fenced code block, one relative path per line (the file list)
+On any failure, or if the `subagent` tool is unavailable (it comes from the `pi-subagent` extension and depends on the `context-scout.md` preset), **fast fail**: abort the whole `/aider` run and report to the user the envelope `status` and `errorMessage` (if any), plus the `session=` JSONL path with the resume suggestion `subagent { resume: <path>, task: <steering prompt> }` (the child keeps its gathered progress, so resuming is cheaper than a fresh re-run).
 
-**On any failure → fast fail.** Do **not** fall back to inline gathering — it would flood the main context with search output, defeating the delegation. Abort the whole `/aider` run and report to the user:
+## Step 4. Send /add in batches
 
-- the envelope `status=` value and `errorMessage` (if any)
-- the `session=` JSONL path, with the resume suggestion: `subagent { resume: <path>, task: <steering prompt> }` — the child keeps its gathered progress, so resuming is usually cheaper than a fresh re-run
+Aider accepts multiple files per `/add`. Batch by **20 files** to keep each line manageable and let aider tokenize between batches. Quote paths containing spaces. Use the send-capture pattern with a 0.5s sleep and `-S -100`. If a batch's capture shows aider waiting on a confirmation (e.g. `(Y)n)`), send `y` + Enter and re-capture before the next batch.
 
-### Step 4. Send /add in batches
+## Step 5. Verify with /ls
 
-Aider accepts multiple files per `/add`. Batch by **20 files** to keep each line manageable and let aider tokenize between batches.
+Send `/ls` via the send-capture pattern (0.5s, `-S -2000`). Parse the file list under headings like `Files in chat:` and `Read-only files:`, then compare with the intended set from Step 3:
 
-For each batch:
-
-```bash
-tmux send-keys -t "$AIDER_PANE" -l -- "/add file1 file2 ... file20"
-tmux send-keys -t "$AIDER_PANE" Enter
-sleep 0.5                                            # let aider echo "Added ... to the chat"
-tmux capture-pane -p -J -t "$AIDER_PANE" -S -100     # inspect for failures
-```
-
-Quote paths containing spaces. If a batch's capture shows aider is mid-prompt (e.g. a confirmation `(Y)n)` line), send `y` + Enter and re-capture before the next batch.
-
-### Step 5. Verify with /ls and report failures
-
-```bash
-tmux send-keys -t "$AIDER_PANE" -l -- '/ls'
-tmux send-keys -t "$AIDER_PANE" Enter
-sleep 0.5
-tmux capture-pane -p -J -t "$AIDER_PANE" -S -2000
-```
-
-Parse the `/ls` output. Aider lists files under headings like `Files in chat:` and `Read-only files:`. Build the set of files actually present.
-
-Compare with the intended set from Step 3:
-
-- **Missing files**: report them to the user as a list, with whatever rejection reason aider printed nearby (e.g. "matches gitignore", "not found", "outside repo"). Do **not** retry automatically.
+- **Missing files**: list them for the user with aider's nearby rejection reason (e.g. "matches gitignore", "not found", "outside repo"). Do **not** retry automatically.
 - **Extras** (rare; aider sometimes auto-adds related files): just note them.
+- If parsing fails, dump the raw capture in the report.
 
 ## Final report to user
 
@@ -122,15 +71,4 @@ Always include:
 1. The aider `pane_id` used (and whether it was spawned).
 2. Total files attempted, total confirmed in context.
 3. List of any missing files with reason.
-4. Copy-paste monitor command for the user:
-   `tmux attach -t <session>` (use the session from `tmux display-message -p '#S'`), then switch to the aider pane.
-
-## Failure modes
-
-- **Not in tmux** → abort with clear message.
-- **`context-scout` subagent fails** (envelope `status=` is not `done`, or the `KEYWORDS:` line / code block is missing) → **fast fail**: abort the run, report `status`, `errorMessage`, and the `session=` path; suggest resume or re-run. Never fall back to inline gathering.
-- **`subagent` tool unavailable** → abort with a clear message telling the user the skill depends on the `subagent` extension (`eggmasonvalue/pi-subagent`) and the preset agent `~/.pi/agent/agents/context-scout.md`.
-- **Multiple aider panes** → abort, list them, ask user to pick (no flag yet to disambiguate).
-- **`wait-aider-ready.sh` times out (spawn only)** → capture the pane and surface it. Common cause: aider failed to start (missing API key, bad model name).
-- **Aider stuck in a confirmation prompt** after `/add` (e.g. `Add … to chat? (Y)n)`) → send `y` + Enter, re-capture, continue.
-- **`/ls` parse fails** → fall back to dumping the raw capture in the report.
+4. Copy-paste monitor command: `tmux attach -t <session>` (session from `tmux display-message -p '#S'`), then switch to the aider pane.
