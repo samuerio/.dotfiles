@@ -63,14 +63,14 @@ tmux capture-pane -p -J -t "$AIDER_PANE" -S -20    # confirm "Dropping all files
 
 Order matters: `/clear` must come before `/drop` so the history referencing those files is wiped before the file set itself changes.
 
-### Step 3. Gather context files via the `context-scout` subagent
+### Step 3. Gather context files via the `scout` subagent
 
-Step 3 runs in an **isolated context** through the `subagent` tool, using the preset agent `context-scout` (user-level, `~/.pi/agent/agents/context-scout.md`; read-only toolset plus `bash` for search pipelines). This keeps the flood of `rg` output out of the main context — the main agent consumes only the final file list. The preset implements the full gathering strategy (keywords → direct hits → reverse-reference expansion with no depth cap → adjacent artifacts; breadth over precision, no upper bound, relative paths, dedup + sort).
+Step 3 runs in an **isolated context** through the `subagent` tool, using the preset agent `scout` (user-level, `~/.pi/agent/agents/context-scout.md`; read-only toolset plus `bash` for search pipelines). This keeps the flood of `rg` output out of the main context — the main agent consumes only the final file list. The preset implements the full gathering strategy (keywords → direct hits → reverse-reference expansion with no depth cap → adjacent artifacts; breadth over precision, no upper bound, relative paths, dedup + sort).
 
 Invoke:
 
 ```
-subagent { agent: "context-scout", task: <task>, cwd: <pi's cwd>, timeoutMs: 300000 }
+subagent { agent: "scout", task: <task>, cwd: <pi's cwd>, timeoutMs: 300000 }
 ```
 
 **Parse the result strictly.** Success requires all of:
