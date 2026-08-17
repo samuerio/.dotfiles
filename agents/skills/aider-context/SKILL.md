@@ -61,8 +61,6 @@ Send `/ls` (sleep `0.5`, capture `-S -2000`) and parse files under `Files in cha
 
 Always report:
 
-1. aider `pane_id` and whether it was spawned.
-2. Action performed and paths acted on.
-3. Number of files attempted and confirmed in context.
-4. Missing/rejected files and reasons.
-5. Monitor: `tmux attach -t $(tmux display-message -p '#S')` — tell the user to switch to the aider pane.
+1. Action performed and paths acted on.
+2. Number of files attempted and confirmed in context.
+3. Missing/rejected files and reasons.
