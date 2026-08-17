@@ -25,16 +25,7 @@ Run `scripts/find-aider-pane.sh` and handle its exit code:
 
 Record whether the pane was existing or spawned.
 
-### 2. Parse the action
-
-From the user's request, determine:
-
-- **reset** — "reset", "start over", "clear and add", etc.
-- **add** — add/include files without reset language.
-- **drop** — remove/drop specific files.
-- **clear** — clear all files without adding replacements.
-
-### 3. Apply the action
+### 2. Apply the action
 
 Interaction pattern for every aider command:
 
@@ -45,19 +36,19 @@ sleep <delay>
 tmux capture-pane -p -J -t "$AIDER_PANE" -S -<lines>
 ```
 
-| Action | Commands | sleep | capture |
+| Action (trigger words) | Commands | sleep | capture |
 |---|---|---|---|
-| reset | `/clear`, `/drop`, then `/add <paths>` if paths exist | 0.3 / 0.3 / 0.5 | -100 |
-| clear | `/clear`, `/drop` | 0.3 | -100 |
-| add   | `/add <paths>` | 0.5 | -100 |
-| drop  | `/drop <paths>` | 0.3 | -100 |
+| reset ("reset", "start over", "clear and add") | `/clear`, `/drop`, then `/add <paths>` if paths exist | 0.3 / 0.3 / 0.5 | -100 |
+| clear (clear all, no replacement) | `/clear`, `/drop` | 0.3 | -100 |
+| add (add/include, no reset language) | `/add <paths>` | 0.5 | -100 |
+| drop (remove/drop specific files) | `/drop <paths>` | 0.3 | -100 |
 
 Notes:
 - For a full clear/reset, confirm the capture contains `Dropping all files`.
 - Quote paths containing spaces. Send all added files in one `/add <paths>` command.
 - If `/add` shows a confirmation prompt such as `(Y)n)`, send `y` + Enter once and capture again.
 
-### 4. Verify
+### 3. Verify
 
 Send `/ls` (sleep `0.5`, capture `-S -2000`) and parse files under `Files in chat:` and `Read-only files:`. Compare against the requested state:
 
