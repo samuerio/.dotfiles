@@ -2,11 +2,11 @@
     "enabled": true,
     "allowed": [
         {
-            "id": "opencode-go/deepseek-v4-flash",
-            "thinkingLevels": ["high", "xhigh", "max"],
-            "coding_index": 50,
+            "id": "opencode-go/gpt-5.6-luna",
+            "thinkingLevels": ["medium", "high", "xhigh", "max"],
+            "coding_index": 52,
             "description": "Great default for most coding tasks"
         }
     ],
-    "default": "opencode-go/deepseek-v4-flash"
+    "default": "opencode-go/gpt-5.6-luna"
 }
