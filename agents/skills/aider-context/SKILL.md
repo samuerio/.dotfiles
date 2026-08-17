@@ -35,18 +35,18 @@ tmux send-keys -t "$AIDER_PANE" Enter
 sleep <delay>
 tmux capture-pane -p -J -t "$AIDER_PANE" -S -<lines>
 ```
+Choose `<delay>` based on the command and pane responsiveness; do not omit the wait.
 
-| Action (trigger words) | Commands | sleep | capture |
-|---|---|---|---|
-| reset ("reset", "start over", "clear and add") | `/clear`, `/drop`, then `/add <paths>` if paths exist | 0.3 / 0.3 / 0.5 | -100 |
-| clear (clear all, no replacement) | `/clear`, `/drop` | 0.3 | -100 |
-| add (add/include, no reset language) | `/add <paths>` | 0.5 | -100 |
-| drop (remove/drop specific files) | `/drop <paths>` | 0.3 | -100 |
+| Action (trigger words) | Commands |
+|---|---|
+| reset ("reset", "start over", "clear and add") | `/clear`, `/drop`, then `/add <paths>` if paths exist |
+| clear (clear all, no replacement) | `/clear`, `/drop` |
+| add (add/include, no reset language) | `/add <paths>` |
+| drop (remove/drop specific files) | `/drop <paths>` |
 
 Notes:
 - For a full clear/reset, confirm the capture contains `Dropping all files`.
 - Quote paths containing spaces. Send all added files in one `/add <paths>` command.
-- If `/add` shows a confirmation prompt such as `(Y)n)`, send `y` + Enter once and capture again.
 
 ### 3. Verify
 
