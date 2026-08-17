@@ -17,7 +17,14 @@ import type { Dirent } from "node:fs";
 // =============================================================================
 
 type ModeName = string;
-type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+type ThinkingLevel =
+    | "off"
+    | "minimal"
+    | "low"
+    | "medium"
+    | "high"
+    | "xhigh"
+    | "max";
 
 type ModeSpec = {
     provider?: string;
@@ -286,6 +293,7 @@ function normalizeThinkingLevel(level: unknown): ThinkingLevel | undefined {
         "medium",
         "high",
         "xhigh",
+        "max",
     ];
     return allowed.includes(v) ? v : undefined;
 }
@@ -725,6 +733,7 @@ const ALL_THINKING_LEVELS: ThinkingLevel[] = [
     "medium",
     "high",
     "xhigh",
+    "max",
 ];
 const THINKING_UNSET_LABEL = "(don't change)";
 
