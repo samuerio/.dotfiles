@@ -10,7 +10,6 @@ Manage the file context of an interactive `aider` REPL in a sibling tmux pane.
 
 ## Rules
 
-- Only act on file paths the user explicitly named — never search the workspace or infer relevant files, even if the request sounds like it implies specific files ("add the files we just edited"). If the action or paths are ambiguous, ask the user to clarify.
 - Use the default tmux socket (never `-S`). Pi must already be inside tmux (`$TMUX` non-empty). Assume aider's cwd equals pi's cwd; do not verify it.
 
 ## Steps
@@ -34,8 +33,6 @@ From the user's request, determine:
 - **add** — add/include files without reset language.
 - **drop** — remove/drop specific files.
 - **clear** — clear all files without adding replacements.
-
-If add/drop/reset requires files but no explicit paths were given, stop and ask for paths.
 
 ### 3. Apply the action
 
