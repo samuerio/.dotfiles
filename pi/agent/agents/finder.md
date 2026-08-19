@@ -1,6 +1,31 @@
 ---
 name: finder
-description: Intelligently search your codebase: Use it for complex, multi-step search tasks where you need to find code based on functionality or concepts rather than exact matches.
+description: >
+  Intelligently search your codebase: Use it for complex, multi-step search tasks where you need to find code based on functionality or concepts rather than exact matches. Anytime you want to chain multiple grep calls you should use this tool.
+
+  **WHEN TO USE THIS TOOL:**
+
+  * You must locate code by behavior or concept
+  * You need to run multiple greps in sequence
+  * You must correlate or look for connection between several areas of the codebase.
+  * You must filter broad terms ("config", "logger", "cache") by context.
+  * You need answers to questions such as "Where do we validate JWT authentication headers?" or "Which module handles file-watcher retry logic"
+
+  **WHEN NOT TO USE THIS TOOL:**
+
+  * When you know the exact file path - use Read directly
+  * When looking for specific symbols or exact strings - use glob or Grep
+  * When you need to create, modify files, or run terminal commands
+
+  **USAGE GUIDELINES:**
+
+  1. Always spawn multiple finder agents in parallel to maximise speed.
+  2. Formulate your query as a precise engineering request.
+     ✓ "Find every place we build an HTTP error response."
+     ✗ "error handling search"
+  3. Name concrete artefacts, patterns, or APIs to narrow scope (e.g., "Express middleware", "fs.watch debounce").
+  4. State explicit success criteria so the agent knows when to stop (e.g., "Return file paths and line numbers for all JWT verification calls").
+  5. Never issue vague or exploratory commands - be definitive and goal-oriented.
 tools: read, bash
 ---
 
