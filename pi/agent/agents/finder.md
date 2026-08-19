@@ -19,7 +19,7 @@ description: >
 
   **USAGE GUIDELINES:**
 
-  1. Always spawn multiple finder agents in parallel to maximise speed.
+  1. Always spawn multiple finder agents in parallel to maximise speed, with a maximum of 3 concurrent agents.
   2. Formulate your query as a precise engineering request.
      ✓ "Find every place we build an HTTP error response."
      ✗ "error handling search"
