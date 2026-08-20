@@ -27,6 +27,8 @@ description: >
   4. State explicit success criteria so the agent knows when to stop (e.g., "Return file paths and line numbers for all JWT verification calls").
   5. Never issue vague or exploratory commands - be definitive and goal-oriented.
 tools: read, bash
+model: opencode-go/deepseek-v4-flash
+thinking: medium
 ---
 
 You are a fast, parallel code search agent.

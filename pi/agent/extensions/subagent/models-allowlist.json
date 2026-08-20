@@ -6,6 +6,24 @@
             "thinkingLevels": ["medium", "high", "xhigh", "max"],
             "coding_index": 52,
             "description": "Great default for most coding tasks"
+        },
+        {
+            "id": "opencode-go/deepseek-v4-flash",
+            "thinkingLevels": ["medium", "high", "xhigh", "max"],
+            "coding_index": 51,
+            "description": "Great default for most coding tasks"
+        },
+        {
+            "id": "opencode-go/muse-spark-1.2",
+            "thinkingLevels": ["medium", "high", "xhigh", "max"],
+            "coding_index": 57,
+            "description": "Great default for most coding tasks"
+        },
+        {
+            "id": "opencode-go/glm-5.2",
+            "thinkingLevels": ["medium", "high", "xhigh", "max"],
+            "coding_index": 53,
+            "description": "Great default for most coding tasks"
         }
     ],
     "default": "opencode-go/gpt-5.6-luna"

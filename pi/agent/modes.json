@@ -14,8 +14,8 @@
     },
     "smart": {
       "provider": "opencode-go",
-      "modelId": "gpt-5.6-luna",
-      "thinkingLevel": "max"
+      "modelId": "glm-5.2",
+      "thinkingLevel": "medium"
     },
     "deep": {
       "provider": "opencode-go",
