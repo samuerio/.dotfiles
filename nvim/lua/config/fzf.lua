@@ -23,14 +23,8 @@ vim.g['fzf_action'] = {
 }
 
 vim.g.fzf_history_dir = '~/.local/share/fzf-history'
-
--- 使用 ripgrep 列出文件，自动尊重 .gitignore，git 和非 git 目录均可用
-vim.env.FZF_DEFAULT_COMMAND = 'rg --files --hidden --glob "!.git"'
+vim.env.FZF_DEFAULT_COMMAND = 'rg --files'
 
 utils.nmap('<leader>f', ':Files <CR>')
-utils.nmap('<leader>h', ':Ag <CR>')
+utils.nmap('<leader>h', ':RG <CR>')
 utils.nmap('<leader>;', ':History:<CR>')
-
-vim.cmd([[
-    command! -bang -nargs=* Ag call fzf#vim#ag(<q-args>, {'options': '--delimiter : --nth 4..'}, <bang>0)
-]])
