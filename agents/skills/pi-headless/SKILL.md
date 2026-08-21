@@ -139,6 +139,8 @@ For the full event schema and more recipes, see [`references/json-mode-events.md
 | `--no-skills` | disable auto-discovery of skills; only explicitly passed `--skill` paths are loaded |
 | `-e` / `--extension <path>` | load an extension from an explicit path; supports local file or remote repo URL |
 | `--no-extensions` | disable auto-discovery of extensions; only explicitly passed `-e` paths are loaded |
+| `--system-prompt <text>` | replace the default coding-assistant system prompt entirely (custom persona, non-coding worker, etc.) |
+| `--append-system-prompt <text>` | append text or file contents to the system prompt; repeatable to stack multiple additions |
 
 ## Common Workflows
 
