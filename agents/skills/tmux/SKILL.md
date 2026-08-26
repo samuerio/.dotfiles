@@ -69,6 +69,11 @@ Inspect the last 10 lines. The pane is **ready** if the last non-empty line matc
 ## Sending input safely
 
 - Prefer literal sends to avoid shell splitting: `tmux -S <socket> send-keys -t target -l -- "$cmd"`
+- **`-l` sends everything literally — a trailing `Enter` would be typed as the word "Enter", not the key.** Submit in two steps:
+  ```bash
+  tmux -S <socket> send-keys -t <target> -l -- "$cmd"
+  tmux -S <socket> send-keys -t <target> Enter
+  ```
 - When composing inline commands, use single quotes or ANSI C quoting to avoid expansion: `tmux ... send-keys -t target -- $'python3 -m http.server 8000'`.
 - To send control keys: `tmux ... send-keys -t target C-c`, `C-d`, `C-z`, `Escape`, etc.
 
@@ -91,7 +96,7 @@ Some special rules for processes:
 
 ## Interactive tool recipes
 
-- **Python REPL**: `tmux ... send-keys -- 'python3 -q' Enter`; wait for `^>>>`; send code with `-l`; interrupt with `C-c`. Always with `PYTHON_BASIC_REPL`.
+- **Python REPL**: `tmux ... send-keys -- 'python3 -q' Enter`; wait for `^>>>`; send code with `send-keys -l -- "$code"` followed by a separate `send-keys Enter` call; interrupt with `C-c`. Always with `PYTHON_BASIC_REPL`.
 - **gdb**: `tmux ... send-keys -- 'gdb --quiet ./a.out' Enter`; disable paging `tmux ... send-keys -- 'set pagination off' Enter`; break with `C-c`; issue `bt`, `info locals`, etc.; exit via `quit` then confirm `y`.
 - **Other TTY apps** (ipdb, psql, mysql, node, bash): same pattern—start the program, poll for its prompt, then send literal text and Enter.
 

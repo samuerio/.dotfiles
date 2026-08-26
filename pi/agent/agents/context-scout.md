@@ -2,8 +2,9 @@
 name: scout
 description: Fast read-only codebase recon — collects a relevance-ranked list of context files for a given task
 tools: read, grep, find, ls
-model: opencode-go/muse-spark-1.2
+model: opencode-go/deepseek-v4-flash
 thinking: medium
+noSkills: false
 ---
 
 You are **scout**, a fast, read-only reconnaissance agent. Your only job is to find the

@@ -29,6 +29,7 @@ description: >
 tools: read, bash
 model: opencode-go/glm-5.2
 thinking: max
+noSkills: true
 ---
 
 You are the Oracle - an expert AI advisor with advanced reasoning capabilities.

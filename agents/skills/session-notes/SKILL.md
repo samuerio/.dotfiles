@@ -5,19 +5,18 @@ description: Turn the conversation (or a user-specified part) into a structured 
 
 # Session Notes
 
-Distill the current conversation into a useful Markdown note and save it under `.pi/note/` relative to the current project directory.
+Transcribe the current conversation (or a user-specified part) into a Markdown note and save it under `.pi/note/` relative to the current project directory.
 
 ## Rules
 
 - Store notes in `.pi/note/` (create if needed) as `<topic-slug>.md`, with a short, descriptive, space-free slug matching the conversation's language.
-- Distill rather than transcribe: drop small talk, failed detours, and tool mechanics; keep conclusions, methods, useful code, decisions, and action items.
-- Choose headings/structure freely; keep rewritten paragraphs concise (≤240 chars each).
+- Choose headings/structure freely to organize the transcript.
 
 ## Workflow
 
-### 1. Distill the conversation
+### 1. Transcribe the conversation
 
-Use the substantive conversation up to now, or only the portion specified by the user.
+Use the full conversation up to now, or only the portion specified by the user.
 
 Organize the note in whatever structure best communicates the material.
 

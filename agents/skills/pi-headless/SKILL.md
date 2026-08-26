@@ -139,8 +139,9 @@ For the full event schema and more recipes, see [`references/json-mode-events.md
 | `--no-skills` | disable auto-discovery of skills; only explicitly passed `--skill` paths are loaded |
 | `-e` / `--extension <path>` | load an extension from an explicit path; supports local file or remote repo URL |
 | `--no-extensions` | disable auto-discovery of extensions; only explicitly passed `-e` paths are loaded |
-| `--system-prompt <text>` | replace the default coding-assistant system prompt entirely (custom persona, non-coding worker, etc.) |
-| `--append-system-prompt <text>` | append text or file contents to the system prompt; repeatable to stack multiple additions |
+| `--system-prompt <text\|path>` | replace the default coding-assistant system prompt entirely (custom persona, non-coding worker, etc.). If the value is an existing file path, its contents are loaded as the prompt |
+| `--append-system-prompt <text\|path>` | append text or file contents to the system prompt; repeatable to stack multiple additions. If the value is an existing file path, its contents are loaded and appended |
+| `--no-context-files` / `-nc` | disable auto-discovery of context files (`AGENTS.md`, `CLAUDE.md`, `AGENTS.override.md`) from the global directory, cwd, and parent directories |
 
 ## Common Workflows
 
@@ -166,6 +167,28 @@ cat handoff-for-impl.md \
 The handoff doc contains both the plan and the implementation instruction in one file. The worker receives everything it needs from the doc alone.
 
 > In both cases the worker runs to completion and exits, no follow-up turns. Keep the input doc focused so pi has everything it needs in a single pass.
+
+### Custom System Prompt
+
+Replace or extend the default coding-assistant system prompt, e.g. to run pi as a non-coding worker or with a custom persona. Pass a bare file path (no `@` prefix) to load the prompt from a file; if the path exists it is read and used as the prompt contents:
+
+```bash
+{baseDir}/scripts/piw --no-session \
+  --system-prompt /path/to/prompt.md \
+  -p "Run task"
+```
+
+`--append-system-prompt` keeps the default prompt and adds to it; `--system-prompt` replaces it entirely. Both accept inline text or a bare file path. Note this differs from `-p @file` / `--print @file`, which uses the `@` prefix to read a file into the user prompt.
+
+Combine with `--no-extensions`, `--no-skills`, and `--no-context-files` to fully isolate the run from project-level instructions and auto-discovered extensions/skills:
+
+```bash
+{baseDir}/scripts/piw --no-session \
+  --no-extensions --no-skills --no-context-files \
+  --tools read,bash \
+  --system-prompt /path/to/prompt.md \
+  -p "Run task"
+```
 
 ### Read-Only Mode
 

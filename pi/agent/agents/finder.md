@@ -29,6 +29,7 @@ description: >
 tools: read, bash
 model: opencode-go/deepseek-v4-flash
 thinking: medium
+noSkills: true
 ---
 
 You are a fast, parallel code search agent.

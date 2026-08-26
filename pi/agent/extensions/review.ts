@@ -533,6 +533,7 @@ Provide your findings in a clear, structured format:
 5. Ignore trivial style issues unless they obscure meaning or violate documented standards.
 6. Do not generate a full PR fix — only flag issues and optionally provide short suggestion blocks.
 7. End with the required "Human Reviewer Callouts (Non-Blocking)" section and all applicable bold callouts (no yes/no).
+8. Response in chinese.
 
 Output all findings the author would fix if they knew about them. If there are no qualifying findings, explicitly state the code looks good. Don't stop at the first finding - list every qualifying issue. Then append the required non-blocking callouts section.`;
 
