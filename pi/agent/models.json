@@ -1,5 +1,26 @@
 {
     "providers": {
+        "zhipu": {
+            "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
+            "api": "openai-completions",
+            "apiKey": "$ZHIPUAI_API_KEY",
+            "models": [
+                {
+                    "id": "glm-5.3-flash",
+                    "name": "glm-5.3-flash",
+                    "reasoning": true,
+                    "input": ["text", "image"],
+                    "contextWindow": 256000,
+                    "maxTokens": 32000,
+                    "cost": {
+                        "input": 0.075,
+                        "output": 0.25,
+                        "cacheRead": 0.015,
+                        "cacheWrite": 0
+                    }
+                }
+            ]
+        },
         "aliyun": {
             "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
             "api": "openai-completions",

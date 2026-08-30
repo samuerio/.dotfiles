@@ -1,0 +1,6 @@
+{
+    "model": "opencode-go/deepseek-v4-flash",
+    "thinking": "medium",
+    "tools": ["write", "edit", "read", "bash", "finder", "oracle"],
+    "noSkills": true
+}
