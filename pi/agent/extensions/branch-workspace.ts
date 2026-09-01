@@ -286,9 +286,13 @@ function bwRunDir(tasksDir: string, alias: string): string {
 	return path.join(tasksDir, bwUuid(alias));
 }
 
-/** Per-task session history dir: `<tasksDir>/sessions/<uuid>/` (child --session-dir). */
-function bwSessionsDir(tasksDir: string, alias: string): string {
-	return path.join(tasksDir, "sessions", bwUuid(alias));
+/**
+ * Flat session dir: `<tasksDir>/sessions/` (child --session-dir). Session
+ * files are named `<timestamp>_<uuid>.jsonl` by pi, so no per-task subdir is
+ * needed; the dir is append-only history (never wiped on re-dispatch).
+ */
+function bwSessionsDir(tasksDir: string): string {
+	return path.join(tasksDir, "sessions");
 }
 
 async function readBwResult(tasksDir: string, alias: string): Promise<BwChildResult | null> {
@@ -900,8 +904,9 @@ async function dispatchBackgroundTask(
 		return { ok: false, alias, worktreePath, error: "No model is active. Cannot dispatch background task." };
 	}
 
-	// 5. Run artifacts: latest-wins — a previous closed run of the same alias
-	// leaves stale task.md / result.json / sessions behind; wipe and recreate.
+	// 5. Run artifacts: latest-wins on the run dir (fixed file names task.md /
+	// result.json need wiping); the flat sessions dir is append-only — its
+	// `<timestamp>_<uuid>.jsonl` names never collide, old runs stay as history.
 	const runDir = bwRunDir(env.tasksDir, alias);
 	let resultPath: string;
 	let promptPath: string;
@@ -909,8 +914,7 @@ async function dispatchBackgroundTask(
 	try {
 		await rm(runDir, { recursive: true, force: true });
 		await mkdir(runDir, { recursive: true, mode: 0o700 });
-		sessionDir = bwSessionsDir(env.tasksDir, alias);
-		await rm(sessionDir, { recursive: true, force: true });
+		sessionDir = bwSessionsDir(env.tasksDir);
 		await mkdir(sessionDir, { recursive: true, mode: 0o700 });
 		promptPath = path.join(runDir, "task.md");
 		resultPath = path.join(runDir, "result.json");
@@ -936,6 +940,9 @@ async function dispatchBackgroundTask(
 	}
 
 	// 7. Child command: interactive Pi, unconditional --approve (autonomous run).
+	// Session id is unique per dispatch (<uuid>-<random>): pi resumes an
+	// existing session when the id matches, so a fixed uuid id would carry the
+	// previous run's context into the re-dispatched task.
 	const tmuxTarget = `${session}:0.0`;
 	const attachCommand = bwAttachCommand(alias);
 	const piArgs = [
@@ -944,7 +951,7 @@ async function dispatchBackgroundTask(
 		"--model", model,
 		"--thinking", thinking,
 		"--session-dir", sessionDir,
-		"--session-id", uuid,
+		"--session-id", `${uuid}-${randomUUID().slice(0, 6)}`,
 		"--name", session,
 		"--approve",
 		"--extension", EXTENSION_PATH,
