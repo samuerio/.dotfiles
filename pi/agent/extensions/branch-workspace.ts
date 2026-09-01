@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
+	DynamicBorder,
 	truncateHead,
 	type ExtensionAPI,
 	type ExtensionCommandContext,
@@ -15,7 +16,7 @@ import {
 	type Theme,
 	type ThemeColor,
 } from "@earendil-works/pi-coding-agent";
-import { Container, Text, type TUI } from "@earendil-works/pi-tui";
+import { Container, SelectList, Text, type SelectItem, type TUI } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
 // ─── Script Resolution ────────────────────────────────────────────
@@ -60,9 +61,7 @@ async function copyToClipboard(pi: ExtensionAPI, text: string): Promise<boolean>
  */
 const BLANK_ROW = "\u200B";
 
-/** Programmatic pane log tail density: batch overview vs single drill-down. */
-const BATCH_RAW_TAIL = 10;
-/** Single /bw-log: pane tail lines while running, output lines once settled. */
+/** Log action: pane tail lines while running, output lines once settled. */
 const LOG_PANE_TAIL = 12;
 const LOG_OUTPUT_LINES = 12;
 
@@ -449,12 +448,14 @@ async function selectBranchWorkspace(
 		return null;
 	}
 
-	// Display row: "<alias> (<taskStatus>, <dirty>) (no session)" — each mark
-	// omitted per facts. Map display strings back to facts to avoid parsing.
+	// Display row: "<alias> (<taskStatus>|running, <dirty>) (no session)" —
+	// each mark omitted per facts; running = live session, no result yet.
+	// Map display strings back to facts to avoid parsing.
 	const displayToFacts = new Map<string, BranchWorkspaceFacts>();
 	for (const bw of worktrees) {
 		const marks: string[] = [];
 		if (bw.taskStatus) marks.push(bw.taskStatus);
+		else if (bw.sessionExists) marks.push("running");
 		if (bw.dirty) marks.push("dirty");
 		const mark = marks.length > 0 ? ` (${marks.join(", ")})` : "";
 		const noSession = bw.sessionExists ? "" : " (no session)";
@@ -468,32 +469,183 @@ async function selectBranchWorkspace(
 
 type BranchWorkspaceAction = "log" | "status" | "vscode" | "close";
 
-/** Actions filtered by facts: session → log; worktree → vscode/close; status always. */
-function getAvailableActions(facts: BranchWorkspaceFacts): BranchWorkspaceAction[] {
-	const actions: BranchWorkspaceAction[] = [];
-	if (facts.sessionExists) actions.push("log");
-	actions.push("status");
-	if (facts.worktreePath !== undefined) actions.push("vscode", "close");
-	return actions;
-}
-
-function parsePositionalName(args: string, flagPatterns: RegExp[] = []): { name: string | undefined; rest: string } {
-	let stripped = args;
-	for (const re of flagPatterns) {
-		stripped = stripped.replace(re, "");
+/** Action labels for the selector, filtered by facts (session → log; worktree → vscode/close). */
+function bwActionItems(facts: BranchWorkspaceFacts): SelectItem[] {
+	const items: SelectItem[] = [];
+	if (facts.sessionExists) {
+		items.push({ value: "log", label: "Log (live pane / settled output)" });
 	}
-	const tokens = stripped.trim().split(/\s+/).filter(Boolean);
-	if (tokens.length === 0) return { name: undefined, rest: "" };
-	return { name: tokens[0], rest: tokens.slice(1).join(" ") };
+	items.push({ value: "status", label: "Status (facts + env)" });
+	if (facts.worktreePath !== undefined) {
+		items.push({ value: "vscode", label: "Open in VS Code" });
+		items.push({ value: "close", label: "Close (remove worktree + kill session)" });
+	}
+	return items;
 }
 
-async function resolveNameOrSelect(
-	pi: ExtensionAPI,
-	name: string | undefined,
+/** files.ts-style action selector: bordered SelectList returning the chosen action. */
+async function selectBwAction(
 	ctx: ExtensionCommandContext,
-): Promise<BranchWorkspaceFacts | null> {
-	if (name) return resolveBranchWorkspaceFacts(pi, name);
-	return selectBranchWorkspace(pi, ctx, "Select branch-workspace");
+	facts: BranchWorkspaceFacts,
+): Promise<BranchWorkspaceAction | null> {
+	const actions = bwActionItems(facts);
+	return ctx.ui.custom<BranchWorkspaceAction | null>((tui, theme, _kb, done) => {
+		const container = new Container();
+		container.addChild(new DynamicBorder((str) => theme.fg("accent", str)));
+		container.addChild(new Text(theme.fg("accent", theme.bold(`Action for "${facts.name}"`))));
+
+		const selectList = new SelectList(actions, actions.length, {
+			selectedPrefix: (text) => theme.fg("accent", text),
+			selectedText: (text) => theme.fg("accent", text),
+			description: (text) => theme.fg("muted", text),
+			scrollInfo: (text) => theme.fg("dim", text),
+			noMatch: (text) => theme.fg("warning", text),
+		});
+		selectList.onSelect = (item) => done(item.value as BranchWorkspaceAction);
+		selectList.onCancel = () => done(null);
+
+		container.addChild(selectList);
+		container.addChild(new Text(theme.fg("dim", "Press enter to confirm or esc to cancel")));
+		container.addChild(new DynamicBorder((str) => theme.fg("accent", str)));
+
+		return {
+			render(width: number) {
+				return container.render(width);
+			},
+			invalidate() {
+				container.invalidate();
+			},
+			handleInput(data: string) {
+				selectList.handleInput(data);
+				tui.requestRender();
+			},
+		};
+	});
+}
+
+// ─── Action Runners (executed directly by the /bw-list flow) ──────
+
+async function runBwStatusAction(
+	pi: ExtensionAPI,
+	ctx: ExtensionCommandContext,
+	facts: BranchWorkspaceFacts,
+): Promise<void> {
+	const env = await buildBranchWorkspaceEnv(pi, facts.name);
+	const lines = formatStatusText(env).split("\n");
+
+	// Attach hint only when a session exists, matching the log footer.
+	let footer: string | undefined;
+	if (env.monitorCmd) {
+		const copied = await copyToClipboard(pi, env.monitorCmd);
+		footer = `Monitor: ${env.monitorCmd}${copied ? " (copied)" : ""}`;
+	}
+
+	ctx.ui.setWidget("bw-status", buildWidget(lines, footer), { placement: "aboveEditor" });
+}
+
+async function runBwCloseAction(
+	pi: ExtensionAPI,
+	ctx: ExtensionCommandContext,
+	facts: BranchWorkspaceFacts,
+): Promise<void> {
+	// Worktree existence is a prerequisite for close.
+	if (facts.worktreePath === undefined) {
+		ctx.ui.notify(`Branch-workspace "${facts.name}" does not exist (no worktree).`, "error");
+		return;
+	}
+
+	// Interactive confirm maps to force:true; never close a dirty worktree without it.
+	let force = false;
+	if (facts.dirty) {
+		const proceed = await ctx.ui.confirm(
+			"Dirty Worktree",
+			`Branch-workspace "${facts.name}" has uncommitted changes. Close anyway?`,
+		);
+		if (!proceed) {
+			ctx.ui.notify("Cancelled.", "info");
+			return;
+		}
+		force = true;
+	}
+
+	const result = await closeBranchWorkspace(pi, { name: facts.name, force });
+	if (!result.ok) {
+		ctx.ui.notify(result.error ?? "close failed", "error");
+		return;
+	}
+	if (result.error) {
+		ctx.ui.notify(result.error, "warning");
+	}
+	ctx.ui.notify(formatCloseText(result), "info");
+}
+
+async function runBwLogAction(
+	pi: ExtensionAPI,
+	ctx: ExtensionCommandContext,
+	facts: BranchWorkspaceFacts,
+): Promise<void> {
+	const { name: bwName } = facts;
+
+	// Log observes the current task: a missing worktree fails fast.
+	if (facts.worktreePath === undefined) {
+		ctx.ui.notify(`Branch-workspace "${bwName}" does not exist (no worktree).`, "error");
+		return;
+	}
+
+	const env = await getTasksEnv(pi);
+	if (!env) {
+		ctx.ui.notify("Failed to resolve repo root for background-task artifacts.", "error");
+		return;
+	}
+	const session = bwSessionName(bwUuid(bwName));
+
+	const result = await readBwResult(env.tasksDir, bwName);
+	const startedAt = await readBwTaskStartedAt(env.tasksDir, bwName);
+	const duration = formatDuration(startedAt, result?.finishedAt);
+
+	// Attach line + footer render only while the session still exists.
+	const attachCommand = facts.sessionExists ? bwAttachCommand(bwName) : undefined;
+
+	if (!result && !facts.sessionExists) {
+		ctx.ui.notify(
+			`Background task "${bwName}" has not settled and its tmux session no longer exists — nothing to observe. Clean up via /bw-list (close).`,
+			"error",
+		);
+		return;
+	}
+
+	let paneOutput = "";
+	if (!result) {
+		const paneTarget = await discoverPaneTarget(pi, env.socketPath, session);
+		if (!paneTarget) {
+			ctx.ui.notify(`No pane found for session "${session}".`, "error");
+			return;
+		}
+		paneOutput = await capturePaneOutput(pi, env.socketPath, paneTarget, LOG_PANE_TAIL);
+	}
+
+	let footer: string | undefined;
+	if (attachCommand) {
+		const copied = await copyToClipboard(pi, attachCommand);
+		footer = `Monitor: ${attachCommand}${copied ? " (copied)" : ""}`;
+	}
+
+	const lines = formatBwLogWidgetLines(bwName, attachCommand, result, paneOutput, duration);
+	ctx.ui.setWidget("bw-log", buildWidget(lines, footer), { placement: "aboveEditor" });
+}
+
+async function runBwVscodeAction(
+	pi: ExtensionAPI,
+	ctx: ExtensionCommandContext,
+	facts: BranchWorkspaceFacts,
+): Promise<void> {
+	if (facts.worktreePath === undefined) {
+		ctx.ui.notify(`Branch-workspace "${facts.name}" does not exist (no worktree).`, "error");
+		return;
+	}
+
+	await pi.exec("code", [facts.worktreePath]);
+	ctx.ui.notify(`Opened VS Code for "${facts.name}" at ${facts.worktreePath}`, "info");
 }
 
 // ─── tmux Helpers ─────────────────────────────────────────────────
@@ -554,50 +706,7 @@ function truncateBwText(text: string): string {
 // ─── Pane Log Widgets ─────────────────────────────────────────────
 
 /**
- * Append the last rawTailLines of pane output to lines. Caller supplies the
- * banner (────── name ──────); shared by the batch /bw-log view.
- */
-function appendRawTailLines(lines: string[], paneOutput: string, rawTailLines: number): void {
-	const cleaned = paneOutput.replace(/\s+$/, "");
-	if (
-		!cleaned.trim() ||
-		cleaned === "(empty)" ||
-		cleaned === "(no pane)" ||
-		cleaned === "(no output)"
-	) {
-		lines.push(cleaned.trim() || "(no output)");
-		return;
-	}
-	const tail = cleaned.split("\n").slice(-rawTailLines);
-	if (tail.length === 0 || (tail.length === 1 && !tail[0].trim())) {
-		lines.push("(no output)");
-		return;
-	}
-	for (const row of tail) {
-		lines.push(row.length === 0 ? BLANK_ROW : row);
-	}
-}
-
-/** Branch-workspace banner. */
-function formatBatchNameHeader(name: string): string {
-	return `────── ${name} ──────`;
-}
-
-/** Batch /bw-log -b: name banner + short raw tail per worktree with a live session. */
-function formatBatchRawLines(captures: Array<{ name: string; output: string }>): string[] {
-	// Spacer rows (not ""): title ↔ first block, and between branch-workspace blocks
-	const lines: string[] = [`Batch · ${captures.length} live`, BLANK_ROW];
-
-	captures.forEach((c, i) => {
-		if (i > 0) lines.push(BLANK_ROW);
-		lines.push(formatBatchNameHeader(c.name), BLANK_ROW);
-		appendRawTailLines(lines, c.output, BATCH_RAW_TAIL);
-	});
-	return lines;
-}
-
-/**
- * Single /bw-log: subagent-style renderResult layout.
+ * Log action widget: subagent-style renderResult layout.
  * Running → live pane tail; settled → result output (+ error on failed).
  * The attach line renders only when the tmux session still exists
  * (attachCommand is undefined otherwise).
@@ -852,7 +961,7 @@ interface DispatchResult {
  * Create a fresh branch-workspace for alias (fail fast on duplicates), start an
  * interactive child Pi inside its tmux session with the given prompt, and
  * return immediately. Completion is reported via result.json (child reporter)
- * and observed through /bw-log and /bw-list.
+ * and observed through /bw-list.
  */
 async function dispatchBackgroundTask(
 	pi: ExtensionAPI,
@@ -966,8 +1075,8 @@ async function dispatchBackgroundTask(
 	].join(" ");
 
 	// 8. Fire and forget. Errors here leave a created worktree/session behind —
-	// point the caller at /bw-close for cleanup.
-	const cleanupHint = `worktree/session already created — clean up with /bw-close ${alias}`;
+	// point the caller at /bw-list (close) for cleanup.
+	const cleanupHint = `worktree/session already created — clean up with /bw-list (close ${alias})`;
 	const sent = await pi.exec("tmux", ["-S", env.socketPath, "send-keys", "-t", tmuxTarget, "-l", "--", childCommand]);
 	if (sent.code !== 0) {
 		return {
@@ -987,7 +1096,7 @@ async function dispatchBackgroundTask(
 		};
 	}
 
-	// 9. Return immediately — completion is observed via /bw-log and /bw-list.
+	// 9. Return immediately — completion is observed via /bw-list.
 	return {
 		ok: true,
 		alias,
@@ -995,7 +1104,7 @@ async function dispatchBackgroundTask(
 		worktreePath,
 		tmuxSession: session,
 		attachCommand,
-		monitorCommand: `/bw-log ${alias}`,
+		monitorCommand: "/bw-list",
 		provider,
 		model,
 		thinking,
@@ -1011,7 +1120,7 @@ function formatDispatchText(result: DispatchResult): string {
 		`Worktree: ${result.worktreePath}`,
 		`Attach: ${result.attachCommand}`,
 		`Monitor: ${result.monitorCommand}`,
-		`Clean up when done: /bw-close ${result.alias}`,
+		`Clean up when done: /bw-list → close ${result.alias}`,
 	].join("\n");
 }
 
@@ -1111,210 +1220,35 @@ export default function (pi: ExtensionAPI): void {
 		ctx.ui.setWidget("bw-status", undefined);
 	});
 
-	// ── /bw-list ──
+	// ── /bw-list ──  (single entry point: task list → action → execute, loop)
 	pi.registerCommand("bw-list", {
-		description: "List background-task worktrees (task status, dirty, session) and run an action. (For pane log of all sessions: /bw-log -b)",
+		description: "List background tasks (task status, dirty, session) and run an action (log / status / vscode / close)",
 		handler: async (_args, ctx) => {
-			// Select branch-workspace
-			const selected = await selectBranchWorkspace(pi, ctx, "Select branch-workspace");
-			if (!selected) return;
+			// files.ts pattern: esc at the action selector returns to the task
+			// list; esc at the task list exits. Actions run directly (no command
+			// pasting), so several tasks can be observed in one invocation.
+			while (true) {
+				const selected = await selectBranchWorkspace(pi, ctx, "Select background task");
+				if (!selected) return;
 
-			// Select action filtered by facts (session → log; worktree → vscode/close)
-			const actions = getAvailableActions(selected);
-			const action = await ctx.ui.select(`Action for "${selected.name}"`, actions) as BranchWorkspaceAction | undefined;
-			if (!action) return;
+				const action = await selectBwAction(ctx, selected);
+				if (!action) continue;
 
-			// Paste the command using positional argument for the selected branch-workspace.
-			// This works for all actions offered here (log / status / vscode / close).
-			// For a pane log of every branch-workspace with a live session, use `/bw-log -b` directly.
-			const cmd = `/bw-${action} ${selected.name}`;
-			ctx.ui.pasteToEditor(cmd);
-		},
-	});
-
-	// ── /bw-status [name] ──
-	// Branch-workspace status = facts + env (not pane log — use /bw-log for that).
-	// Display uses the same aboveEditor widget surface as /bw-log.
-	pi.registerCommand("bw-status", {
-		description:
-			"Show branch-workspace status (facts + env: worktreePath, session, dirty, taskStatus, …). Usage: /bw-status [name]",
-		handler: async (args, ctx) => {
-			const { name } = parsePositionalName(args);
-
-			const resolved = await resolveNameOrSelect(pi, name, ctx);
-			if (!resolved) return;
-			const { name: bwName } = resolved;
-
-			const env = await buildBranchWorkspaceEnv(pi, bwName);
-			const lines = formatStatusText(env).split("\n");
-
-			// Attach hint only when a session exists, matching /bw-log footer.
-			let footer: string | undefined;
-			if (env.monitorCmd) {
-				const copied = await copyToClipboard(pi, env.monitorCmd);
-				footer = `Monitor: ${env.monitorCmd}${copied ? " (copied)" : ""}`;
-			}
-
-			ctx.ui.setWidget("bw-status", buildWidget(lines, footer), { placement: "aboveEditor" });
-		},
-	});
-
-	// ── /bw-close [name] ──
-	pi.registerCommand("bw-close", {
-		description: "Close a branch-workspace (remove worktree + kill tmux session; run artifacts are kept). Usage: /bw-close [name]",
-		handler: async (args, ctx) => {
-			const { name } = parsePositionalName(args);
-
-			const facts = await resolveNameOrSelect(pi, name, ctx);
-			if (!facts) return;
-			const { name: bwName } = facts;
-
-			// Worktree existence is a prerequisite for close.
-			if (facts.worktreePath === undefined) {
-				ctx.ui.notify(`Branch-workspace "${bwName}" does not exist (no worktree).`, "error");
-				return;
-			}
-
-			// Interactive confirm maps to force:true; never close a dirty worktree without it.
-			let force = false;
-			if (facts.dirty) {
-				const proceed = await ctx.ui.confirm(
-					"Dirty Worktree",
-					`Branch-workspace "${bwName}" has uncommitted changes. Close anyway?`,
-				);
-				if (!proceed) {
-					ctx.ui.notify("Cancelled.", "info");
-					return;
+				switch (action) {
+					case "log":
+						await runBwLogAction(pi, ctx, selected);
+						break;
+					case "status":
+						await runBwStatusAction(pi, ctx, selected);
+						break;
+					case "vscode":
+						await runBwVscodeAction(pi, ctx, selected);
+						break;
+					case "close":
+						await runBwCloseAction(pi, ctx, selected);
+						break;
 				}
-				force = true;
 			}
-
-			const result = await closeBranchWorkspace(pi, { name: bwName, force });
-			if (!result.ok) {
-				ctx.ui.notify(result.error ?? "close failed", "error");
-				return;
-			}
-			if (result.error) {
-				ctx.ui.notify(result.error, "warning");
-			}
-			ctx.ui.notify(formatCloseText(result), "info");
-		},
-	});
-
-	// ── /bw-log [-b|--batch] [name] ──  (pane log; not /bw-status)
-	pi.registerCommand("bw-log", {
-		description: "Show background-task log (settled output when done, live pane while running). Usage: /bw-log [-b|--batch] [name]",
-		handler: async (args, ctx) => {
-			const batch = /(^|\s)(-b|--batch)\b/.test(args);
-			const { name } = parsePositionalName(args, [/(^|\s)(-b|--batch)\b/g]);
-
-			if (batch) {
-				const env = await getTasksEnv(pi);
-				if (!env) {
-					ctx.ui.notify("Failed to resolve repo root for background-task artifacts.", "error");
-					return;
-				}
-
-				const all = await listTaskWorktrees(pi);
-				const withSession = all.filter((w) => w.sessionExists);
-				if (withSession.length === 0) {
-					ctx.ui.notify("No branch-workspaces with a live tmux session.", "info");
-					return;
-				}
-
-				const captures: Array<{ name: string; output: string }> = [];
-				for (const bw of withSession) {
-					const session = bwSessionName(bwUuid(bw.name));
-					const target = await discoverPaneTarget(pi, env.socketPath, session);
-					if (!target) {
-						captures.push({ name: bw.name, output: "(no pane)" });
-						continue;
-					}
-					const output = await capturePaneOutput(pi, env.socketPath, target, 12);
-					captures.push({ name: bw.name, output: output || "(empty)" });
-				}
-
-				// Batch is an overview only — no fake multi-target attach line.
-				// Drill down with /bw-log <name> (single mode copies a real attach cmd).
-				const lines = formatBatchRawLines(captures);
-				ctx.ui.setWidget("bw-log", buildWidget(lines), { placement: "aboveEditor" });
-				return;
-			}
-
-			// Single branch-workspace, four-step order:
-			// 1. no worktree → fast fail (closed tasks are history, not observable)
-			// 2. result.json settled → output view
-			// 3. unsettled + no session → fast fail
-			// 4. unsettled + session → live pane tail
-			const facts = await resolveNameOrSelect(pi, name, ctx);
-			if (!facts) return;
-			const { name: bwName } = facts;
-
-			// /bw-log observes the current task: a missing worktree fails fast.
-			if (facts.worktreePath === undefined) {
-				ctx.ui.notify(`Branch-workspace "${bwName}" does not exist (no worktree).`, "error");
-				return;
-			}
-
-			const env = await getTasksEnv(pi);
-			if (!env) {
-				ctx.ui.notify("Failed to resolve repo root for background-task artifacts.", "error");
-				return;
-			}
-			const session = bwSessionName(bwUuid(bwName));
-
-			const result = await readBwResult(env.tasksDir, bwName);
-			const startedAt = await readBwTaskStartedAt(env.tasksDir, bwName);
-			const duration = formatDuration(startedAt, result?.finishedAt);
-
-			// Attach line + footer render only while the session still exists.
-			const attachCommand = facts.sessionExists ? bwAttachCommand(bwName) : undefined;
-
-			if (!result && !facts.sessionExists) {
-				ctx.ui.notify(
-					`Background task "${bwName}" has not settled and its tmux session no longer exists — nothing to observe. Clean up with /bw-close ${bwName}.`,
-					"error",
-				);
-				return;
-			}
-
-			let paneOutput = "";
-			if (!result) {
-				const paneTarget = await discoverPaneTarget(pi, env.socketPath, session);
-				if (!paneTarget) {
-					ctx.ui.notify(`No pane found for session "${session}".`, "error");
-					return;
-				}
-				paneOutput = await capturePaneOutput(pi, env.socketPath, paneTarget, LOG_PANE_TAIL);
-			}
-
-			let footer: string | undefined;
-			if (attachCommand) {
-				const copied = await copyToClipboard(pi, attachCommand);
-				footer = `Monitor: ${attachCommand}${copied ? " (copied)" : ""}`;
-			}
-
-			const lines = formatBwLogWidgetLines(bwName, attachCommand, result, paneOutput, duration);
-			ctx.ui.setWidget("bw-log", buildWidget(lines, footer), { placement: "aboveEditor" });
-		},
-	});
-
-	// ── /bw-vscode [name] ──
-	pi.registerCommand("bw-vscode", {
-		description: "Open a branch-workspace in VS Code. Usage: /bw-vscode [name]",
-		handler: async (args, ctx) => {
-			const { name } = parsePositionalName(args);
-
-			const facts = await resolveNameOrSelect(pi, name, ctx);
-			if (!facts) return;
-
-			if (facts.worktreePath === undefined) {
-				ctx.ui.notify(`Branch-workspace "${facts.name}" does not exist (no worktree).`, "error");
-				return;
-			}
-
-			await pi.exec("code", [facts.worktreePath]);
-			ctx.ui.notify(`Opened VS Code for "${facts.name}" at ${facts.worktreePath}`, "info");
 		},
 	});
 
@@ -1326,11 +1260,11 @@ export default function (pi: ExtensionAPI): void {
 		name: "background_task",
 		label: "Background task",
 		description:
-			"Dispatch a one-shot background task: create a fresh branch-workspace (git worktree + tmux session) named by alias, then start an interactive Pi process inside it with the given prompt. Returns immediately without waiting for the task. Completion is observed by the user via /bw-log (live pane, settled output) and /bw-list (completed/failed task status). Fails fast if the alias already exists.",
+			"Dispatch a one-shot background task: create a fresh branch-workspace (git worktree + tmux session) named by alias, then start an interactive Pi process inside it with the given prompt. Returns immediately without waiting for the task. Progress and completion are observed by the user via /bw-list (live pane, settled output, task status). Fails fast if the alias already exists.",
 		promptSnippet: "Dispatch a one-shot background task to a fresh branch-workspace; returns immediately.",
 		promptGuidelines: [
 			"alias must be a new branch-workspace name (e.g. feat/my-feature); an existing alias fails fast reporting what already exists (worktree and/or tmux session).",
-			"The dispatch returns immediately — do not wait, poll, or assume the task result. The user observes progress via /bw-log and completion via /bw-list.",
+			"The dispatch returns immediately — do not wait, poll, or assume the task result. The user observes progress and completion via /bw-list.",
 			"The background Pi runs autonomously (--approve) in an isolated worktree, inheriting the current provider, model, and thinking level.",
 		],
 		parameters: Type.Object({
