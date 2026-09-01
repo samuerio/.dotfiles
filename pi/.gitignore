@@ -5,7 +5,6 @@ agent/bin/
 agent/settings.json
 agent/telegram.json
 agent/tmux-subagents
-agent/branch-workspaces
 git
 
 # Logs

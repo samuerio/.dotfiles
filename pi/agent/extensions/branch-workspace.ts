@@ -1,13 +1,13 @@
-import { randomUUID } from "node:crypto";
+import { spawnSync } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
-	getAgentDir,
 	truncateHead,
 	type ExtensionAPI,
 	type ExtensionCommandContext,
@@ -23,8 +23,11 @@ import { Type } from "typebox";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BRANCH_WORKSPACE_SCRIPTS_DIR = path.join(__dirname, "branch-workspace");
 const WORKTREE_SH = path.join(BRANCH_WORKSPACE_SCRIPTS_DIR, "worktree.sh");
-const FIND_SESSIONS_SH = path.join(BRANCH_WORKSPACE_SCRIPTS_DIR, "find-sessions.sh");
-const TMUX_SOCKET_DIR = "/tmp/claude-tmux-sockets";
+
+/** `pi --attach-bw <alias>`: attach to a dispatched task's tmux session. */
+const ATTACH_FLAG = "attach-bw";
+/** Repo-local tasks dir (relative to repo root): `.pi/background-tasks/`. */
+const TASKS_DIR_PARTS = [".pi", "background-tasks"] as const;
 
 // ─── Background-task Child Mode ───────────────────────────────────
 
@@ -32,8 +35,8 @@ const TMUX_SOCKET_DIR = "/tmp/claude-tmux-sockets";
 const BW_CHILD_ENV = "PI_BW_CHILD";
 /** Result file path handed to the child Pi via env. */
 const BW_RESULT_ENV = "PI_BW_RESULT";
-/** Per repo-root + alias run artifacts, relative to getAgentDir(). */
-const BW_RUNS_DIR = "branch-workspaces";
+/** Task alias handed to the child Pi via env (reporter writes result.json branch). */
+const BW_ALIAS_ENV = "PI_BW_ALIAS";
 const EXTENSION_PATH = fileURLToPath(import.meta.url);
 
 async function copyToClipboard(pi: ExtensionAPI, text: string): Promise<boolean> {
@@ -111,20 +114,56 @@ function buildWidget(lines: WidgetLine[], footer?: string) {
 	};
 }
 
-// ─── tmux Socket ──────────────────────────────────────────────────
+// ─── Repo-local Tasks Environment & Keys ──────────────────────────
 
-async function getTmuxSocket(pi: ExtensionAPI): Promise<string | null> {
-	const result = await pi.exec("bash", [WORKTREE_SH, "root-name"]);
+/** Repo-root-local background-task environment (artifacts + tmux socket). */
+interface BwTasksEnv {
+	/** Main worktree root (absolute), from `worktree.sh root-path`. */
+	repoRoot: string;
+	/** `<repoRoot>/.pi/background-tasks`. */
+	tasksDir: string;
+	/** Per-repo tmux socket inside tasksDir. */
+	socketPath: string;
+}
+
+/** uuid = sha256(alias) truncated to 16 hex chars; unique per repo (branch names are unique). */
+function bwUuid(alias: string): string {
+	return createHash("sha256").update(alias, "utf8").digest("hex").slice(0, 16);
+}
+
+/** tmux session / window naming: `background-task-<uuid>` (window name is fixed "pi"). */
+function bwSessionName(uuid: string): string {
+	return `background-task-${uuid}`;
+}
+
+/** Attach command: `pi --attach-bw <alias>` — quote only when the alias needs it. */
+function bwAttachCommand(alias: string): string {
+	const safe = /^[A-Za-z0-9._/-]+$/.test(alias);
+	return `pi --${ATTACH_FLAG} ${safe ? alias : shellQuote(alias)}`;
+}
+
+async function getTasksEnv(pi: ExtensionAPI): Promise<BwTasksEnv | null> {
+	const result = await pi.exec("bash", [WORKTREE_SH, "root-path"]);
 	if (result.code !== 0) return null;
-	const rootName = result.stdout.trim();
-	if (!rootName) return null;
-	return path.join(TMUX_SOCKET_DIR, `${rootName}.sock`);
+	const repoRoot = result.stdout.trim();
+	if (!repoRoot) return null;
+	const tasksDir = path.join(repoRoot, ...TASKS_DIR_PARTS);
+	return { repoRoot, tasksDir, socketPath: path.join(tasksDir, "tmux.sock") };
+}
+
+/** Session names on our per-repo socket; [] when the server is down / socket missing. */
+async function listSessionNames(pi: ExtensionAPI, socket: string): Promise<string[]> {
+	const result = await pi.exec("tmux", ["-S", socket, "list-sessions", "-F", "#{session_name}"]);
+	if (result.code !== 0) return [];
+	return result.stdout.split("\n").map((line) => line.trim()).filter(Boolean);
 }
 
 // ─── Child Reporter (background task result.json) ─────────────────
 
 interface BwChildResult {
 	version: 1;
+	/** Task alias / git branch, for uuid → alias reverse lookup. */
+	branch?: string;
 	status: "completed" | "failed";
 	output: string;
 	error?: string;
@@ -196,8 +235,10 @@ function registerBwChildReporter(pi: ExtensionAPI, resultPath: string): void {
 		const assistantError = typeof assistant?.errorMessage === "string" ? assistant.errorMessage : undefined;
 		const failed = !assistant || stopReason === "error" || stopReason === "aborted" || Boolean(fallbackError);
 		const output = assistant ? textFromAssistant(assistant) : "";
+		const branch = process.env[BW_ALIAS_ENV];
 		const result: BwChildResult = {
 			version: 1,
+			branch: branch && branch.length > 0 ? branch : undefined,
 			status: failed ? "failed" : "completed",
 			output,
 			error:
@@ -238,28 +279,30 @@ function registerBwChildReporter(pi: ExtensionAPI, resultPath: string): void {
 
 // ─── Run Artifacts (task.md / result.json / session) ──────────────
 
-function rootNameFromSocket(socket: string): string {
-	return path.basename(socket, ".sock");
+// ─── Run Artifacts (task.md / result.json / sessions) ─────────────
+
+/** Per-task run dir: `<tasksDir>/<uuid>/` (task.md + result.json, latest-wins). */
+function bwRunDir(tasksDir: string, alias: string): string {
+	return path.join(tasksDir, bwUuid(alias));
 }
 
-function bwRunDirFromRoot(rootName: string, alias: string): string {
-	return path.join(getAgentDir(), BW_RUNS_DIR, rootName, alias);
+/** Per-task session history dir: `<tasksDir>/sessions/<uuid>/` (child --session-dir). */
+function bwSessionsDir(tasksDir: string, alias: string): string {
+	return path.join(tasksDir, "sessions", bwUuid(alias));
 }
 
-async function readBwResultFromRoot(rootName: string, alias: string): Promise<BwChildResult | null> {
+async function readBwResult(tasksDir: string, alias: string): Promise<BwChildResult | null> {
 	try {
-		return JSON.parse(
-			await readFile(path.join(bwRunDirFromRoot(rootName, alias), "result.json"), "utf8"),
-		) as BwChildResult;
+		return JSON.parse(await readFile(path.join(bwRunDir(tasksDir, alias), "result.json"), "utf8")) as BwChildResult;
 	} catch {
 		return null;
 	}
 }
 
 /** Dispatch timestamp = task.md mtime (written right before the child starts). */
-async function readBwTaskStartedAtFromRoot(rootName: string, alias: string): Promise<number | undefined> {
+async function readBwTaskStartedAt(tasksDir: string, alias: string): Promise<number | undefined> {
 	try {
-		const info = await stat(path.join(bwRunDirFromRoot(rootName, alias), "task.md"));
+		const info = await stat(path.join(bwRunDir(tasksDir, alias), "task.md"));
 		return info.mtimeMs;
 	} catch {
 		return undefined;
@@ -285,12 +328,6 @@ interface CleanOutput {
 	worktreePath: string;
 	leftoverCount: number;
 	leftovers: string[];
-}
-
-interface SessionEntry {
-	session_name: string;
-	attached: boolean;
-	created: string;
 }
 
 // ─── Script Output Parsers ────────────────────────────────────────
@@ -319,13 +356,6 @@ function parseCleanOutput(stdout: string): CleanOutput | null {
 	}
 }
 
-function parseSessionsOutput(stdout: string): SessionEntry[] {
-	try {
-		return JSON.parse(stdout);
-	} catch {
-		return [];
-	}
-}
 
 // ─── Branch-workspace Facts ───────────────────────────────────────
 
@@ -348,25 +378,22 @@ async function resolveBranchWorkspaceFacts(
 	pi: ExtensionAPI,
 	name: string,
 ): Promise<BranchWorkspaceFacts> {
-	const socket = await getTmuxSocket(pi);
+	const env = await getTasksEnv(pi);
 
 	// Worktree
 	const wtResult = await pi.exec("bash", [WORKTREE_SH, "list", "--json", "-q", name]);
 	const worktrees = wtResult.code === 0 ? parseWorktreeOutput(wtResult.stdout) : [];
 	const worktree = worktrees.find((w) => w.branch === name);
 
-	// tmux session
+	// tmux session (per-repo socket, session named background-task-<uuid>)
 	let sessionExists = false;
-	if (socket) {
-		const sessResult = await pi.exec("bash", [FIND_SESSIONS_SH, "-S", socket, "-q", name, "--json"]);
-		if (sessResult.code === 0) {
-			sessionExists = parseSessionsOutput(sessResult.stdout).some((s) => s.session_name === name);
-		}
+	if (env) {
+		const sessions = await listSessionNames(pi, env.socketPath);
+		sessionExists = sessions.includes(bwSessionName(bwUuid(name)));
 	}
 
 	// Task status from run artifacts
-	const rootName = socket ? rootNameFromSocket(socket) : null;
-	const childResult = rootName ? await readBwResultFromRoot(rootName, name) : null;
+	const childResult = env ? await readBwResult(env.tasksDir, name) : null;
 
 	return {
 		name,
@@ -389,26 +416,18 @@ async function listTaskWorktrees(pi: ExtensionAPI): Promise<BranchWorkspaceFacts
 	const worktrees = wtResult.code === 0 ? parseWorktreeOutput(wtResult.stdout) : [];
 	if (worktrees.length === 0) return [];
 
-	const socket = await getTmuxSocket(pi);
-	let sessions: SessionEntry[] = [];
-	if (socket) {
-		const sessResult = await pi.exec("bash", [FIND_SESSIONS_SH, "-S", socket, "--json"]);
-		if (sessResult.code === 0) {
-			sessions = parseSessionsOutput(sessResult.stdout);
-		}
-	}
-
-	const rootName = socket ? rootNameFromSocket(socket) : null;
+	const env = await getTasksEnv(pi);
+	const sessions = env ? await listSessionNames(pi, env.socketPath) : [];
 	const result: BranchWorkspaceFacts[] = [];
 	for (const wt of [...worktrees].sort((a, b) => a.branch.localeCompare(b.branch))) {
 		// Task status: verbatim result.json status; undefined while running or
 		// when the worktree was not created by background_task.
-		const childResult = rootName ? await readBwResultFromRoot(rootName, wt.branch) : null;
+		const childResult = env ? await readBwResult(env.tasksDir, wt.branch) : null;
 		result.push({
 			name: wt.branch,
 			worktreePath: wt.path,
 			dirty: wt.dirty,
-			sessionExists: sessions.some((s) => s.session_name === wt.branch),
+			sessionExists: sessions.includes(bwSessionName(bwUuid(wt.branch))),
 			taskStatus: childResult?.status,
 		});
 	}
@@ -641,18 +660,25 @@ function formatBwLogWidgetLines(
 async function ensureSession(
 	pi: ExtensionAPI,
 	socket: string,
-	name: string,
+	session: string,
 	worktreePath: string,
 ): Promise<boolean> {
-	const hasSession = await pi.exec("tmux", ["-S", socket, "has-session", "-t", name]);
+	const hasSession = await pi.exec("tmux", ["-S", socket, "has-session", "-t", session]);
 	if (hasSession.code === 0) return true;
 
 	await mkdir(path.dirname(socket), { recursive: true });
-	const result = await pi.exec("tmux", [
-		"-S", socket,
-		"new-session", "-d", "-s", name,
-		"-c", worktreePath,
-	]);
+	const create = () =>
+		pi.exec("tmux", ["-S", socket, "new-session", "-d", "-s", session, "-c", worktreePath]);
+	let result = await create();
+	if (result.code !== 0 && existsSync(socket)) {
+		// Stale socket file (server died, file left behind) blocks new-session:
+		// confirm no server listens, then remove the file and retry once.
+		const probe = await pi.exec("tmux", ["-S", socket, "list-sessions"]);
+		if (probe.code !== 0) {
+			await rm(socket, { force: true });
+			result = await create();
+		}
+	}
 	return result.code === 0;
 }
 
@@ -680,29 +706,30 @@ interface CloseResult {
 
 async function buildBranchWorkspaceEnv(pi: ExtensionAPI, name: string): Promise<BranchWorkspaceEnv> {
 	const facts = await resolveBranchWorkspaceFacts(pi, name);
-	const socket = await getTmuxSocket(pi);
+	const env = await getTasksEnv(pi);
+	const session = bwSessionName(bwUuid(name));
 	let paneTarget: string | null = null;
-	if (socket && facts.sessionExists) {
-		paneTarget = await discoverPaneTarget(pi, socket, name);
+	if (env && facts.sessionExists) {
+		paneTarget = await discoverPaneTarget(pi, env.socketPath, session);
 	}
 	return {
 		name,
 		worktreePath: facts.worktreePath,
-		socket,
-		session: name,
+		socket: env?.socketPath ?? null,
+		session,
 		paneTarget,
 		sessionExists: facts.sessionExists,
 		dirty: facts.dirty,
 		taskStatus: facts.taskStatus,
 		// Attach only when a tmux session exists.
-		monitorCmd: facts.sessionExists && socket ? `tmux -S ${socket} attach -t ${name}` : undefined,
+		monitorCmd: facts.sessionExists ? bwAttachCommand(name) : undefined,
 	};
 }
 
 /**
  * Close a branch-workspace: worktree existence is a prerequisite. Removes the
  * worktree (dirty requires force) and kills the tmux session when present.
- * Run artifacts (task.md / result.json / session/) are kept on purpose.
+ * Run artifacts (.pi/background-tasks/<uuid>/) are kept on purpose.
  */
 async function closeBranchWorkspace(
 	pi: ExtensionAPI,
@@ -744,9 +771,12 @@ async function closeBranchWorkspace(
 	// Kill the session when present; failure is only a warning.
 	let sessionWarn: string | undefined;
 	if (facts.sessionExists) {
-		const socket = await getTmuxSocket(pi);
-		if (socket) {
-			const killResult = await pi.exec("tmux", ["-S", socket, "kill-session", "-t", name]);
+		const env = await getTasksEnv(pi);
+		if (env) {
+			const killResult = await pi.exec("tmux", [
+				"-S", env.socketPath,
+				"kill-session", "-t", bwSessionName(bwUuid(name)),
+			]);
 			if (killResult.code !== 0) {
 				sessionWarn = `Worktree removed but tmux session "${name}" could not be killed.`;
 			}
@@ -801,6 +831,8 @@ function formatStatusText(env: BranchWorkspaceEnv): string {
 interface DispatchResult {
 	ok: boolean;
 	alias: string;
+	/** sha256(alias) truncated to 16 hex chars — worktree/run/session key. */
+	uuid?: string;
 	error?: string;
 	worktreePath?: string;
 	tmuxSession?: string;
@@ -848,14 +880,16 @@ async function dispatchBackgroundTask(
 	}
 	const worktreePath = output.worktreePath;
 
-	// 3. tmux session on the branch-workspace socket.
-	const socket = await getTmuxSocket(pi);
-	if (!socket) {
-		return { ok: false, alias, worktreePath, error: "Failed to resolve tmux socket" };
+	// 3. Repo-local tasks env (per-repo socket + artifact dirs) + tmux session.
+	const env = await getTasksEnv(pi);
+	if (!env) {
+		return { ok: false, alias, worktreePath, error: "Failed to resolve repo root (worktree.sh root-path)" };
 	}
-	const sessionOk = await ensureSession(pi, socket, alias, worktreePath);
+	const uuid = bwUuid(alias);
+	const session = bwSessionName(uuid);
+	const sessionOk = await ensureSession(pi, env.socketPath, session, worktreePath);
 	if (!sessionOk) {
-		return { ok: false, alias, worktreePath, error: `Failed to start tmux session for "${alias}".` };
+		return { ok: false, alias, worktreePath, error: `Failed to start tmux session "${session}".` };
 	}
 
 	// 4. Model inheritance.
@@ -866,15 +900,17 @@ async function dispatchBackgroundTask(
 		return { ok: false, alias, worktreePath, error: "No model is active. Cannot dispatch background task." };
 	}
 
-	// 5. Run artifacts: task.md / result.json / session/.
-	const rootName = rootNameFromSocket(socket);
-	const runDir = bwRunDirFromRoot(rootName, alias);
+	// 5. Run artifacts: latest-wins — a previous closed run of the same alias
+	// leaves stale task.md / result.json / sessions behind; wipe and recreate.
+	const runDir = bwRunDir(env.tasksDir, alias);
 	let resultPath: string;
 	let promptPath: string;
 	let sessionDir: string;
 	try {
+		await rm(runDir, { recursive: true, force: true });
 		await mkdir(runDir, { recursive: true, mode: 0o700 });
-		sessionDir = path.join(runDir, "session");
+		sessionDir = bwSessionsDir(env.tasksDir, alias);
+		await rm(sessionDir, { recursive: true, force: true });
 		await mkdir(sessionDir, { recursive: true, mode: 0o700 });
 		promptPath = path.join(runDir, "task.md");
 		resultPath = path.join(runDir, "result.json");
@@ -893,24 +929,23 @@ async function dispatchBackgroundTask(
 
 	// 6. Keep the pane visible after the child Pi exits (settled output view).
 	const remain = await pi.exec("tmux", [
-		"-S", socket, "set-window-option", "-t", `${alias}:0`, "remain-on-exit", "on",
+		"-S", env.socketPath, "set-window-option", "-t", `${session}:0`, "remain-on-exit", "on",
 	]);
 	if (remain.code !== 0) {
 		return { ok: false, alias, worktreePath, error: remain.stderr.trim() || "Failed to set remain-on-exit." };
 	}
 
 	// 7. Child command: interactive Pi, unconditional --approve (autonomous run).
-	const childSessionId = randomUUID();
-	const tmuxTarget = `${alias}:0.0`;
-	const attachCommand = `tmux -S ${shellQuote(socket)} attach -t ${shellQuote(alias)}`;
+	const tmuxTarget = `${session}:0.0`;
+	const attachCommand = bwAttachCommand(alias);
 	const piArgs = [
 		...getPiInvocationParts(),
 		"--provider", provider,
 		"--model", model,
 		"--thinking", thinking,
 		"--session-dir", sessionDir,
-		"--session-id", childSessionId,
-		"--name", alias,
+		"--session-id", uuid,
+		"--name", session,
 		"--approve",
 		"--extension", EXTENSION_PATH,
 		`@${promptPath}`,
@@ -919,13 +954,14 @@ async function dispatchBackgroundTask(
 		"exec env",
 		`${BW_CHILD_ENV}=1`,
 		`${BW_RESULT_ENV}=${shellQuote(resultPath)}`,
+		`${BW_ALIAS_ENV}=${shellQuote(alias)}`,
 		piArgs.map(shellQuote).join(" "),
 	].join(" ");
 
 	// 8. Fire and forget. Errors here leave a created worktree/session behind —
 	// point the caller at /bw-close for cleanup.
 	const cleanupHint = `worktree/session already created — clean up with /bw-close ${alias}`;
-	const sent = await pi.exec("tmux", ["-S", socket, "send-keys", "-t", tmuxTarget, "-l", "--", childCommand]);
+	const sent = await pi.exec("tmux", ["-S", env.socketPath, "send-keys", "-t", tmuxTarget, "-l", "--", childCommand]);
 	if (sent.code !== 0) {
 		return {
 			ok: false,
@@ -934,7 +970,7 @@ async function dispatchBackgroundTask(
 			error: `${sent.stderr.trim() || "Failed to start child Pi."} (${cleanupHint})`,
 		};
 	}
-	const entered = await pi.exec("tmux", ["-S", socket, "send-keys", "-t", tmuxTarget, "Enter"]);
+	const entered = await pi.exec("tmux", ["-S", env.socketPath, "send-keys", "-t", tmuxTarget, "Enter"]);
 	if (entered.code !== 0) {
 		return {
 			ok: false,
@@ -948,8 +984,9 @@ async function dispatchBackgroundTask(
 	return {
 		ok: true,
 		alias,
+		uuid,
 		worktreePath,
-		tmuxSession: alias,
+		tmuxSession: session,
 		attachCommand,
 		monitorCommand: `/bw-log ${alias}`,
 		provider,
@@ -971,9 +1008,84 @@ function formatDispatchText(result: DispatchResult): string {
 	].join("\n");
 }
 
+// ─── Attach Flag (pi --attach-bw <alias>) ─────────────────────────
+
+function currentTmuxSocket(): string | undefined {
+	const socket = process.env.TMUX?.split(",", 1)[0]?.trim();
+	return socket || undefined;
+}
+
+function attachFlagValue(argv: string[]): string | undefined {
+	const flag = `--${ATTACH_FLAG}`;
+	for (let index = 2; index < argv.length; index++) {
+		const argument = argv[index];
+		if (argument === "--") break;
+		if (argument === flag) {
+			const value = argv[index + 1];
+			return !value || value.startsWith("--") ? "" : value;
+		}
+		if (argument.startsWith(`${flag}=`)) return argument.slice(flag.length + 1);
+	}
+	return undefined;
+}
+
+/**
+ * `pi --attach-bw <alias>`: attach to a dispatched task's tmux session and
+ * exit (never starts the normal TUI). The socket lives in the current repo's
+ * `.pi/background-tasks/` — the repo root is resolved from cwd, so this must
+ * be run from the repo that dispatched the task (running from inside one of
+ * its worktrees resolves the worktree root and fast-fails on the missing
+ * socket, by design).
+ */
+function attachToBackgroundTaskAndExit(rawAlias: string): never {
+	const alias = rawAlias.trim();
+	if (!alias) {
+		console.error(`Error: --${ATTACH_FLAG} requires a background-task alias.`);
+		process.exit(2);
+	}
+	const root = spawnSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" });
+	if (root.status !== 0 || !root.stdout.trim()) {
+		console.error(`Error: --${ATTACH_FLAG} must be run from inside the repository that dispatched the task.`);
+		process.exit(2);
+	}
+	const socketPath = path.join(root.stdout.trim(), ...TASKS_DIR_PARTS, "tmux.sock");
+	if (!existsSync(socketPath)) {
+		console.error(`Error: no background-task tmux socket at ${socketPath}. Dispatched a task from this repo?`);
+		process.exit(2);
+	}
+
+	const session = bwSessionName(bwUuid(alias));
+	const probe = spawnSync("tmux", ["-S", socketPath, "has-session", "-t", session], { encoding: "utf8" });
+	if (probe.status !== 0) {
+		console.error(`Error: no live tmux session for background task "${alias}" (settled or closed).`);
+		process.exit(2);
+	}
+
+	const sameServer = currentTmuxSocket() === socketPath;
+	const args = ["-S", socketPath, sameServer ? "switch-client" : "attach-session", "-t", session];
+	const env = { ...process.env };
+	if (!sameServer) {
+		delete env.TMUX;
+		delete env.TMUX_PANE;
+	}
+	const result = spawnSync("tmux", args, { stdio: "inherit", env });
+	if (result.error) console.error(`Failed to run tmux: ${result.error.message}`);
+	process.exit(result.status ?? 1);
+}
+
 // ─── Commands & Tools ─────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI): void {
+	// `pi --attach-bw <alias>`: attach to a dispatched task's tmux session and
+	// exit (never starts the normal TUI). Registered before child mode so the
+	// flag works in every invocation context.
+	pi.registerFlag(ATTACH_FLAG, {
+		description: "Attach to a background-task tmux session by task alias",
+		type: "string",
+	});
+	const attachTarget = attachFlagValue(process.argv);
+	if (attachTarget !== undefined) attachToBackgroundTaskAndExit(attachTarget);
+
 	// Child mode (dispatched background task): register only the result
 	// reporter — no slash commands, no agent tools.
 	if (process.env[BW_CHILD_ENV] === "1") {
@@ -1090,9 +1202,9 @@ export default function (pi: ExtensionAPI): void {
 			const { name } = parsePositionalName(args, [/(^|\s)(-b|--batch)\b/g]);
 
 			if (batch) {
-				const socket = await getTmuxSocket(pi);
-				if (!socket) {
-					ctx.ui.notify("Failed to resolve tmux socket.", "error");
+				const env = await getTasksEnv(pi);
+				if (!env) {
+					ctx.ui.notify("Failed to resolve repo root for background-task artifacts.", "error");
 					return;
 				}
 
@@ -1105,12 +1217,13 @@ export default function (pi: ExtensionAPI): void {
 
 				const captures: Array<{ name: string; output: string }> = [];
 				for (const bw of withSession) {
-					const target = await discoverPaneTarget(pi, socket, bw.name);
+					const session = bwSessionName(bwUuid(bw.name));
+					const target = await discoverPaneTarget(pi, env.socketPath, session);
 					if (!target) {
 						captures.push({ name: bw.name, output: "(no pane)" });
 						continue;
 					}
-					const output = await capturePaneOutput(pi, socket, target, 12);
+					const output = await capturePaneOutput(pi, env.socketPath, target, 12);
 					captures.push({ name: bw.name, output: output || "(empty)" });
 				}
 
@@ -1121,27 +1234,34 @@ export default function (pi: ExtensionAPI): void {
 				return;
 			}
 
-			// Single branch-workspace, three branches:
-			// 1. result.json settled → output view
-			// 2. unsettled + no session → fast fail
-			// 3. unsettled + session → live pane tail
+			// Single branch-workspace, four-step order:
+			// 1. no worktree → fast fail (closed tasks are history, not observable)
+			// 2. result.json settled → output view
+			// 3. unsettled + no session → fast fail
+			// 4. unsettled + session → live pane tail
 			const facts = await resolveNameOrSelect(pi, name, ctx);
 			if (!facts) return;
 			const { name: bwName } = facts;
 
-			const socket = await getTmuxSocket(pi);
-			if (!socket) {
-				ctx.ui.notify("Failed to resolve tmux socket.", "error");
+			// /bw-log observes the current task: a missing worktree fails fast.
+			if (facts.worktreePath === undefined) {
+				ctx.ui.notify(`Branch-workspace "${bwName}" does not exist (no worktree).`, "error");
 				return;
 			}
 
-			const rootName = rootNameFromSocket(socket);
-			const result = await readBwResultFromRoot(rootName, bwName);
-			const startedAt = await readBwTaskStartedAtFromRoot(rootName, bwName);
+			const env = await getTasksEnv(pi);
+			if (!env) {
+				ctx.ui.notify("Failed to resolve repo root for background-task artifacts.", "error");
+				return;
+			}
+			const session = bwSessionName(bwUuid(bwName));
+
+			const result = await readBwResult(env.tasksDir, bwName);
+			const startedAt = await readBwTaskStartedAt(env.tasksDir, bwName);
 			const duration = formatDuration(startedAt, result?.finishedAt);
 
 			// Attach line + footer render only while the session still exists.
-			const attachCommand = facts.sessionExists ? `tmux -S ${socket} attach -t ${bwName}` : undefined;
+			const attachCommand = facts.sessionExists ? bwAttachCommand(bwName) : undefined;
 
 			if (!result && !facts.sessionExists) {
 				ctx.ui.notify(
@@ -1153,12 +1273,12 @@ export default function (pi: ExtensionAPI): void {
 
 			let paneOutput = "";
 			if (!result) {
-				const paneTarget = await discoverPaneTarget(pi, socket, bwName);
+				const paneTarget = await discoverPaneTarget(pi, env.socketPath, session);
 				if (!paneTarget) {
-					ctx.ui.notify(`No pane found for session "${bwName}".`, "error");
+					ctx.ui.notify(`No pane found for session "${session}".`, "error");
 					return;
 				}
-				paneOutput = await capturePaneOutput(pi, socket, paneTarget, LOG_PANE_TAIL);
+				paneOutput = await capturePaneOutput(pi, env.socketPath, paneTarget, LOG_PANE_TAIL);
 			}
 
 			let footer: string | undefined;

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: $0 open <branch> | list [-q <query>] | clean <branch> [--force] | root-name" >&2
+  echo "usage: $0 open <branch> | list [-q <query>] | clean <branch> [--force] | root-path" >&2
 }
 
 command="${1:-}"
@@ -38,7 +38,7 @@ case "$command" in
       exit 2
     fi
     ;;
-  root-name)
+  root-path)
     if [ "$#" -ne 0 ]; then
       usage
       exit 2
@@ -240,10 +240,10 @@ branch_for_worktree_path() {
 
 collect_worktrees
 
-if [ "$command" = "root-name" ]; then
-  basename "$repo_main"
+if [ "$command" = "root-path" ]; then
+  printf '%s\n' "$repo_main"
   exit 0
-fi
+ fi
 
 if [ "$command" = "list" ]; then
   if [ "$json_output" = true ]; then
@@ -254,8 +254,13 @@ if [ "$command" = "list" ]; then
   exit 0
 fi
 
-branch_tail="${branch##*/}"
-worktree_path="$repo_main/.worktree/$branch_tail"
+# Worktree dir key = sha256(branch) truncated to 16 hex chars: stable across
+# re-opens, and avoids basename collisions between branches like feat/a and chore/a.
+branch_uuid() {
+  printf '%s' "$1" | sha256sum | cut -c1-16
+}
+
+worktree_path="$repo_main/.worktree/$(branch_uuid "$branch")"
 
 existing_branch="$(branch_for_worktree_path "$worktree_path" || true)"
 if [ -n "$existing_branch" ] && [ "$existing_branch" != "$branch" ]; then
@@ -333,11 +338,13 @@ if [ "$command" = "clean" ]; then
 fi
 
 gitignore="$repo_main/.gitignore"
-if ! grep -q '^/\.worktree/$' "$gitignore" 2>/dev/null; then
-  echo '/.worktree/' >> "$gitignore"
-  git -C "$repo_main" add "$gitignore"
-  git -C "$repo_main" commit -m "chore(gitignore): add .worktree directory to ignores" "$gitignore" >&2
-fi
+for ignore_line in '/.worktree/' '/.pi/background-tasks/'; do
+  if ! grep -qF "$ignore_line" "$gitignore" 2>/dev/null; then
+    echo "$ignore_line" >> "$gitignore"
+    git -C "$repo_main" add "$gitignore"
+    git -C "$repo_main" commit -m "chore(gitignore): ignore $ignore_line" "$gitignore" >&2
+  fi
+done
 
 mkdir -p "$(dirname "$worktree_path")"
 
