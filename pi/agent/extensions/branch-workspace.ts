@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import * as path from "node:path";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -25,8 +26,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPTS_DIR = path.join(__dirname, "branch-workspace");
 const WORKTREE_SH = path.join(SCRIPTS_DIR, "worktree.sh");
 
-/** `pi --attach-background-task <alias>`: attach to a dispatched task's tmux session. */
+/** `pi --attach-background-task <alias> [--task-root <repoRoot>]`: attach to a dispatched task's tmux session. */
 const ATTACH_FLAG = "attach-background-task";
+/** Repo root for the attach target; bypasses `git rev-parse` when supplied. */
+const TASK_ROOT_FLAG = "task-root";
 /** Repo-local tasks dir (relative to repo root): `.pi/background-tasks/`. */
 const TASKS_DIR_PARTS = [".pi", "background-tasks"] as const;
 
@@ -135,10 +138,12 @@ function taskSessionName(uuid: string): string {
 	return `background-task-${uuid}`;
 }
 
-/** Attach command: `pi --attach-background-task <alias>` — quote only when the alias needs it. */
-function taskAttachCommand(alias: string): string {
+/** Attach command: `pi --attach-background-task <alias> [--task-root <repoRoot>]` — quote only when needed. */
+function taskAttachCommand(alias: string, repoRoot?: string): string {
 	const safe = /^[A-Za-z0-9._/-]+$/.test(alias);
-	return `pi --${ATTACH_FLAG} ${safe ? alias : shellQuote(alias)}`;
+	let cmd = `pi --${ATTACH_FLAG} ${safe ? alias : shellQuote(alias)}`;
+	if (repoRoot) cmd += ` --${TASK_ROOT_FLAG} ${shellQuote(repoRoot)}`;
+	return cmd;
 }
 
 async function getTasksEnv(pi: ExtensionAPI): Promise<TasksEnv | null> {
@@ -604,7 +609,8 @@ async function runLogAction(
 	const duration = formatDuration(startedAt, result?.finishedAt);
 
 	// Attach line + footer render only while the session still exists.
-	const attachCommand = facts.sessionExists ? taskAttachCommand(taskName) : undefined;
+	// Include --task-root so the copied command works from any directory.
+	const attachCommand = facts.sessionExists ? taskAttachCommand(taskName, env.repoRoot) : undefined;
 
 	if (!result && !facts.sessionExists) {
 		ctx.ui.notify(
@@ -835,7 +841,7 @@ async function buildTaskEnv(pi: ExtensionAPI, name: string): Promise<TaskEnv> {
 		dirty: facts.dirty,
 		taskStatus: facts.taskStatus,
 		// Attach only when a tmux session exists.
-		monitorCmd: facts.sessionExists ? taskAttachCommand(name) : undefined,
+		monitorCmd: facts.sessionExists ? taskAttachCommand(name, env?.repoRoot) : undefined,
 	};
 }
 
@@ -1053,7 +1059,7 @@ async function dispatchBackgroundTask(
 	// existing session when the id matches, so a fixed uuid id would carry the
 	// previous run's context into the re-dispatched task.
 	const tmuxTarget = `${session}:0.0`;
-	const attachCommand = taskAttachCommand(alias);
+	const attachCommand = taskAttachCommand(alias, env.repoRoot);
 	const piArgs = [
 		...getPiInvocationParts(),
 		"--provider", provider,
@@ -1145,26 +1151,59 @@ function attachFlagValue(argv: string[]): string | undefined {
 	return undefined;
 }
 
+function taskRootFlagValue(argv: string[]): string | undefined {
+	const flag = `--${TASK_ROOT_FLAG}`;
+	for (let index = 2; index < argv.length; index++) {
+		const argument = argv[index];
+		if (argument === "--") break;
+		if (argument === flag) {
+			const value = argv[index + 1];
+			return !value || value.startsWith("--") ? "" : value;
+		}
+		if (argument.startsWith(`${flag}=`)) return argument.slice(flag.length + 1);
+	}
+	return undefined;
+}
+
 /**
- * `pi --attach-background-task <alias>`: attach to a dispatched task's tmux session and
- * exit (never starts the normal TUI). The socket lives in the current repo's
- * `.pi/background-tasks/` — the repo root is resolved from cwd, so this must
- * be run from the repo that dispatched the task (running from inside one of
- * its worktrees resolves the worktree root and fast-fails on the missing
- * socket, by design).
+ * `pi --attach-background-task <alias> [--task-root <repoRoot>]`: attach to a
+ * dispatched task's tmux session and exit (never starts the normal TUI). When
+ * `--task-root` is supplied the socket is resolved from that dir; otherwise
+ * from cwd's `git rev-parse --show-toplevel`.
  */
-function attachToBackgroundTaskAndExit(rawAlias: string): never {
+function attachToBackgroundTaskAndExit(rawAlias: string, rawRoot?: string): never {
 	const alias = rawAlias.trim();
 	if (!alias) {
 		console.error(`Error: --${ATTACH_FLAG} requires a background-task alias.`);
 		process.exit(2);
 	}
-	const root = spawnSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" });
-	if (root.status !== 0 || !root.stdout.trim()) {
-		console.error(`Error: --${ATTACH_FLAG} must be run from inside the repository that dispatched the task.`);
-		process.exit(2);
+	let repoRoot: string;
+	if (rawRoot !== undefined) {
+		const trimmed = rawRoot.trim();
+		if (!trimmed) {
+			console.error(`Error: --${TASK_ROOT_FLAG} requires a repo root path.`);
+			process.exit(2);
+		}
+		// Tilde expansion for convenience; the rest is path.resolve (handles relative).
+		const expanded = trimmed.startsWith("~/")
+			? path.join(process.env.HOME ?? os.homedir(), trimmed.slice(2))
+			: trimmed.startsWith("~") && trimmed.length === 1
+				? (process.env.HOME ?? os.homedir())
+				: trimmed;
+		repoRoot = path.resolve(expanded);
+		if (!existsSync(repoRoot)) {
+			console.error(`Error: --${TASK_ROOT_FLAG} "${rawRoot}" does not exist.`);
+			process.exit(2);
+		}
+	} else {
+		const root = spawnSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" });
+		if (root.status !== 0 || !root.stdout.trim()) {
+			console.error(`Error: --${ATTACH_FLAG} must be run from inside the repository that dispatched the task (or pass --${TASK_ROOT_FLAG} <repoRoot>).`);
+			process.exit(2);
+		}
+		repoRoot = root.stdout.trim();
 	}
-	const socketPath = path.join(root.stdout.trim(), ...TASKS_DIR_PARTS, "tmux.sock");
+	const socketPath = path.join(repoRoot, ...TASKS_DIR_PARTS, "tmux.sock");
 	if (!existsSync(socketPath)) {
 		console.error(`Error: no background-task tmux socket at ${socketPath}. Dispatched a task from this repo?`);
 		process.exit(2);
@@ -1192,15 +1231,22 @@ function attachToBackgroundTaskAndExit(rawAlias: string): never {
 // ─── Commands & Tools ─────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI): void {
-	// `pi --attach-background-task <alias>`: attach to a dispatched task's tmux session and
-	// exit (never starts the normal TUI). Registered before child mode so the
-	// flag works in every invocation context.
+	// `pi --attach-background-task <alias> [--task-root <repoRoot>]`: attach to a
+	// dispatched task's tmux session and exit (never starts the normal TUI).
+	// Registered before child mode so the flags work in every invocation context.
 	pi.registerFlag(ATTACH_FLAG, {
 		description: "Attach to a background-task tmux session by task alias",
 		type: "string",
 	});
+	pi.registerFlag(TASK_ROOT_FLAG, {
+		description: "Repo root for --attach-background-task (bypasses git rev-parse)",
+		type: "string",
+	});
 	const attachTarget = attachFlagValue(process.argv);
-	if (attachTarget !== undefined) attachToBackgroundTaskAndExit(attachTarget);
+	if (attachTarget !== undefined) {
+		const taskRoot = taskRootFlagValue(process.argv);
+		attachToBackgroundTaskAndExit(attachTarget, taskRoot);
+	}
 
 	// Child mode (dispatched background task): register only the result
 	// reporter — no slash commands, no agent tools.
