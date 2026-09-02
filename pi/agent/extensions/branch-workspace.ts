@@ -1340,10 +1340,8 @@ export default function (pi: ExtensionAPI): void {
 			};
 		},
 		renderCall(args, theme) {
-			const alias = typeof args.alias === "string" && args.alias.trim() ? args.alias.trim() : "...";
 			const description = typeof args.description === "string" && args.description.trim() ? args.description.trim() : "...";
-			const text =
-				theme.fg("toolTitle", theme.bold("background_task ")) + theme.fg("dim", `${alias} · ${description}`);
+			const text = theme.fg("toolTitle", theme.bold("background_task ")) + theme.fg("dim", description);
 			return new Text(text, 0, 0);
 		},
 		renderResult(result, _options, theme) {
@@ -1356,7 +1354,6 @@ export default function (pi: ExtensionAPI): void {
 			text += theme.fg("muted", " · dispatched");
 			text += `\n  ${theme.fg("accent", details.attachCommand ?? "")}`;
 			text += `\n  ${theme.fg("dim", `${details.provider ?? ""}/${details.model ?? ""} (${details.thinking ?? ""})`)}`;
-			text += `\n  ${theme.fg("muted", `monitor: ${details.monitorCommand}`)}`;
 			return new Text(text, 0, 0);
 		},
 	});
