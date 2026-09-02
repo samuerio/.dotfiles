@@ -585,13 +585,18 @@ async function ensureRuntime(
 async function persistRuntime(
     pi: ExtensionAPI,
     ctx: ExtensionContext,
+    includeCurrentMode = false,
 ): Promise<void> {
     if (!runtime.filePath) return;
 
-    // Do not persist currentMode; multiple running pi sessions would fight over it.
-    // Instead we infer the mode on startup from the active model + thinking level.
+    // Configuration edits normally leave currentMode alone. Explicit mode selections
+    // include it so a fresh session can start in the last selected mode.
     runtime.baseline ??= cloneModesFile(runtime.data);
-    const patch = computeModesPatch(runtime.baseline, runtime.data, false);
+    const patch = computeModesPatch(
+        runtime.baseline,
+        runtime.data,
+        includeCurrentMode,
+    );
     if (!patch) return;
 
     await withFileLock(runtime.filePath, async () => {
@@ -715,6 +720,11 @@ async function applyMode(
     if (!modelAppliedOk) {
         runtime.currentMode = CUSTOM_MODE_NAME;
         customOverlay = getCurrentSelectionSpec(pi, ctx);
+    } else {
+        // Persist only real, successfully applied modes. The shared modes file carries
+        // this selection across brand-new sessions without coupling it to session entries.
+        runtime.data.currentMode = mode;
+        await persistRuntime(pi, ctx, true);
     }
 
     if (ctx.hasUI) {
@@ -1035,7 +1045,9 @@ async function renameModeUI(
             oldName,
             newName,
         );
-        await persistRuntime(pi, ctx);
+        const renamedPersistedMode = runtime.data.currentMode === oldName;
+        if (renamedPersistedMode) runtime.data.currentMode = newName;
+        await persistRuntime(pi, ctx, renamedPersistedMode);
 
         if (runtime.currentMode === oldName) runtime.currentMode = newName;
         if (runtime.lastRealMode === oldName) runtime.lastRealMode = newName;
@@ -1059,8 +1071,9 @@ function createModelRuntimeFromRegistry(
     return {
         getAvailableSnapshot: () => registry.getAvailable(),
         getModel: (provider, modelId) => registry.find(provider, modelId),
-        refresh: async (_options) => {
-            await registry.refresh();
+        refresh: async (options) => {
+            const result = await registry.refresh(options as any);
+            if (result && typeof (result as any).errors !== "undefined") return result as any;
             return { aborted: false, errors: new Map() };
         },
         getError: () => registry.getError(),
@@ -1073,7 +1086,6 @@ async function pickModelForModeUI(
 ): Promise<{ provider: string; modelId: string } | undefined> {
     if (!ctx.hasUI) return undefined;
 
-    const settingsManager = SettingsManager.inMemory();
     const currentModel =
         spec.provider && spec.modelId
             ? ctx.modelRegistry.find(spec.provider, spec.modelId)
@@ -1086,10 +1098,9 @@ async function pickModelForModeUI(
             const selector = new ModelSelectorComponent(
                 tui,
                 currentModel,
-                settingsManager,
-                createModelRuntimeFromRegistry(ctx.modelRegistry),
+                createModelRuntimeFromRegistry(ctx.modelRegistry) as any,
                 scopedModels as any,
-                (model) =>
+                (model: any) =>
                     done({ provider: model.provider, modelId: model.id }),
                 () => done(undefined),
             );
@@ -1521,7 +1532,7 @@ export default function (pi: ExtensionAPI) {
             if (tokens[0] === "store") {
                 await ensureRuntime(pi, ctx);
 
-                let target = tokens[1];
+                let target: string | undefined = tokens[1];
                 if (!target) {
                     if (!ctx.hasUI) return;
                     const names = orderedModeNames(runtime.data.modes);
@@ -1579,14 +1590,26 @@ export default function (pi: ExtensionAPI) {
         await ensureRuntime(pi, ctx);
         customOverlay = null;
 
-        const inferred = inferModeFromSelection(ctx, pi, runtime.data);
-        if (inferred) {
-            runtime.currentMode = inferred;
-            runtime.lastRealMode = inferred;
+        const branch = ctx.sessionManager.getBranch();
+        const isFreshSession = branch.every(
+            (entry) =>
+                entry.type === "model_change" ||
+                entry.type === "thinking_level_change",
+        );
+        if (isFreshSession) {
+            // Pi records the default model/thinking level before session_start, even for a
+            // fresh session. Ignore those initialization entries and apply the last mode.
+            await applyMode(pi, ctx, runtime.data.currentMode);
         } else {
-            // No exact match → treat as overlay.
-            runtime.currentMode = CUSTOM_MODE_NAME;
-            customOverlay = getCurrentSelectionSpec(pi, ctx);
+            const inferred = inferModeFromSelection(ctx, pi, runtime.data);
+            if (inferred) {
+                runtime.currentMode = inferred;
+                runtime.lastRealMode = inferred;
+            } else {
+                // No exact match → treat as overlay.
+                runtime.currentMode = CUSTOM_MODE_NAME;
+                customOverlay = getCurrentSelectionSpec(pi, ctx);
+            }
         }
 
         applyEditor(pi, ctx);
