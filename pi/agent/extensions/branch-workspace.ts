@@ -1315,13 +1315,19 @@ export default function (pi: ExtensionAPI): void {
 			alias: Type.String({
 				description: "Task alias, used as the branch name (e.g. feat/my-feature). Must not already exist.",
 			}),
-			prompt: Type.String({ description: "The complete task content for the background Pi process." }),
+			prompt: Type.String({
+				description: "The task for the agent to perform. Be specific about what needs to be done and include any relevant context.",
+			}),
+			description: Type.String({
+				description: "A very short description of the task that can be displayed to the user.",
+			}),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const alias = typeof params.alias === "string" ? params.alias.trim() : "";
 			const prompt = typeof params.prompt === "string" ? params.prompt.trim() : "";
-			if (!alias || !prompt) {
-				const error = "background_task requires a non-empty alias and prompt.";
+			const description = typeof params.description === "string" ? params.description.trim() : "";
+			if (!alias || !prompt || !description) {
+				const error = "background_task requires a non-empty alias, prompt and description.";
 				return {
 					content: [{ type: "text" as const, text: error }],
 					details: { ok: false, alias, error },
@@ -1335,11 +1341,9 @@ export default function (pi: ExtensionAPI): void {
 		},
 		renderCall(args, theme) {
 			const alias = typeof args.alias === "string" && args.alias.trim() ? args.alias.trim() : "...";
-			const task = typeof args.prompt === "string" && args.prompt.trim() ? args.prompt.trim() : "...";
-			const firstLine = task.split("\n", 1)[0] ?? task;
-			const preview = firstLine.length > 80 ? `${firstLine.slice(0, 80)}…` : firstLine;
+			const description = typeof args.description === "string" && args.description.trim() ? args.description.trim() : "...";
 			const text =
-				theme.fg("toolTitle", theme.bold("background_task ")) + theme.fg("dim", `${alias} · ${preview}`);
+				theme.fg("toolTitle", theme.bold("background_task ")) + theme.fg("dim", `${alias} · ${description}`);
 			return new Text(text, 0, 0);
 		},
 		renderResult(result, _options, theme) {
