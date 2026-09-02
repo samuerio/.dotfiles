@@ -1309,9 +1309,7 @@ export default function (pi: ExtensionAPI): void {
 			"Dispatch a one-shot background task: create a fresh git worktree + tmux session named by alias, then start an interactive Pi process inside it with the given prompt. Returns immediately without waiting for the task. Progress and completion are observed by the user via /background-tasks (live pane, settled output, task status). Fails fast if the alias already exists.",
 		promptSnippet: "Dispatch a one-shot background task to a fresh isolated worktree; returns immediately.",
 		promptGuidelines: [
-			"alias must be a new task name (e.g. feat/my-feature, used as the branch name); an existing alias fails fast reporting what already exists (worktree and/or tmux session).",
-			"The dispatch returns immediately — do not wait, poll, or assume the task result. The user observes progress and completion via /background-tasks.",
-			"The background Pi runs autonomously (--approve) in an isolated worktree, inheriting the current provider, model, and thinking level.",
+			"background_task is fire-and-forget — returns immediately, the user observes via /background-tasks.",
 		],
 		parameters: Type.Object({
 			alias: Type.String({
