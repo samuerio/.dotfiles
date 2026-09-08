@@ -14,7 +14,8 @@ linux_rime/user.yaml
 pi/agent/models-store.json
 **/node_modules/
 /.worktree/
-# branch-workspace temporary mount area (spec symlinks)
+# background-task temporary mount area (spec symlinks)
 /.bw/
 spec/
 research/
+/.pi/background-tasks/
