@@ -10,14 +10,25 @@ import {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
 	DynamicBorder,
+	SessionManager,
 	truncateHead,
 	type ExtensionAPI,
 	type ExtensionCommandContext,
 	type ExtensionContext,
+	type SessionInfo,
 	type Theme,
 	type ThemeColor,
 } from "@earendil-works/pi-coding-agent";
-import { Container, SelectList, Text, type SelectItem, type TUI } from "@earendil-works/pi-tui";
+import {
+	Container,
+	Input,
+	SelectList,
+	Spacer,
+	Text,
+	fuzzyFilter,
+	type SelectItem,
+	type TUI,
+} from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
 // ─── Script Resolution ────────────────────────────────────────────
@@ -380,6 +391,8 @@ interface TaskFacts {
 	dirty?: boolean;
 	sessionExists: boolean;
 	taskStatus?: TaskStatus;
+	/** Latest run's child session file (result.json sessionFile); absent while running. */
+	sessionFile?: string;
 }
 
 async function resolveTaskFacts(
@@ -409,6 +422,7 @@ async function resolveTaskFacts(
 		dirty: worktree?.dirty,
 		sessionExists,
 		taskStatus: childResult?.status,
+		sessionFile: childResult?.sessionFile,
 	};
 }
 
@@ -437,6 +451,7 @@ async function listTaskWorktrees(pi: ExtensionAPI): Promise<TaskFacts[]> {
 			dirty: wt.dirty,
 			sessionExists: sessions.includes(taskSessionName(taskUuid(wt.branch))),
 			taskStatus: childResult?.status,
+			sessionFile: childResult?.sessionFile,
 		});
 	}
 	return result;
@@ -472,13 +487,16 @@ async function selectTask(
 	return displayToFacts.get(choice) ?? null;
 }
 
-type TaskAction = "log" | "vscode" | "close";
+type TaskAction = "log" | "addToPrompt" | "vscode" | "close";
 
-/** Action labels for the selector, filtered by facts (session → log; worktree → vscode/close). */
+/** Action labels for the selector, filtered by facts (session → log; result sessionFile → addToPrompt; worktree → vscode/close). */
 function taskActionItems(facts: TaskFacts): SelectItem[] {
 	const items: SelectItem[] = [];
 	if (facts.sessionExists) {
 		items.push({ value: "log", label: "Log (live pane / settled output)" });
+	}
+	if (facts.sessionFile) {
+		items.push({ value: "addToPrompt", label: "Add session to prompt" });
 	}
 	if (facts.worktreePath !== undefined) {
 		items.push({ value: "vscode", label: "Open in VS Code" });
@@ -488,15 +506,15 @@ function taskActionItems(facts: TaskFacts): SelectItem[] {
 }
 
 /** files.ts-style action selector: bordered SelectList returning the chosen action. */
-async function selectTaskAction(
+async function showActionMenu<T extends string>(
 	ctx: ExtensionCommandContext,
-	facts: TaskFacts,
-): Promise<TaskAction | null> {
-	const actions = taskActionItems(facts);
-	return ctx.ui.custom<TaskAction | null>((tui, theme, _kb, done) => {
+	title: string,
+	actions: SelectItem[],
+): Promise<T | null> {
+	return ctx.ui.custom<T | null>((tui, theme, _kb, done) => {
 		const container = new Container();
 		container.addChild(new DynamicBorder((str) => theme.fg("accent", str)));
-		container.addChild(new Text(theme.fg("accent", theme.bold(`Action for "${facts.name}"`))));
+		container.addChild(new Text(theme.fg("accent", theme.bold(title))));
 
 		const selectList = new SelectList(actions, actions.length, {
 			selectedPrefix: (text) => theme.fg("accent", text),
@@ -505,7 +523,7 @@ async function selectTaskAction(
 			scrollInfo: (text) => theme.fg("dim", text),
 			noMatch: (text) => theme.fg("warning", text),
 		});
-		selectList.onSelect = (item) => done(item.value as TaskAction);
+		selectList.onSelect = (item) => done(item.value as T);
 		selectList.onCancel = () => done(null);
 
 		container.addChild(selectList);
@@ -525,6 +543,13 @@ async function selectTaskAction(
 			},
 		};
 	});
+}
+
+async function selectTaskAction(
+	ctx: ExtensionCommandContext,
+	facts: TaskFacts,
+): Promise<TaskAction | null> {
+	return showActionMenu<TaskAction>(ctx, `Action for "${facts.name}"`, taskActionItems(facts));
 }
 
 // ─── Action Runners (executed directly by the /background-tasks flow) ──────
@@ -633,6 +658,224 @@ async function runVscodeAction(
 
 	await pi.exec("code", [facts.worktreePath]);
 	ctx.ui.notify(`Opened VS Code for "${facts.name}" at ${facts.worktreePath}`, "info");
+}
+
+// ─── Child Session History (/background-tasks sessions) ──────────
+
+type SessionAction = "resume" | "addToPrompt";
+
+/** Append "read session @<path>" to the editor (files.ts addFileToPrompt variant). */
+function addSessionToPrompt(ctx: ExtensionCommandContext, sessionFile: string): void {
+	const mention = `read session @${sessionFile}`;
+	const current = ctx.ui.getEditorText();
+	const separator = current && !current.endsWith(" ") ? " " : "";
+	ctx.ui.setEditorText(`${current}${separator}${mention}`);
+	ctx.ui.notify(`Added ${mention} to prompt`, "info");
+}
+
+/**
+ * All child session files under `<tasksDir>/sessions/`, newest first
+ * (`SessionManager.listAll` with an explicit dir does no cwd filtering —
+ * `list` would drop every child session because their cwd is a worktree).
+ * Null when the repo root cannot be resolved; [] when nothing was dispatched yet.
+ */
+async function listChildSessions(pi: ExtensionAPI): Promise<SessionInfo[] | null> {
+	const env = await getTasksEnv(pi);
+	if (!env) return null;
+	const sessionsDir = taskSessionsDir(env.tasksDir);
+	if (!existsSync(sessionsDir)) return [];
+	return SessionManager.listAll(sessionsDir);
+}
+
+/** /resume-style relative age: "now" / "5m" / "3h" / "2d" / "1w" / "3mo" / "1y". */
+function formatSessionAge(date: Date): string {
+	const diffMs = Date.now() - date.getTime();
+	const minutes = Math.floor(diffMs / 60000);
+	if (minutes < 1) return "now";
+	if (minutes < 60) return `${minutes}m`;
+	const hours = Math.floor(diffMs / 3600000);
+	if (hours < 24) return `${hours}h`;
+	const days = Math.floor(diffMs / 86400000);
+	if (days < 7) return `${days}d`;
+	if (days < 30) return `${Math.floor(days / 7)}w`;
+	if (days < 365) return `${Math.floor(days / 30)}mo`;
+	return `${Math.floor(days / 365)}y`;
+}
+
+/** Sanity cap for picker row labels. */
+const SESSION_LABEL_MAX = 100;
+/**
+ * Size the label column to the widest label instead of a fixed width: with
+ * min 1 / max cap, SelectList clamps the column to the actual widest label
+ * (and shrinks it on narrow terminals), so long names are never cut while
+ * the right side still has room.
+ */
+const SESSION_LIST_LAYOUT = { minPrimaryColumnWidth: 1, maxPrimaryColumnWidth: SESSION_LABEL_MAX };
+
+/** Session row label: name (set at dispatch: "<alias> - <description>") or first message. */
+function sessionDisplayLabel(info: SessionInfo): string {
+	const text = (info.name ?? info.firstMessage ?? "").replace(/[\x00-\x1f\x7f]/g, " ").trim();
+	const label = text.length > 0 ? text : "(no title)";
+	return label.length > SESSION_LABEL_MAX ? `${label.slice(0, SESSION_LABEL_MAX - 1)}…` : label;
+}
+
+/** files.ts-style fuzzy picker over child sessions. Returns the chosen SessionInfo or null on esc. */
+async function selectChildSession(
+	ctx: ExtensionCommandContext,
+	sessions: SessionInfo[],
+): Promise<SessionInfo | null> {
+	const items: SelectItem[] = sessions.map((info) => ({
+		value: info.path,
+		label: sessionDisplayLabel(info),
+		description: `${info.messageCount} ${formatSessionAge(info.modified)}`,
+	}));
+
+	const selection = await ctx.ui.custom<string | null>((tui, theme, keybindings, done) => {
+		const container = new Container();
+		container.addChild(new DynamicBorder((str) => theme.fg("accent", str)));
+		container.addChild(new Text(theme.fg("accent", theme.bold("Select background-task session")), 0, 0));
+
+		const searchInput = new Input();
+		container.addChild(searchInput);
+		container.addChild(new Spacer(1));
+
+		const listContainer = new Container();
+		container.addChild(listContainer);
+		container.addChild(new Text(theme.fg("dim", "Type to filter • enter to select • esc to cancel"), 0, 0));
+		container.addChild(new DynamicBorder((str) => theme.fg("accent", str)));
+
+		let filteredItems = items;
+		let selectList: SelectList | null = null;
+
+		const updateList = () => {
+			listContainer.clear();
+			if (filteredItems.length === 0) {
+				listContainer.addChild(new Text(theme.fg("warning", "  No matching sessions"), 0, 0));
+				selectList = null;
+				return;
+			}
+			selectList = new SelectList(
+				filteredItems,
+				Math.min(filteredItems.length, 12),
+				{
+					selectedPrefix: (text) => theme.fg("accent", text),
+					selectedText: (text) => theme.fg("accent", text),
+					description: (text) => theme.fg("muted", text),
+					scrollInfo: (text) => theme.fg("dim", text),
+					noMatch: (text) => theme.fg("warning", text),
+				},
+				SESSION_LIST_LAYOUT,
+			);
+			selectList.onSelect = (item) => done(item.value as string);
+			selectList.onCancel = () => done(null);
+			listContainer.addChild(selectList);
+		};
+
+		const applyFilter = () => {
+			const query = searchInput.getValue();
+			// Match label/description only: every item's value shares the same
+			// sessions-dir prefix, so including it would make fuzzy subsequence
+			// matches hit nearly everything.
+			filteredItems = query
+				? fuzzyFilter(items, query, (item) => `${item.label} ${item.description ?? ""}`)
+				: items;
+			updateList();
+		};
+
+		applyFilter();
+
+		return {
+			render(width: number) {
+				return container.render(width);
+			},
+			invalidate() {
+				container.invalidate();
+			},
+			handleInput(data: string) {
+				if (
+					keybindings.matches(data, "tui.select.up") ||
+					keybindings.matches(data, "tui.select.down") ||
+					keybindings.matches(data, "tui.select.confirm") ||
+					keybindings.matches(data, "tui.select.cancel")
+				) {
+					if (selectList) {
+						selectList.handleInput(data);
+					} else if (keybindings.matches(data, "tui.select.cancel")) {
+						done(null);
+					}
+					tui.requestRender();
+					return;
+				}
+				searchInput.handleInput(data);
+				applyFilter();
+				tui.requestRender();
+			},
+		};
+	});
+
+	return selection ? (sessions.find((info) => info.path === selection) ?? null) : null;
+}
+
+async function selectSessionAction(
+	ctx: ExtensionCommandContext,
+	info: SessionInfo,
+): Promise<SessionAction | null> {
+	const label = sessionDisplayLabel(info);
+	const title = `Action for "${label.length > 40 ? `${label.slice(0, 39)}…` : label}"`;
+	return showActionMenu<SessionAction>(ctx, title, [
+		{ value: "addToPrompt", label: "Add to prompt" },
+		{ value: "resume", label: "Resume" },
+	]);
+}
+
+/**
+ * `/background-tasks sessions`: pure child-session history picker, independent
+ * of worktree / run-dir existence. esc at the action menu returns to the
+ * session list; esc at the list exits. Resume replaces the current session —
+ * the handler returns immediately afterwards because this ctx is stale.
+ */
+async function runSessionsFlow(pi: ExtensionAPI, ctx: ExtensionCommandContext): Promise<void> {
+	if (!ctx.hasUI) {
+		ctx.ui.notify("background-tasks sessions requires interactive mode", "error");
+		return;
+	}
+
+	const sessions = await listChildSessions(pi);
+	if (sessions === null) {
+		ctx.ui.notify("Failed to resolve repo root for background-task artifacts.", "error");
+		return;
+	}
+	if (sessions.length === 0) {
+		ctx.ui.notify("No background-task sessions yet.", "info");
+		return;
+	}
+
+	while (true) {
+		const selected = await selectChildSession(ctx, sessions);
+		if (!selected) return;
+
+		const action = await selectSessionAction(ctx, selected);
+		if (!action) continue;
+
+		if (action === "resume") {
+			try {
+				const result = await ctx.switchSession(selected.path);
+				if (result.cancelled) {
+					ctx.ui.notify("Resume cancelled.", "info");
+					continue;
+				}
+			} catch (error) {
+				ctx.ui.notify(
+					`Failed to resume session: ${error instanceof Error ? error.message : String(error)}`,
+					"error",
+				);
+			}
+			// Session replaced (or resume failed terminally): stop using this ctx.
+			return;
+		}
+
+		addSessionToPrompt(ctx, selected.path);
+	}
 }
 
 // ─── tmux Helpers ─────────────────────────────────────────────────
@@ -1202,8 +1445,14 @@ export default function (pi: ExtensionAPI): void {
 
 	// ── /background-tasks ──  (single entry point: task list → action → execute, loop)
 	pi.registerCommand("background-tasks", {
-		description: "List background tasks (task status, dirty, session) and run an action (log / vscode / close)",
-		handler: async (_args, ctx) => {
+		description: "List background tasks and run an action (log / vscode / close); 'sessions' picks a child session (resume / add to prompt)",
+		handler: async (args, ctx) => {
+			// `/background-tasks sessions`: child-session history picker.
+			if (args.trim() === "sessions") {
+				await runSessionsFlow(pi, ctx);
+				return;
+			}
+
 			// files.ts pattern: esc at the action selector returns to the task
 			// list; esc at the task list exits. Actions run directly (no command
 			// pasting), so several tasks can be observed in one invocation.
@@ -1217,6 +1466,13 @@ export default function (pi: ExtensionAPI): void {
 				switch (action) {
 					case "log":
 						await runLogAction(pi, ctx, selected);
+						break;
+					case "addToPrompt":
+						if (!selected.sessionFile) {
+							ctx.ui.notify(`Background task "${selected.name}" has no settled session file.`, "error");
+							break;
+						}
+						addSessionToPrompt(ctx, selected.sessionFile);
 						break;
 					case "vscode":
 						await runVscodeAction(pi, ctx, selected);
