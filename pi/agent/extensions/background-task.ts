@@ -472,7 +472,7 @@ async function selectTask(
 	return displayToFacts.get(choice) ?? null;
 }
 
-type TaskAction = "log" | "status" | "vscode" | "close";
+type TaskAction = "log" | "vscode" | "close";
 
 /** Action labels for the selector, filtered by facts (session → log; worktree → vscode/close). */
 function taskActionItems(facts: TaskFacts): SelectItem[] {
@@ -480,7 +480,6 @@ function taskActionItems(facts: TaskFacts): SelectItem[] {
 	if (facts.sessionExists) {
 		items.push({ value: "log", label: "Log (live pane / settled output)" });
 	}
-	items.push({ value: "status", label: "Status (facts + env)" });
 	if (facts.worktreePath !== undefined) {
 		items.push({ value: "vscode", label: "Open in VS Code" });
 		items.push({ value: "close", label: "Close (remove worktree + kill session)" });
@@ -529,24 +528,6 @@ async function selectTaskAction(
 }
 
 // ─── Action Runners (executed directly by the /background-tasks flow) ──────
-
-async function runStatusAction(
-	pi: ExtensionAPI,
-	ctx: ExtensionCommandContext,
-	facts: TaskFacts,
-): Promise<void> {
-	const env = await buildTaskEnv(pi, facts.name);
-	const lines = formatStatusText(env).split("\n");
-
-	// Attach hint only when a session exists, matching the log footer.
-	let footer: string | undefined;
-	if (env.monitorCmd) {
-		const copied = await copyToClipboard(pi, env.monitorCmd);
-		footer = `Monitor: ${env.monitorCmd}${copied ? " (copied)" : ""}`;
-	}
-
-	ctx.ui.setWidget("background-task-status", buildWidget(lines, footer), { placement: "aboveEditor" });
-}
 
 async function runCloseAction(
 	pi: ExtensionAPI,
@@ -636,7 +617,7 @@ async function runLogAction(
 		footer = `Monitor: ${attachCommand}${copied ? " (copied)" : ""}`;
 	}
 
-	const lines = formatLogWidgetLines(taskName, attachCommand, result, paneOutput, duration);
+	const lines = formatLogWidgetLines(taskName, facts.worktreePath, attachCommand, result, paneOutput, duration);
 	ctx.ui.setWidget("background-task-log", buildWidget(lines, footer), { placement: "aboveEditor" });
 }
 
@@ -715,10 +696,12 @@ function truncateTaskText(text: string): string {
  * Log action widget: subagent-style renderResult layout.
  * Running → live pane tail; settled → result output (+ error on failed).
  * The attach line renders only when the tmux session still exists
- * (attachCommand is undefined otherwise).
+ * (attachCommand is undefined otherwise). The worktree line always renders
+ * (runLogAction requires the worktree to exist).
  */
 function formatLogWidgetLines(
 	alias: string,
+	worktreePath: string,
 	attachCommand: string | undefined,
 	result: BackgroundTaskResult | null,
 	paneOutput: string,
@@ -743,6 +726,7 @@ function formatLogWidgetLines(
 			{ text: `  ${result.provider ?? ""}/${result.model ?? ""} (${result.thinking ?? ""})`, color: "dim" },
 		]);
 	}
+	lines.push([{ text: `  worktree: ${worktreePath}`, color: "dim" }]);
 	lines.push("");
 
 	if (status === "running") {
@@ -801,19 +785,7 @@ async function ensureSession(
 	return result.code === 0;
 }
 
-// ─── Shared lifecycle core (slash commands) ───────────────────────
-
-interface TaskEnv {
-	name: string;
-	worktreePath?: string;
-	socket: string | null;
-	session: string;
-	paneTarget: string | null;
-	sessionExists: boolean;
-	dirty?: boolean;
-	taskStatus?: TaskStatus;
-	monitorCmd?: string;
-}
+// ─── Task Close (worktree + session) ──────────────────────────────
 
 interface CloseResult {
 	ok: boolean;
@@ -821,28 +793,6 @@ interface CloseResult {
 	error?: string;
 	needsForce?: "dirty";
 	leftoverCount?: number;
-}
-
-async function buildTaskEnv(pi: ExtensionAPI, name: string): Promise<TaskEnv> {
-	const facts = await resolveTaskFacts(pi, name);
-	const env = await getTasksEnv(pi);
-	const session = taskSessionName(taskUuid(name));
-	let paneTarget: string | null = null;
-	if (env && facts.sessionExists) {
-		paneTarget = await discoverPaneTarget(pi, env.socketPath, session);
-	}
-	return {
-		name,
-		worktreePath: facts.worktreePath,
-		socket: env?.socketPath ?? null,
-		session,
-		paneTarget,
-		sessionExists: facts.sessionExists,
-		dirty: facts.dirty,
-		taskStatus: facts.taskStatus,
-		// Attach only when a tmux session exists.
-		monitorCmd: facts.sessionExists ? taskAttachCommand(name, env?.repoRoot) : undefined,
-	};
 }
 
 /**
@@ -925,23 +875,6 @@ function formatCloseText(result: CloseResult): string {
 		msg += ` ${result.error}`;
 	}
 	return msg;
-}
-
-function formatStatusText(env: TaskEnv): string {
-	if (env.worktreePath === undefined) {
-		return `Background task "${env.name}" does not exist (no worktree).`;
-	}
-	return [
-		`Background task "${env.name}" status.`,
-		`worktreePath: ${env.worktreePath}`,
-		`sessionExists: ${env.sessionExists}`,
-		`taskStatus: ${env.taskStatus ?? "(unsettled or not a background task)"}`,
-		`dirty: ${env.dirty ?? false}`,
-		`socket: ${env.socket ?? ""}`,
-		`session: ${env.session}`,
-		`paneTarget: ${env.paneTarget ?? ""}`,
-		`monitorCmd: ${env.monitorCmd ?? ""}`,
-	].join("\n");
 }
 
 // ─── Background Task Dispatch ─────────────────────────────────────
@@ -1265,12 +1198,11 @@ export default function (pi: ExtensionAPI): void {
 	// Clear background-task widgets when a new turn starts so they don't block conversation output.
 	pi.on("turn_start", async (_event, ctx) => {
 		ctx.ui.setWidget("background-task-log", undefined);
-		ctx.ui.setWidget("background-task-status", undefined);
 	});
 
 	// ── /background-tasks ──  (single entry point: task list → action → execute, loop)
 	pi.registerCommand("background-tasks", {
-		description: "List background tasks (task status, dirty, session) and run an action (log / status / vscode / close)",
+		description: "List background tasks (task status, dirty, session) and run an action (log / vscode / close)",
 		handler: async (_args, ctx) => {
 			// files.ts pattern: esc at the action selector returns to the task
 			// list; esc at the task list exits. Actions run directly (no command
@@ -1285,9 +1217,6 @@ export default function (pi: ExtensionAPI): void {
 				switch (action) {
 					case "log":
 						await runLogAction(pi, ctx, selected);
-						break;
-					case "status":
-						await runStatusAction(pi, ctx, selected);
 						break;
 					case "vscode":
 						await runVscodeAction(pi, ctx, selected);
