@@ -961,6 +961,7 @@ interface DispatchResult {
 	provider?: string;
 	model?: string;
 	thinking?: string;
+	prompt?: string;
 }
 
 /**
@@ -971,9 +972,9 @@ interface DispatchResult {
  */
 async function dispatchBackgroundTask(
 	pi: ExtensionAPI,
-	opts: { alias: string; prompt: string; ctx: ExtensionContext },
+	opts: { alias: string; prompt: string; description: string; ctx: ExtensionContext },
 ): Promise<DispatchResult> {
-	const { alias, prompt, ctx } = opts;
+	const { alias, prompt, description, ctx } = opts;
 
 	// 1. Fail fast on duplicate alias (existing worktree or tmux session).
 	const existing = await resolveTaskFacts(pi, alias);
@@ -1033,7 +1034,7 @@ async function dispatchBackgroundTask(
 		await mkdir(sessionDir, { recursive: true, mode: 0o700 });
 		promptPath = path.join(runDir, "task.md");
 		resultPath = path.join(runDir, "result.json");
-		await writeFile(promptPath, `# Background task: ${alias}\n\n${prompt}\n`, {
+		await writeFile(promptPath, `${prompt}\n`, {
 			encoding: "utf8",
 			mode: 0o600,
 		});
@@ -1067,7 +1068,7 @@ async function dispatchBackgroundTask(
 		"--thinking", thinking,
 		"--session-dir", sessionDir,
 		"--session-id", `${uuid}-${randomUUID().slice(0, 6)}`,
-		"--name", session,
+		"--name", `${alias} - ${description}`,
 		"--approve",
 		"--extension", EXTENSION_PATH,
 		`@${promptPath}`,
@@ -1114,6 +1115,7 @@ async function dispatchBackgroundTask(
 		provider,
 		model,
 		thinking,
+		prompt,
 	};
 }
 
@@ -1333,7 +1335,7 @@ export default function (pi: ExtensionAPI): void {
 					details: { ok: false, alias, error },
 				};
 			}
-			const result = await dispatchBackgroundTask(pi, { alias, prompt, ctx });
+			const result = await dispatchBackgroundTask(pi, { alias, prompt, description, ctx });
 			return {
 				content: [{ type: "text" as const, text: formatDispatchText(result) }],
 				details: result,
@@ -1344,11 +1346,29 @@ export default function (pi: ExtensionAPI): void {
 			const text = theme.fg("toolTitle", theme.bold("background_task ")) + theme.fg("dim", description);
 			return new Text(text, 0, 0);
 		},
-		renderResult(result, _options, theme) {
+		renderResult(result, { expanded }, theme) {
 			const details = result.details as DispatchResult | undefined;
 			if (!details || !details.ok) {
 				const content = result.content.find((part) => part.type === "text");
 				return new Text(content?.type === "text" ? content.text : "(no output)", 0, 0);
+			}
+			if (expanded && details.prompt) {
+				const container = new Container();
+				container.addChild(
+					new Text(
+						`${theme.fg("warning", "●")} ${theme.fg("toolTitle", theme.bold(details.alias))}${theme.fg("muted", " · dispatched")}`,
+						0,
+						0,
+					),
+				);
+				container.addChild(new Text(theme.fg("accent", details.attachCommand ?? ""), 0, 0));
+				container.addChild(
+					new Text(theme.fg("dim", `${details.provider ?? ""}/${details.model ?? ""} (${details.thinking ?? ""})`), 0, 0),
+				);
+				container.addChild(new Text(BLANK_ROW, 1, 0));
+				container.addChild(new Text(theme.fg("muted", "─── Prompt ───"), 0, 0));
+				container.addChild(new Text(theme.fg("dim", details.prompt), 0, 0));
+				return container;
 			}
 			let text = `${theme.fg("warning", "●")} ${theme.fg("toolTitle", theme.bold(details.alias))}`;
 			text += theme.fg("muted", " · dispatched");
