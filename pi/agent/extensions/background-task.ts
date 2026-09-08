@@ -23,7 +23,7 @@ import { Type } from "typebox";
 // ─── Script Resolution ────────────────────────────────────────────
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SCRIPTS_DIR = path.join(__dirname, "branch-workspace");
+const SCRIPTS_DIR = path.join(__dirname, "background-task");
 const WORKTREE_SH = path.join(SCRIPTS_DIR, "worktree.sh");
 
 /** `pi --attach-background-task <alias> [--task-root <repoRoot>]`: attach to a dispatched task's tmux session. */

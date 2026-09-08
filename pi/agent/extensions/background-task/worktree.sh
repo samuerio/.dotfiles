@@ -337,15 +337,6 @@ if [ "$command" = "clean" ]; then
   exit 0
 fi
 
-gitignore="$repo_main/.gitignore"
-for ignore_line in '/.worktree/' '/.pi/background-tasks/'; do
-  if ! grep -qF "$ignore_line" "$gitignore" 2>/dev/null; then
-    echo "$ignore_line" >> "$gitignore"
-    git -C "$repo_main" add "$gitignore"
-    git -C "$repo_main" commit -m "chore(gitignore): ignore $ignore_line" "$gitignore" >&2
-  fi
-done
-
 mkdir -p "$(dirname "$worktree_path")"
 
 needs_new_worktree="yes"
@@ -353,12 +344,6 @@ if [ -n "$existing_branch" ]; then
   needs_new_worktree="no"
 elif [ -d "$worktree_path/.git" ] || [ -f "$worktree_path/.git" ]; then
   echo "error: $worktree_path exists but is not a registered git worktree" >&2
-  exit 1
-fi
-
-if [ "$needs_new_worktree" = "yes" ] && [ -n "$(git -C "$repo_main" status --porcelain)" ]; then
-  echo "error: current worktree has uncommitted changes" >&2
-  echo "please commit or stash your changes before creating a new worktree" >&2
   exit 1
 fi
 
