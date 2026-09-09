@@ -184,7 +184,7 @@ elif [[ $(uname) == "Linux" ]]; then
     # 针对 Linux 的命令
     # Puppeteer/Mermaid CLI configuration
     export PUPPETEER_EXECUTABLE_PATH="/usr/bin/google-chrome-stable"
-    alias vpn='export https_proxy=http://127.0.0.1:7890 http_proxy=http://127.0.0.1:7890 all_proxy=socks5://127.0.0.1:7890'
+    alias vpn='export https_proxy=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897 all_proxy=socks5://127.0.0.1:7897'
     alias nd='cd ~/workspace/.dotfiles && nvim ./'
 
     # alias kvpn='sudo openvpn --daemon --config ~/.config/openvpn/kaopuyun.ovpn'
