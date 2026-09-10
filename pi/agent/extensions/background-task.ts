@@ -290,8 +290,6 @@ function registerTaskChildReporter(pi: ExtensionAPI, resultPath: string): void {
 	});
 }
 
-// ─── Run Artifacts (task.md / result.json / session) ──────────────
-
 // ─── Run Artifacts (task.md / result.json / sessions) ─────────────
 
 /** Per-task run dir: `<tasksDir>/<uuid>/` (task.md + result.json, latest-wins). */
@@ -909,8 +907,11 @@ interface CloseResult {
 
 /**
  * Close a background task: worktree existence is a prerequisite. Removes the
- * worktree (dirty requires force) and kills the tmux session when present.
- * Run artifacts (.pi/background-tasks/<uuid>/) are kept on purpose.
+ * worktree (dirty requires force), kills the tmux session when present, and
+ * deletes the run dir (task.md + result.json) once cleanup succeeded — the
+ * task list is sourced from worktrees, so leftover artifacts would be
+ * orphaned. The sessions dir (child session history) is append-only and
+ * never touched here.
  */
 async function closeTask(
 	pi: ExtensionAPI,
@@ -950,9 +951,9 @@ async function closeTask(
 	const cleanOutput = parseCleanOutput(cleanResult.stdout);
 
 	// Kill the session when present; failure is only a warning.
+	const env = await getTasksEnv(pi);
 	let sessionWarn: string | undefined;
 	if (facts.sessionExists) {
-		const env = await getTasksEnv(pi);
 		if (env) {
 			const killResult = await pi.exec("tmux", [
 				"-S", env.socketPath,
@@ -964,11 +965,23 @@ async function closeTask(
 		}
 	}
 
+	// Remove the run dir (task.md + result.json) after successful cleanup:
+	// best-effort, skipped when the session kill failed (the child may still
+	// be writing result.json there). Failure to delete is only a warning.
+	let runDirWarn: string | undefined;
+	if (env && !sessionWarn) {
+		try {
+			await rm(taskRunDir(env.tasksDir, name), { recursive: true, force: true });
+		} catch (error) {
+			runDirWarn = `Failed to remove run artifacts: ${error instanceof Error ? error.message : String(error)}`;
+		}
+	}
+
 	return {
 		ok: true,
 		name,
 		leftoverCount: cleanOutput?.leftoverCount ?? 0,
-		error: sessionWarn,
+		error: sessionWarn ?? runDirWarn,
 	};
 }
 
