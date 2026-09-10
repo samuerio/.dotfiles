@@ -6,7 +6,9 @@
  * - Tool `show_markdown(path)`: for the agent to present a markdown file it
  *   just wrote (plans, reports, docs). Non-blocking: the tool returns
  *   immediately and the overlay stays open until the user presses Esc.
- * - Command `/preview <path>`: manually preview any markdown file.
+ * - Command `/preview [path]`: manually preview a markdown file. With no
+ *   argument, reopens the most recently previewed file in this session
+ *   (tracked in a session entry, so it survives restarts and is per branch).
  *
  * Only one preview overlay is open at a time; a new preview closes the
  * previous one. In headless mode (no UI) both paths degrade to printing the
@@ -17,6 +19,7 @@ import {
     getMarkdownTheme,
     type ExtensionAPI,
     type ExtensionContext,
+    type SessionEntry,
     type Theme,
     type KeybindingsManager,
 } from "@earendil-works/pi-coding-agent";
@@ -39,6 +42,48 @@ type PreviewDetails = { path: string; error?: string };
 
 /** Handle of the currently open preview overlay (single instance). */
 let activePreviewHandle: OverlayHandle | null = null;
+
+// --- Last-preview state (same pattern as inline.ts) ---
+
+const PREVIEW_STATE_KEY = "preview-state";
+
+interface PreviewState {
+    path: string;
+}
+
+/** In-memory cache of the most recently previewed file (per current branch). */
+let lastPreviewPath: string | null = null;
+
+function persistPreviewPath(pi: ExtensionAPI, filePath: string): void {
+    lastPreviewPath = filePath;
+    pi.appendEntry(PREVIEW_STATE_KEY, { path: filePath } satisfies PreviewState);
+}
+
+function loadPreviewPathFromBranch(branch: SessionEntry[]): string | null {
+    for (let i = branch.length - 1; i >= 0; i--) {
+        const entry = branch[i];
+        if (
+            entry.type === "custom" &&
+            entry.customType === PREVIEW_STATE_KEY &&
+            entry.data &&
+            typeof (entry.data as PreviewState).path === "string"
+        ) {
+            return (entry.data as PreviewState).path;
+        }
+    }
+    return null;
+}
+
+function reconstructPreviewState(ctx: ExtensionContext): void {
+    lastPreviewPath = loadPreviewPathFromBranch(ctx.sessionManager.getBranch());
+}
+
+function getLastPreviewPath(ctx: ExtensionContext): string | null {
+    if (lastPreviewPath === null) {
+        reconstructPreviewState(ctx);
+    }
+    return lastPreviewPath;
+}
 
 function expandHome(filePath: string): string {
     if (filePath === "~") return os.homedir();
@@ -245,8 +290,15 @@ class MarkdownPreviewOverlayComponent {
     }
 }
 
-async function openPreview(ctx: ExtensionContext, filePath: string, content: string): Promise<void> {
-    // Close any previously open preview (single instance).
+async function openPreview(
+    pi: ExtensionAPI,
+    ctx: ExtensionContext,
+    filePath: string,
+    content: string,
+): Promise<void> {
+    // Record as the session's most recent preview, then close any previously
+    // open preview (single instance).
+    persistPreviewPath(pi, filePath);
     if (activePreviewHandle) {
         const handle = activePreviewHandle;
         activePreviewHandle = null;
@@ -296,6 +348,15 @@ async function openPreview(ctx: ExtensionContext, filePath: string, content: str
 }
 
 export default function previewExtension(pi: ExtensionAPI) {
+    // Rebuild the last-preview cache on session load / tree navigation so a
+    // no-argument /preview follows the current branch.
+    pi.on("session_start", async (_event, ctx) => {
+        reconstructPreviewState(ctx);
+    });
+    pi.on("session_tree", async (_event, ctx) => {
+        reconstructPreviewState(ctx);
+    });
+
     pi.registerTool({
         name: "show_markdown",
         label: "Show Markdown",
@@ -321,6 +382,7 @@ export default function previewExtension(pi: ExtensionAPI) {
              }
 
             if (!ctx.hasUI) {
+                persistPreviewPath(pi, filePath);
                 const text = `Preview not available (headless mode). File: ${filePath}`;
                 return {
                     content: [{ type: "text", text }],
@@ -330,7 +392,7 @@ export default function previewExtension(pi: ExtensionAPI) {
 
             // Fire-and-forget: do not await; the tool returns immediately and the
             // user closes the overlay with Esc. done() handles cleanup.
-            void openPreview(ctx, filePath, result.content);
+            void openPreview(pi, ctx, filePath, result.content);
 
             return {
                 content: [{ type: "text", text: `Opened preview: ${filePath}` }],
@@ -366,13 +428,22 @@ export default function previewExtension(pi: ExtensionAPI) {
     });
 
     pi.registerCommand("preview", {
-        description: "Preview a markdown file in an overlay viewer",
+        description:
+            "Preview a markdown file in an overlay viewer. With no argument, " +
+            "reopens the most recently previewed file in this session.",
         handler: async (args, ctx) => {
-            const target = (args ?? "").trim();
+            let target = (args ?? "").trim();
             if (!target) {
-                ctx.ui.notify("Usage: /preview <path-to-markdown>", "warning");
-                 return;
-             }
+                const last = getLastPreviewPath(ctx);
+                if (!last) {
+                    ctx.ui.notify(
+                        "No markdown previewed yet in this session. Usage: /preview <path-to-markdown>",
+                        "warning",
+                    );
+                    return;
+                }
+                target = last;
+            }
             if (!ctx.hasUI) {
                 console.log(`Preview not available (headless mode). File: ${resolvePreviewPath(ctx.cwd, target)}`);
                  return;
@@ -384,7 +455,7 @@ export default function previewExtension(pi: ExtensionAPI) {
                 ctx.ui.notify(result.error, "error");
                  return;
              }
-            await openPreview(ctx, filePath, result.content);
+            await openPreview(pi, ctx, filePath, result.content);
          },
     });
 }
