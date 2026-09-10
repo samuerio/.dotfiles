@@ -15,7 +15,9 @@ import { type AssistantMessage, type Message, type ThinkingLevel as AiThinkingLe
 import {
 	Container,
 	Input,
+	Key,
 	Markdown,
+	matchesKey,
 	truncateToWidth,
 	visibleWidth,
 	type Focusable,
@@ -202,6 +204,10 @@ class BtwOverlay extends Container implements Focusable {
 	private readonly onSubmitCallback: (value: string) => void;
 	private readonly onDismissCallback: () => void;
 	private _focused = false;
+	private scrollOffset = 0;
+	private followTail = true;
+	private lastTotal = 0;
+	private lastHeight = 6;
 
 	get focused(): boolean {
 		return this._focused;
@@ -232,6 +238,9 @@ class BtwOverlay extends Container implements Focusable {
 
 		this.input = new Input();
 		this.input.onSubmit = (value) => {
+			// A new question pins the view back to the latest messages.
+			this.followTail = true;
+			this.scrollOffset = 0;
 			this.onSubmitCallback(value);
 		};
 		this.input.onEscape = () => {
@@ -245,6 +254,14 @@ class BtwOverlay extends Container implements Focusable {
 			return;
 		}
 
+		if (matchesKey(data, Key.ctrl("u"))) {
+			this.pageBy(-1);
+			return;
+		}
+		if (matchesKey(data, Key.ctrl("d"))) {
+			this.pageBy(1);
+			return;
+		}
 		this.input.handleInput(data);
 	}
 
@@ -255,6 +272,24 @@ class BtwOverlay extends Container implements Focusable {
 
 	getDraft(): string {
 		return this.input.getValue();
+	}
+
+	private pageBy(direction: 1 | -1): void {
+		const halfPage = Math.max(1, Math.floor(this.lastHeight / 2));
+		const maxScroll = Math.max(0, this.lastTotal - this.lastHeight);
+		const next = this.scrollOffset + direction * halfPage;
+		if (direction > 0 && next >= maxScroll) {
+			// Scrolled back to the bottom: resume tail-following.
+			this.followTail = true;
+			this.scrollOffset = maxScroll;
+		} else if (next <= 0) {
+			this.followTail = false;
+			this.scrollOffset = 0;
+		} else {
+			this.followTail = false;
+			this.scrollOffset = next;
+		}
+		this.tui.requestRender();
 	}
 
 	private frameLine(content: string, innerWidth: number): string {
@@ -279,7 +314,15 @@ class BtwOverlay extends Container implements Focusable {
 
 		// Markdown renders to innerWidth already — no manual wrapping needed
 		const transcript = this.getTranscript(innerWidth, this.theme);
-		const visibleTranscript = transcript.slice(-transcriptHeight);
+		this.lastTotal = transcript.length;
+		this.lastHeight = transcriptHeight;
+		const maxScroll = Math.max(0, transcript.length - transcriptHeight);
+		if (this.followTail) {
+			this.scrollOffset = maxScroll;
+		} else {
+			this.scrollOffset = Math.min(this.scrollOffset, maxScroll);
+		}
+		const visibleTranscript = transcript.slice(this.scrollOffset, this.scrollOffset + transcriptHeight);
 		const transcriptPadding = Math.max(0, transcriptHeight - visibleTranscript.length);
 
 		const status = this.getStatus();
@@ -308,7 +351,10 @@ class BtwOverlay extends Container implements Focusable {
 		lines.push(
 			`${this.theme.fg("borderMuted", "│")}${inputLine}${this.theme.fg("borderMuted", "│")}`,
 		);
-		lines.push(this.frameLine(this.theme.fg("dim", "Enter submit · Esc close"), innerWidth));
+		const hint = this.followTail
+			? "Enter submit · Esc close"
+			: "Enter submit · Esc close · ctrl+d back to latest";
+		lines.push(this.frameLine(this.theme.fg("dim", hint), innerWidth));
 		lines.push(this.borderLine(innerWidth, "bottom"));
 
 		return lines;
@@ -396,7 +442,7 @@ export default function (pi: ExtensionAPI) {
 		}
 
 		const lines: string[] = [];
-		for (const item of thread.slice(-6)) {
+		for (const item of thread) {
 			// User message
 			const userText = item.question.trim().split("\n")[0];
 			lines.push(theme.fg("accent", theme.bold("You: ")) + truncateToWidth(userText, width - 5, "…"));
