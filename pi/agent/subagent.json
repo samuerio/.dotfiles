@@ -1,5 +1,5 @@
 {
-    "model": "opencode-go/deepseek-v4-flash",
+    "model": "opencode-go/deepseek-v4.1-flash",
     "thinking": "medium",
     "tools": ["write", "edit", "read", "bash", "finder"],
     "noSkills": true
