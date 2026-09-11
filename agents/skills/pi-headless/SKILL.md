@@ -11,13 +11,17 @@ Use interactive mode or `--mode rpc` for multi-turn workflows; print and JSON mo
 
 ## Before You Start
 
-Run all pi invocations through the bundled wrapper `{baseDir}/scripts/piw`; it forwards all other arguments to pi. Never pass `--model` or `--thinking` yourself; the wrapper handles them. Always pass `--no-session` explicitly for headless runs; it is not injected.
+Run all pi invocations through the bundled wrapper `{baseDir}/scripts/piw`; it forwards all other arguments to pi. Never pass `--model` or `--thinking` yourself; the wrapper handles them.
+
+### Session Audit Trail (default on)
+
+By default piw persists every run as a temporary audit session: it generates a UUID and injects `--session-id <uuid> --session-dir /tmp/piw-sessions`. After the run it prints the session file path to stderr as `piw: session: <path>` (stdout stays clean for piping).
+
+Pass `--no-session` for fully ephemeral runs (no session file, no stderr path line).
 
 Each headless run starts from a blank slate with no session history. The task document must be fully self-contained; never rely on context from a previous conversation or session.
 
 If a run needs interactive follow-up or multi-turn debugging, use the tmux skill to run pi interactively instead. The wrapper works there too: without `-p`/`--print`/`--mode json`, pi starts its interactive TUI.
-
-To persist a session for human review, omit `--no-session`.
 
 ## Choose the Mode
 
@@ -26,7 +30,7 @@ To persist a session for human review, omit `--no-session`.
 | Final answer only | `pi -p "..."` or `pi --print "..."` | plain text final reply |
 | Structured events to parse programmatically | `pi --mode json "..."` | JSON Lines on stdout |
 
-> Use print mode for final-answer-only scripts. Use JSON mode when a script needs to parse individual events (e.g. checking whether a specific tool ran, extracting token usage) rather than just the final answer. JSON mode is not a substitute for session persistence, if you want a human-reviewable record of a run, omit `--no-session` so pi persists a normal session rather than capturing JSON output.
+> Use print mode for final-answer-only scripts. Use JSON mode when a script needs to parse individual events (e.g. checking whether a specific tool ran, extracting token usage) rather than just the final answer. JSON mode is not a substitute for session persistence: the default piw audit session (see above) already gives you a reviewable session file regardless of mode.
 
 ## Print Mode
 
@@ -35,15 +39,15 @@ To persist a session for human review, omit `--no-session`.
 **Without piped input:**
 
 ```bash
-{baseDir}/scripts/piw --no-session -p "Summarize this codebase"
-{baseDir}/scripts/piw --no-session -p @plan.md "Implement exactly what this plan describes"
+{baseDir}/scripts/piw -p "Summarize this codebase"
+{baseDir}/scripts/piw -p @plan.md "Implement exactly what this plan describes"
 ```
 
 **With piped input:**
 
 ```bash
 cat README.md \
-  | {baseDir}/scripts/piw --no-session -p "Summarize this text"
+  | {baseDir}/scripts/piw -p "Summarize this text"
 ```
 
 ## JSON Mode
@@ -51,7 +55,7 @@ cat README.md \
 stdout: JSON Lines, one event per line (first line = session header). Logs/warnings go to stderr, redirect before piping to `jq`.
 
 ```bash
-{baseDir}/scripts/piw --no-session --mode json "List files" 2>/dev/null \
+{baseDir}/scripts/piw --mode json "List files" 2>/dev/null \
   | jq -c 'select(.type == "message_end")'
 ```
 
@@ -77,13 +81,13 @@ Use two moves:
 
 ```bash
 # Isolate one skill
-{baseDir}/scripts/piw --no-session \
+{baseDir}/scripts/piw \
   --no-skills --skill /path/to/your-skill \
   --mode json "Test prompt" \
   2>debug.err | tee debug.jsonl | jq -c 'select(.type=="tool_execution_end")'
 
 # Isolate one extension
-{baseDir}/scripts/piw --no-session \
+{baseDir}/scripts/piw \
   --no-extensions -e /path/to/your-extension.ts \
   --mode json "Test prompt" \
   2>debug.err | tee debug.jsonl | jq -c 'select(.type=="tool_execution_end")'
@@ -131,7 +135,7 @@ For the full event schema and more recipes, see [`references/json-mode-events.md
 |---|---|
 | `--model <model>` | injected by the wrapper; do not pass manually |
 | `--thinking <thinking>` | injected by the wrapper; do not pass manually |
-| `--no-session` | avoid persisting a session; pass explicitly for headless runs |
+| `--no-session` | opt out of the default `/tmp/piw-sessions` audit session (fully ephemeral) |
 | `--tools <tools>` | comma-separated allowlist of tools, e.g. `read,grep,find,ls` for read-only mode |
 | `--exclude-tools <tools>` | comma-separated denylist of tools to disable |
 | `--no-tools` | disable all tools |
@@ -152,7 +156,7 @@ Use pi as a headless worker to execute a scoped implementation task defined in a
 **Plan without implementation instruction (`@file` + inline prompt):**
 
 ```bash
-{baseDir}/scripts/piw --no-session -p @plan.md "Implement exactly what this plan describes"
+{baseDir}/scripts/piw -p @plan.md "Implement exactly what this plan describes"
 ```
 
 References an existing plan file and pairs it with an implementation instruction to direct the worker. The plan provides the what; the inline prompt tells the worker to execute it.
@@ -161,7 +165,7 @@ References an existing plan file and pairs it with an implementation instruction
 
 ```bash
 cat handoff-for-impl.md \
-  | {baseDir}/scripts/piw --no-session -p
+  | {baseDir}/scripts/piw -p
 ```
 
 The handoff doc contains both the plan and the implementation instruction in one file. The worker receives everything it needs from the doc alone.
@@ -173,7 +177,7 @@ The handoff doc contains both the plan and the implementation instruction in one
 Replace or extend the default coding-assistant system prompt, e.g. to run pi as a non-coding worker or with a custom persona. Pass a bare file path (no `@` prefix) to load the prompt from a file; if the path exists it is read and used as the prompt contents:
 
 ```bash
-{baseDir}/scripts/piw --no-session \
+{baseDir}/scripts/piw \
   --system-prompt /path/to/prompt.md \
   -p "Run task"
 ```
@@ -183,7 +187,7 @@ Replace or extend the default coding-assistant system prompt, e.g. to run pi as 
 Combine with `--no-extensions`, `--no-skills`, and `--no-context-files` to fully isolate the run from project-level instructions and auto-discovered extensions/skills:
 
 ```bash
-{baseDir}/scripts/piw --no-session \
+{baseDir}/scripts/piw \
   --no-extensions --no-skills --no-context-files \
   --tools read,bash \
   --system-prompt /path/to/prompt.md \
@@ -195,7 +199,7 @@ Combine with `--no-extensions`, `--no-skills`, and `--no-context-files` to fully
 Restrict pi to read-only tools to safely review or analyze code without risk of modification:
 
 ```bash
-{baseDir}/scripts/piw --no-session \
+{baseDir}/scripts/piw \
   --tools read,grep,find,ls \
   -p "Review the code and summarize findings"
 ```
@@ -208,16 +212,16 @@ Useful for code review subagents, security scans, or any task where file modific
 # Quick security scan
 find . -name "*.py" -print0 \
   | xargs -0 cat \
-  | {baseDir}/scripts/piw --no-session \
+  | {baseDir}/scripts/piw \
     -p "Check these files for security vulnerabilities and summarize findings by file"
 
 # Performance analysis of staged changes
 git diff \
-  | {baseDir}/scripts/piw --no-session \
+  | {baseDir}/scripts/piw \
     -p "Analyze the performance impact of these changes"
 
 # Documentation consistency check
-{baseDir}/scripts/piw --no-session \
+{baseDir}/scripts/piw \
   -p "Verify all public functions and classes in src/ have complete docstrings. List any missing ones."
 ```
 
@@ -225,16 +229,16 @@ git diff \
 
 ```bash
 # Unit tests for a specific module
-{baseDir}/scripts/piw --no-session \
+{baseDir}/scripts/piw \
   -p @auth.py "Generate comprehensive pytest unit tests for this module. Write them to tests/test_auth.py."
 
 # Integration tests
-{baseDir}/scripts/piw --no-session \
+{baseDir}/scripts/piw \
   -p "Create API integration tests with realistic fixture data for all endpoints in src/api/"
 
 # Test coverage gap analysis (requires a coverage report)
 coverage json -o coverage.json && cat coverage.json \
-  | {baseDir}/scripts/piw --no-session \
+  | {baseDir}/scripts/piw \
     -p "Analyze this coverage report and list the highest-value missing test cases, grouped by module"
 ```
 
@@ -244,16 +248,16 @@ coverage json -o coverage.json && cat coverage.json \
 # OpenAPI spec from source
 find src/ -name "*.py" -print0 \
   | xargs -0 cat \
-  | {baseDir}/scripts/piw --no-session \
+  | {baseDir}/scripts/piw \
     -p "Generate an OpenAPI 3.1 specification for all HTTP endpoints found in this source. Write it to docs/openapi.yaml."
 
 # README generation
-{baseDir}/scripts/piw --no-session \
+{baseDir}/scripts/piw \
   -p "Read the project structure and source files, then create a comprehensive README.md covering setup, usage, and examples"
 
 # Changelog from recent commits
 git log --oneline -50 \
-  | {baseDir}/scripts/piw --no-session \
+  | {baseDir}/scripts/piw \
     -p "Generate a Keep-a-Changelog formatted CHANGELOG entry from these commits, grouped by type (Added, Fixed, Changed)"
 ```
 

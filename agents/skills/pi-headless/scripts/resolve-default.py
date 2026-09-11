@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Resolve the default pi model and thinking level for headless runs.
 
-Reads the `smart` mode from pi's modes.json and prints two lines:
+Reads the `rush` mode from pi's modes.json and prints two lines:
   line 1: model as `provider/modelId`
   line 2: thinkingLevel (may be empty)
 
 Project-level `.pi/modes.json` (relative to cwd) takes precedence, then the
-global `~/.pi/agent/modes.json` (honoring PI_CODING_AGENT_DIR). If `smart` is
+global `~/.pi/agent/modes.json` (honoring PI_CODING_AGENT_DIR). If `rush` is
 absent or malformed, both lines are empty so the caller can fall back to pi's
 own defaults by omitting --model/--thinking.
 """
@@ -17,7 +17,7 @@ import os
 import sys
 from pathlib import Path
 
-MODE_NAME = "smart"
+MODE_NAME = "rush"
 
 
 def global_agent_dir() -> Path:

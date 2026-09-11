@@ -2,17 +2,23 @@
 # piw: wrapper around `pi` for skill-driven runs.
 #
 # Injects the model/thinking resolved at run time from pi's
-# `smart` mode in modes.json (project <cwd>/.pi/modes.json takes precedence,
+# `rush` mode in modes.json (project <cwd>/.pi/modes.json takes precedence,
 # then global ~/.pi/agent/modes.json). The caller never picks a model.
 #
-# Fails fast when no `smart` mode is configured instead of falling back to pi
+# Temporary audit trail: by default each run persists its session to
+# /tmp/piw-sessions/ under a piw-generated UUID, and after the run piw prints
+# the session file path to stderr ("piw: session: <path>"). The UUID makes the
+# file deterministic and concurrency-safe. --no-session opts out; callers
+# passing their own --session/--session-id/--session-dir keep full control.
+# /tmp is tmpfs: the audit trail is cleared on reboot by design.
+#
+# Fails fast when no `rush` mode is configured instead of falling back to pi
 # defaults, so the caller always knows which model a run used.
 #
 # Usage: piw [pi flags and prompt...]
-#   piw --no-session -p "task"
-#   piw --no-session --mode json "task"
-#   piw --no-session --no-skills --skill /path/to/skill -p "task"
-# --no-session is NOT injected; pass it when the run must not persist a session.
+#   piw -p "task"
+#   piw --mode json "task"
+#   piw --no-skills --skill /path/to/skill -p "task"
 # Without -p/--print/--mode, pi starts its interactive TUI (same injections).
 set -euo pipefail
 
@@ -23,17 +29,53 @@ model="${cfg[0]:-}"
 thinking="${cfg[1]:-}"
 
 if [[ -z "$model" ]]; then
-  echo "piw: error: no 'smart' mode resolved from modes.json" >&2
-  echo "Configure modes.smart with provider and modelId in one of:" >&2
+  echo "piw: error: no 'rush' mode resolved from modes.json" >&2
+  echo "Configure modes.rush with provider and modelId in one of:" >&2
   echo "  <cwd>/.pi/modes.json   (project, takes precedence)" >&2
   echo "  ~/.pi/agent/modes.json (global)" >&2
   echo "List available models with: pi --list-models" >&2
   exit 1
 fi
 
+# Scan the caller's flags: --no-session opts out of the audit trail, and
+# explicit session flags mean the caller owns session placement entirely.
+inject_session=1
+for arg in "$@"; do
+  case "$arg" in
+    --no-session | --session | --session=* | --session-id | --session-id=* | --session-dir | --session-dir=*)
+      inject_session=0
+      ;;
+  esac
+done
+
 args=(pi --model "$model")
 if [[ -n "$thinking" ]]; then
   args+=(--thinking "$thinking")
 fi
 
-exec "${args[@]}" "$@"
+session_uuid=""
+if [[ "$inject_session" == 1 ]]; then
+  session_uuid="$(uuidgen 2>/dev/null | tr 'A-Z' 'a-z' || true)"
+  if [[ -z "$session_uuid" ]]; then
+    session_uuid="$(cat /proc/sys/kernel/random/uuid 2>/dev/null || true)"
+  fi
+  if [[ -z "$session_uuid" ]]; then
+    echo "piw: error: cannot generate a session UUID (uuidgen unavailable)" >&2
+    exit 1
+  fi
+  mkdir -p /tmp/piw-sessions
+  args+=(--session-id "$session_uuid" --session-dir /tmp/piw-sessions)
+fi
+
+set +e
+"${args[@]}" "$@"
+rc=$?
+set -e
+
+if [[ -n "$session_uuid" ]]; then
+  session_file="$(find /tmp/piw-sessions -maxdepth 1 -name "*_${session_uuid}.jsonl" 2>/dev/null | head -n 1)"
+  if [[ -n "$session_file" ]]; then
+    echo "piw: session: $session_file" >&2
+  fi
+fi
+exit "$rc"
