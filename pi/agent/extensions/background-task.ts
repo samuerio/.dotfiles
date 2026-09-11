@@ -632,14 +632,13 @@ async function runLogAction(
 		paneOutput = await capturePaneOutput(pi, env.socketPath, paneTarget, LOG_PANE_TAIL);
 	}
 
-	let footer: string | undefined;
+	let attachCopied = false;
 	if (attachCommand) {
-		const copied = await copyToClipboard(pi, attachCommand);
-		footer = `Monitor: ${attachCommand}${copied ? " (copied)" : ""}`;
+		attachCopied = await copyToClipboard(pi, attachCommand);
 	}
 
-	const lines = formatLogWidgetLines(taskName, facts.worktreePath, attachCommand, result, paneOutput, duration);
-	ctx.ui.setWidget("background-task-log", buildWidget(lines, footer), { placement: "aboveEditor" });
+	const lines = formatLogWidgetLines(taskName, facts.worktreePath, attachCommand, attachCopied, result, paneOutput, duration);
+	ctx.ui.setWidget("background-task-log", buildWidget(lines), { placement: "aboveEditor" });
 }
 
 async function runVscodeAction(
@@ -806,13 +805,15 @@ function truncateTaskText(text: string): string {
  * Log action widget: subagent-style renderResult layout.
  * Running → live pane tail; settled → result output (+ error on failed).
  * The attach line renders only when the tmux session still exists
- * (attachCommand is undefined otherwise). The worktree line always renders
+ * (attachCommand is undefined otherwise), with " (copied)" appended when the
+ * command was copied to the clipboard. The worktree line always renders
  * (runLogAction requires the worktree to exist).
  */
 function formatLogWidgetLines(
 	alias: string,
 	worktreePath: string,
 	attachCommand: string | undefined,
+	attachCopied: boolean,
 	result: BackgroundTaskResult | null,
 	paneOutput: string,
 	duration?: string,
@@ -830,7 +831,9 @@ function formatLogWidgetLines(
 		{ text: alias, color: "toolTitle", bold: true },
 		{ text: ` · ${status}${duration ? ` · ${duration}` : ""}`, color: "muted" },
 	]);
-	if (attachCommand) lines.push([{ text: `  ${attachCommand}`, color: "accent" }]);
+	if (attachCommand) {
+		lines.push([{ text: `  ${attachCommand}${attachCopied ? " (copied)" : ""}`, color: "accent" }]);
+	}
 	if (result) {
 		lines.push([
 			{ text: `  ${result.provider ?? ""}/${result.model ?? ""} (${result.thinking ?? ""})`, color: "dim" },
@@ -859,10 +862,6 @@ function formatLogWidgetLines(
 		}
 		if (rows.length > LOG_OUTPUT_LINES) {
 			lines.push([{ text: `… (+${rows.length - LOG_OUTPUT_LINES} more lines)`, color: "muted" }]);
-		}
-		if (result.sessionFile) {
-			lines.push("");
-			lines.push([{ text: `  child session: ${result.sessionFile}`, color: "dim" }]);
 		}
 	}
 	return lines;
@@ -1355,10 +1354,14 @@ export default function (pi: ExtensionAPI): void {
 							break;
 						}
 						addSessionToPrompt(ctx, selected.sessionFile);
-						break;
+						// Session added to the editor: the task's purpose is served;
+						// returning to the list has no next step. Exit the flow.
+						return;
 					case "vscode":
 						await runVscodeAction(pi, ctx, selected);
-						break;
+						// Attention moved to the external editor; no reason to loop
+						// back into the list. Exit the flow.
+						return;
 					case "close":
 						await runCloseAction(pi, ctx, selected);
 						break;
