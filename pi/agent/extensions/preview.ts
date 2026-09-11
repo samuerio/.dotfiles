@@ -95,6 +95,19 @@ function resolvePreviewPath(cwd: string, filePath: string): string {
     return path.resolve(cwd, expandHome(filePath.trim()));
 }
 
+/** cwd-relative when possible, otherwise ~-abbreviated (same semantics as the built-in read renderer). */
+function shortenPath(filePath: string, cwd: string): string {
+    const rel = path.relative(cwd, filePath);
+    if (rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel)) {
+        return rel.split(path.sep).join("/");
+    }
+    const home = os.homedir();
+    if (filePath.startsWith(home)) {
+        return `~${filePath.slice(home.length)}`;
+    }
+    return filePath;
+}
+
 async function readMarkdownFile(
     filePath: string,
 ): Promise<{ content: string; bytes: number } | { error: string }> {
@@ -400,8 +413,9 @@ export default function previewExtension(pi: ExtensionAPI) {
              };
          },
 
-        renderCall(args, theme) {
-            const filePath = typeof args.path === "string" ? args.path : "";
+        renderCall(args, theme, context) {
+            const rawPath = typeof args.path === "string" ? args.path : "";
+            const filePath = rawPath ? shortenPath(resolvePreviewPath(context.cwd, rawPath), context.cwd) : "";
             const text =
                 theme.fg("toolTitle", theme.bold("show_markdown ")) +
                 theme.fg("accent", filePath);
@@ -416,14 +430,7 @@ export default function previewExtension(pi: ExtensionAPI) {
             if (details?.error) {
                 return new Text(theme.fg("error", `Error: ${details.error}`), 0, 0);
              }
-            const filePath = details?.path ?? "";
-            return new Text(
-                theme.fg("success", "✓ ") +
-                    theme.fg("muted", "Opened preview ") +
-                    theme.fg("accent", filePath),
-                0,
-                0,
-            );
+            return new Text("", 0, 0);
          },
     });
 
