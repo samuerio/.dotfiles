@@ -483,9 +483,9 @@ async function selectTask(
 	return displayToFacts.get(choice) ?? null;
 }
 
-type TaskAction = "log" | "addToPrompt" | "vscode" | "close";
+type TaskAction = "log" | "addToPrompt" | "result" | "vscode" | "close";
 
-/** Action labels for the selector, filtered by facts (session → log; result sessionFile → addToPrompt; worktree → vscode/close). */
+/** Action labels for the selector, filtered by facts (session → log; settled → addToPrompt/result; worktree → vscode/close). */
 function taskActionItems(facts: TaskFacts): SelectItem[] {
 	const items: SelectItem[] = [];
 	if (facts.sessionExists) {
@@ -493,6 +493,9 @@ function taskActionItems(facts: TaskFacts): SelectItem[] {
 	}
 	if (facts.sessionFile) {
 		items.push({ value: "addToPrompt", label: "Add session to prompt" });
+	}
+	if (facts.taskStatus) {
+		items.push({ value: "result", label: "Add result to prompt" });
 	}
 	if (facts.worktreePath !== undefined) {
 		items.push({ value: "vscode", label: "Open in VS Code" });
@@ -660,12 +663,43 @@ async function runVscodeAction(
 type SessionAction = "resume" | "addToPrompt";
 
 /** Append "read session @<path>" to the editor (files.ts addFileToPrompt variant). */
-function addSessionToPrompt(ctx: ExtensionCommandContext, sessionFile: string): void {
-	const mention = `read session @${sessionFile}`;
+function addSessionToPrompt(ctx: ExtensionCommandContext, sessionFile: string, mention?: string): void {
+	mention ??= `read session @${sessionFile}`;
 	const current = ctx.ui.getEditorText();
 	const separator = current && !current.endsWith(" ") ? " " : "";
 	ctx.ui.setEditorText(`${current}${separator}${mention}`);
 	ctx.ui.notify(`Added ${mention} to prompt`, "info");
+}
+
+/**
+ * Add the settled task's result output to the editor: the shortest path to
+ * "continue from the task result" without loading the whole child session.
+ * Failed tasks get the error appended (formatLogWidgetLines convention).
+ */
+async function runAddResultAction(
+	pi: ExtensionAPI,
+	ctx: ExtensionCommandContext,
+	facts: TaskFacts,
+): Promise<void> {
+	const env = await getTasksEnv(pi);
+	if (!env) {
+		ctx.ui.notify("Failed to resolve repo root for background-task artifacts.", "error");
+		return;
+	}
+	const result = await readTaskResult(env.tasksDir, facts.name);
+	if (!result) {
+		ctx.ui.notify(`Background task "${facts.name}" has no settled result.`, "error");
+		return;
+	}
+	let output = result.output.trim();
+	if (result.status === "failed" && result.error?.trim()) {
+		output += `${output ? "\n\n" : ""}Error: ${result.error.trim()}`;
+	}
+	const text = `background task ${facts.name} result:\n\n${output || "(no text output)"}`;
+	const current = ctx.ui.getEditorText();
+	const separator = current && !current.endsWith("\n") ? "\n" : "";
+	ctx.ui.setEditorText(`${current}${separator}${text}`);
+	ctx.ui.notify(`Added result for "${facts.name}" to prompt`, "info");
 }
 
 /** Sanity cap for picker row labels. */
@@ -1326,7 +1360,7 @@ export default function (pi: ExtensionAPI): void {
 
 	// ── /background-tasks ──  (single entry point: task list → action → execute, loop)
 	pi.registerCommand("background-tasks", {
-		description: "List background tasks and run an action (log / vscode / close); 'sessions' picks a child session (resume / add to prompt)",
+		description: "List background tasks and run an action (log / add to prompt / add result / vscode / close); 'sessions' picks a child session (resume / add to prompt)",
 		handler: async (args, ctx) => {
 			// `/background-tasks sessions`: child-session history picker.
 			if (args.trim() === "sessions") {
@@ -1353,9 +1387,20 @@ export default function (pi: ExtensionAPI): void {
 							ctx.ui.notify(`Background task "${selected.name}" has no settled session file.`, "error");
 							break;
 						}
-						addSessionToPrompt(ctx, selected.sessionFile);
+						// Alias (= branch) names the task up front: the session
+						// file name only carries a uuid.
+						addSessionToPrompt(
+							ctx,
+							selected.sessionFile,
+							`read background task ${selected.name} session @${selected.sessionFile}`,
+						);
 						// Session added to the editor: the task's purpose is served;
 						// returning to the list has no next step. Exit the flow.
+						return;
+					case "result":
+						await runAddResultAction(pi, ctx, selected);
+						// Result added to the editor: same as addToPrompt,
+						// no next step in the list. Exit the flow.
 						return;
 					case "vscode":
 						await runVscodeAction(pi, ctx, selected);
