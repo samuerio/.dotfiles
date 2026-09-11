@@ -46,6 +46,11 @@ interface ExtractionResult {
     questions: ExtractedQuestion[];
 }
 
+type QnAResult =
+    | { kind: "submit"; text: string }
+    | { kind: "editor"; text: string }
+    | null;
+
 type ThinkingLevel = "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 type ModeSpec = {
@@ -202,8 +207,9 @@ class QnAComponent implements Component {
     private currentIndex: number = 0;
     private editor: Editor;
     private tui: TUI;
-    private onDone: (result: string | null) => void;
+    private onDone: (result: QnAResult) => void;
     private showingConfirmation: boolean = false;
+    private pendingEscape: boolean = false;
 
     // Cache
     private cachedWidth?: number;
@@ -220,7 +226,7 @@ class QnAComponent implements Component {
     constructor(
         questions: ExtractedQuestion[],
         tui: TUI,
-        onDone: (result: string | null) => void,
+        onDone: (result: QnAResult) => void,
     ) {
         this.questions = questions;
         this.answers = questions.map(() => "");
@@ -264,14 +270,16 @@ class QnAComponent implements Component {
         this.invalidate();
     }
 
-    private submit(): void {
+    private buildResponse(includeNoAnswer: boolean): string {
         this.saveCurrentAnswer();
 
         // Build the response text
         const parts: string[] = [];
         for (let i = 0; i < this.questions.length; i++) {
             const q = this.questions[i];
-            const a = this.answers[i]?.trim() || "(no answer)";
+            const a =
+                this.answers[i]?.trim() ||
+                (includeNoAnswer ? "(no answer)" : "");
             parts.push(`Q: ${q.question}`);
             if (q.context) {
                 parts.push(`> ${q.context}`);
@@ -280,9 +288,16 @@ class QnAComponent implements Component {
             parts.push("");
         }
 
-        this.onDone(parts.join("\n").trim());
+        return parts.join("\n").trim();
     }
 
+    private submit(): void {
+        this.onDone({ kind: "submit", text: this.buildResponse(true) });
+    }
+
+    private switchToEditor(): void {
+        this.onDone({ kind: "editor", text: this.buildResponse(false) });
+    }
     private cancel(): void {
         this.onDone(null);
     }
@@ -313,8 +328,33 @@ class QnAComponent implements Component {
         }
 
         // Global navigation and commands
-        if (matchesKey(data, Key.escape) || matchesKey(data, Key.ctrl("c"))) {
+        // Esc requires a second press to cancel (guards against accidental
+        // exit); Ctrl+C cancels immediately.
+        if (matchesKey(data, Key.escape)) {
+            if (this.pendingEscape) {
+                this.cancel();
+                return;
+            }
+            this.pendingEscape = true;
+            this.invalidate();
+            this.tui.requestRender();
+            return;
+        }
+        if (matchesKey(data, Key.ctrl("c"))) {
             this.cancel();
+            return;
+        }
+
+        // Any other key disarms the pending escape
+        if (this.pendingEscape) {
+            this.pendingEscape = false;
+            this.invalidate();
+        }
+
+
+        // Ctrl+E: switch to the full editor with all Q/A as editable text
+        if (matchesKey(data, Key.ctrl("e"))) {
+            this.switchToEditor();
             return;
         }
 
@@ -489,7 +529,9 @@ class QnAComponent implements Component {
             lines.push(
                 padToWidth(this.dim("├" + horizontalLine(boxWidth - 2) + "┤")),
             );
-            const controls = `${this.dim("Tab/Enter")} next · ${this.dim("Shift+Tab")} prev · ${this.dim("Shift+Enter")} newline · ${this.dim("Esc")} cancel`;
+            const controls = this.pendingEscape
+                ? `${this.yellow("Press Esc again to cancel")} ${this.dim("· any other key to continue")}`
+                : `${this.dim("Tab/Enter")} next · ${this.dim("Shift+Tab")} prev · ${this.dim("Shift+Enter")} newline · ${this.dim("Ctrl+E")} editor · ${this.dim("Esc×2")} cancel`;
             lines.push(
                 padToWidth(boxLine(truncateToWidth(controls, contentWidth))),
             );
@@ -643,7 +685,7 @@ export default function (pi: ExtensionAPI) {
         }
 
         // Show the Q&A component
-        const answersResult = await ctx.ui.custom<string | null>(
+        const answersResult = await ctx.ui.custom<QnAResult>(
             (tui, _theme, _kb, done) => {
                 return new QnAComponent(extractionResult.questions, tui, done);
             },
@@ -654,13 +696,29 @@ export default function (pi: ExtensionAPI) {
             return;
         }
 
+        let finalAnswers: string;
+        if (answersResult.kind === "editor") {
+            // Open the full editor prefilled with all Q/A scaffold
+            const edited = await ctx.ui.editor(
+                "Answer questions",
+                answersResult.text,
+            );
+            if (edited === undefined) {
+                ctx.ui.notify("Cancelled", "info");
+                return;
+            }
+            finalAnswers = edited;
+        } else {
+            finalAnswers = answersResult.text;
+        }
+
         // Send the answers directly as a message and trigger a turn
         pi.sendMessage(
             {
                 customType: "answers",
                 content:
                     "I answered your questions in the following way:\n\n" +
-                    answersResult,
+                    finalAnswers,
                 display: true,
             },
             { triggerTurn: true },
