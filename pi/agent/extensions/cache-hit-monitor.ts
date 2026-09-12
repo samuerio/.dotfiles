@@ -10,6 +10,7 @@ import type {
 	ExtensionContext,
 	SessionEntry,
 	Theme,
+	ThemeColor,
 } from "@earendil-works/pi-coding-agent";
 import {
 	stripTerminalSequences,
@@ -85,6 +86,13 @@ export interface CacheMonitorView {
 export interface MonitorLine {
 	role: "title" | "good" | "warning" | "bad" | "muted" | "dim";
 	text: string;
+	/**
+	 * Optional TUI-only graphic. Rendered at paint time in TUI mode so it rescales
+	 * on resize via invalidate/render; plain (non-TUI) mode falls back to text.
+	 * JSON.stringify drops function properties, so publishedSignature stays
+	 * text-only and this field never affects it.
+	 */
+	renderGraphic?: (theme: Theme, width: number) => string;
 }
 
 export interface CollectedCacheSamples {
@@ -323,7 +331,7 @@ export function formatMonitorLines(view: CacheMonitorView): MonitorLine[] {
 		if (view.session.requestCount > 0) {
 			return [
 				{ role: "title", text: "Prompt cache · summary usage only" },
-				formatSessionLine(view.session),
+				...formatSessionLines(view.session),
 				{
 					role: "dim",
 					text: "Latest request metrics are unavailable on this branch.",
@@ -349,7 +357,7 @@ export function formatMonitorLines(view: CacheMonitorView): MonitorLine[] {
 			text: `Prompt cache${live} · request #${view.requestNumber} · ${sanitizeDisplayLabel(latest.provider)}/${sanitizeDisplayLabel(latest.model)}`,
 		},
 		{
-			role: latest.hitRatePercent >= 80 ? "good" : latest.hitRatePercent >= 50 ? "warning" : "bad",
+			role: hitRateSeverity(latest.hitRatePercent).role,
 			text: [
 				`Latest  hit ${formatPercent(latest.hitRatePercent)}`,
 				comparison ? `Δ ${formatSignedPercent(comparison.hitRateDeltaPercent)}` : "Δ n/a",
@@ -368,6 +376,14 @@ export function formatMonitorLines(view: CacheMonitorView): MonitorLine[] {
 			].join("  ·  "),
 		},
 	];
+
+	if (latest.promptTokens > 0) {
+		lines.push({
+			role: "muted",
+			text: `Tokens split  ${compositionSummary(latest)}`,
+			renderGraphic: (theme, width) => renderCompositionGraphic(latest, theme, width),
+		});
+	}
 
 	if (comparison) {
 		lines.push({
@@ -397,7 +413,18 @@ export function formatMonitorLines(view: CacheMonitorView): MonitorLine[] {
 				`miss premium ~${formatNullableMoney(comparison?.estimatedMissPremium ?? null)}`,
 			].join("  ·  "),
 		},
-		formatSessionLine(session),
+		...formatSessionLines(session),
+	);
+	const severity = hitRateSeverity(latest.hitRatePercent);
+	const sparkline = renderSparkline(view.trend, view.trend.length);
+	if (sparkline) {
+		lines.push({
+			role: severity.role,
+			text: sparkline,
+			renderGraphic: (theme, width) => theme.fg(severity.colorKey, renderSparkline(view.trend, width)),
+		});
+	}
+	lines.push(
 		{
 			role: "dim",
 			text: `Trend old→new  ${view.trend.map(formatPercent).join(" → ")}`,
@@ -424,6 +451,136 @@ function formatSessionLine(session: CacheAggregate): MonitorLine {
 			`re-billed ${formatTokens(session.rebilledTokens)} (~${formatNullableMoney(session.estimatedMissPremium)})`,
 		].join("  ·  "),
 	};
+}
+
+function hitRateSeverity(percent: number): { role: MonitorLine["role"]; colorKey: ThemeColor } {
+	if (percent >= 80) return { role: "good", colorKey: "success" };
+	if (percent >= 50) return { role: "warning", colorKey: "warning" };
+	return { role: "bad", colorKey: "error" };
+}
+
+function formatSessionLines(session: CacheAggregate): MonitorLine[] {
+	const lines: MonitorLine[] = [formatSessionLine(session)];
+	if (session.requestCount > 0 && session.promptTokens > 0) {
+		lines.push({
+			role: "muted",
+			text: `Session split  ${compositionSummary(session)}`,
+			renderGraphic: (theme, width) => renderCompositionGraphic(session, theme, width),
+		});
+	}
+	return lines;
+}
+
+// 8 samples keeps the text trend line within ~80 columns; larger counts wrap.
+const SPARKLINE_BLOCKS = "▁▂▃▄▅▆▇█";
+const COMPOSITION_BAR_MAX_CELLS = 48;
+
+export function renderSparkline(values: readonly number[], width: number): string {
+	const renderWidth = Math.max(0, Math.floor(width));
+	if (renderWidth === 0 || values.length === 0) return "";
+	const series = values.slice(-renderWidth).filter((value) => Number.isFinite(value));
+	if (series.length === 0) return "";
+	const min = Math.min(...series);
+	const max = Math.max(...series);
+	const span = max - min;
+	const levels = SPARKLINE_BLOCKS.length;
+	return series
+		.map((value) => {
+			const level = span === 0 ? levels - 1 : Math.floor(((value - min) / span) * (levels - 1));
+			return SPARKLINE_BLOCKS.charAt(Math.min(levels - 1, Math.max(0, level)));
+		})
+		.join("");
+}
+
+export interface CompositionSegment {
+	label: string;
+	value: number;
+	colorKey: ThemeColor;
+}
+
+export function renderStackedBar(
+	segments: readonly CompositionSegment[],
+	theme: Theme,
+	width: number,
+): string {
+	const renderWidth = Math.max(0, Math.floor(width));
+	if (renderWidth === 0 || segments.length === 0) return "";
+	const cells = distributeBarCells(
+		segments.map((segment) => Math.max(0, segment.value)),
+		renderWidth,
+	);
+	return segments
+		.map((segment, index) => ({ segment, cells: cells[index] ?? 0 }))
+		.filter((entry) => entry.cells > 0)
+		.map((entry) => theme.fg(entry.segment.colorKey, "█".repeat(entry.cells)))
+		.join("");
+}
+
+// Largest-remainder distribution: floors first, leftover cells to the biggest
+// fractional shares so segment cells sum exactly to the bar width.
+function distributeBarCells(values: readonly number[], width: number): number[] {
+	const cells = values.map(() => 0);
+	const total = values.reduce((sum, value) => sum + value, 0);
+	if (total <= 0 || width <= 0) return cells;
+	const fractional: { index: number; fraction: number }[] = [];
+	let assigned = 0;
+	values.forEach((value, index) => {
+		const exact = (value / total) * width;
+		const floored = Math.floor(exact);
+		cells[index] = floored;
+		assigned += floored;
+		fractional.push({ index, fraction: exact - floored });
+	});
+	fractional.sort((left, right) => right.fraction - left.fraction);
+	let remaining = width - assigned;
+	for (const entry of fractional) {
+		if (remaining <= 0) break;
+		cells[entry.index] += 1;
+		remaining -= 1;
+	}
+	const assignedTotal = cells.reduce((sum, cell) => sum + cell, 0);
+	if (assignedTotal !== width) {
+		const widest = cells.reduce((best, cell, index) => (cell > cells[best] ? index : best), 0);
+		cells[widest] += width - assignedTotal;
+	}
+	return cells;
+}
+
+function compositionSegments(
+	record: Pick<CacheUsageRecord, "input" | "cacheRead" | "cacheWrite">,
+): CompositionSegment[] {
+	return [
+		{ label: "read", value: record.cacheRead, colorKey: "success" },
+		{ label: "write", value: record.cacheWrite, colorKey: "warning" },
+		{ label: "uncached", value: record.input, colorKey: "error" },
+	];
+}
+
+function compositionSummary(
+	record: Pick<CacheUsageRecord, "input" | "cacheRead" | "cacheWrite" | "promptTokens">,
+): string {
+	if (record.promptTokens <= 0) return "";
+	return compositionSegments(record)
+		.map((segment) => `${segment.label} ${formatPercent((segment.value / record.promptTokens) * 100)}`)
+		.join(" · ");
+}
+
+export function renderCompositionGraphic(
+	record: Pick<CacheUsageRecord, "input" | "cacheRead" | "cacheWrite" | "promptTokens">,
+	theme: Theme,
+	width: number,
+): string {
+	if (record.promptTokens <= 0) return "";
+	const segments = compositionSegments(record);
+	const legend = segments
+		.map((segment) => `${segment.label}${theme.fg(segment.colorKey, "█")}`)
+		.join(" ");
+	const barCells = Math.max(
+		0,
+		Math.min(COMPOSITION_BAR_MAX_CELLS, width - visibleWidth(legend) - 2),
+	);
+	const bar = renderStackedBar(segments, theme, barCells);
+	return bar ? `${bar}  ${legend}` : legend;
 }
 
 export function sanitizeDisplayLabel(value: string): string {
@@ -819,7 +976,7 @@ export function renderCacheMonitor(view: CacheMonitorView, theme: Theme, width: 
 	if (renderWidth === 0) return formatMonitorLines(view).map(() => "");
 	const divider = theme.fg("borderMuted", "─".repeat(renderWidth));
 	const rendered = formatMonitorLines(view).flatMap((line) => {
-		const styled = styleLine(line, theme);
+		const styled = line.renderGraphic?.(theme, renderWidth) ?? styleLine(line, theme);
 		return wrapTextWithAnsi(styled, renderWidth);
 	});
 	return [divider, ...rendered].map((line) =>
