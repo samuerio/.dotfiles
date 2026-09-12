@@ -17,7 +17,7 @@ IDE 级编辑能力，集成 `telescope`/`fzf` 搜索与 `opencode.nvim` AI 工�
 
 pi coding agent 的自定义 TypeScript 扩展集，仓库中除 `nvim/` 外最活跃的子系统。分两类：（1）TUI 斜杠命令与工具，覆盖上下文与文件管理、
 会话编排与交接、background-task（后台任务派发：git worktree + tmux 子会话 + 结果回报）、会话监视与拆解、统一编辑、代码审查、迭代/循环、
-多模态图像改写、tmux 分屏、模式与提示词编辑；（2）非命令扩展，注册自定义 stdio LLM provider（qoder-stdio）
+tmux 分屏、模式与提示词编辑；（2）非命令扩展，注册自定义 stdio LLM provider（qoder-stdio）
 与 turn 生命周期事件钩子（完成通知、装饰性加载提示）。依赖 pi 运行时库 `@earendil-works/pi-coding-agent`、
 `pi-tui`、`pi-ai`、`pi-agent-core`。子代理运行时不在本目录实现，见 `pi/agent/` 的 packages 边界；
 本目录仅保留 `subagent/models-allowlist.json` 等本地策略配置。
