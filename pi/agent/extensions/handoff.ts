@@ -13,7 +13,8 @@
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { complete, type Message } from "@earendil-works/pi-ai";
+import { completeSimple, type UserMessage } from "@earendil-works/pi-ai/compat";
+import { loadRushModeSpec, RUSH_MODE, sessionHeaders } from "./lib/rush.ts";
 import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { BorderedLoader, convertToLlm, serializeConversation } from "@earendil-works/pi-coding-agent";
 
@@ -86,11 +87,22 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			if (!ctx.model) {
-				ctx.ui.notify("No model selected", "error");
+			// Resolve the rush model from modes.json (project, then global).
+			// The handoff prompt is generated with the rush model and its
+			// thinking level, independent of the current session model.
+			const rushSpec = loadRushModeSpec(ctx.cwd);
+			if (!rushSpec) {
+				ctx.ui.notify(`No '${RUSH_MODE}' mode in modes.json`, "error");
 				return;
 			}
-
+			const model = ctx.modelRegistry.find(rushSpec.provider!, rushSpec.modelId!);
+			if (!model) {
+				ctx.ui.notify(
+					`Mode '${RUSH_MODE}' references unknown model ${rushSpec.provider}/${rushSpec.modelId}`,
+					"error",
+				);
+				return;
+			}
 			const goal = args.trim();
 			if (!goal) {
 				ctx.ui.notify("Usage: /handoff <goal for new thread>", "error");
@@ -117,12 +129,12 @@ export default function (pi: ExtensionAPI) {
 				loader.onAbort = () => done(null);
 
 				const doGenerate = async () => {
-					const auth = await ctx.modelRegistry.getApiKeyAndHeaders(ctx.model!);
-					if (!auth.ok || !auth.apiKey) {
-						throw new Error(auth.ok ? `No API key for ${ctx.model!.provider}` : auth.error);
+					const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+					if (!auth.ok) {
+						throw new Error(auth.error);
 					}
 
-					const userMessage: Message = {
+					const userMessage: UserMessage = {
 						role: "user",
 						content: [
 							{
@@ -133,10 +145,19 @@ export default function (pi: ExtensionAPI) {
 						timestamp: Date.now(),
 					};
 
-					const response = await complete(
-						ctx.model!,
+					const sessionId = ctx.sessionManager.getSessionId?.();
+					const response = await completeSimple(
+						model,
 						{ systemPrompt: SYSTEM_PROMPT, messages: [userMessage] },
-						{ apiKey: auth.apiKey, headers: auth.headers, signal: loader.signal },
+						{
+							apiKey: auth.apiKey,
+							headers: {
+								...auth.headers,
+								...sessionHeaders(model, sessionId),
+							},
+							signal: loader.signal,
+							reasoning: rushSpec.thinkingLevel,
+						},
 					);
 
 					if (response.stopReason === "aborted") {

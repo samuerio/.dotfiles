@@ -22,6 +22,9 @@ git worktree + tmux 子会话 + 结果回报）、`tmux-split-fork`）、TUI 工
 模式与提示词编辑（`prompt-editor`）、监控与装饰（`cache-hit-monitor`、`notify`、`whimsical`、`inline`），
 以及注册自定义 stdio LLM provider 的 `qoder-stdio-provider`。依赖 pi 运行时库 `@earendil-works/pi-coding-agent`、
 `pi-tui`、`pi-ai`。子代理运行时不在本目录实现，见 `pi/agent/` 的 packages 边界。
+扩展间共享的非扩展模块放在 `lib/` 子目录（如 `lib/rush.ts`：从 modes.json 解析 rush 模式的 provider/
+model/thinkingLevel 并处理 opencode 会话头）。pi 只把 `extensions/*.ts` 顶层文件与含 `index.ts` 的子目录
+识别为扩展，`lib/` 子目录不会被自动加载。
 
 **Architecture Invariant:** 扩展只能调用 pi 公开的 ExtensionAPI 与事件钩子，禁止直接操作 pi 内部状态。
 

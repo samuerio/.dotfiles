@@ -18,12 +18,12 @@ import type {
     ExtensionAPI,
     ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { BorderedLoader } from "@earendil-works/pi-coding-agent";
 import {
-    BorderedLoader,
-    getAgentDir,
-} from "@earendil-works/pi-coding-agent";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+    loadRushModeSpec,
+    RUSH_MODE,
+    sessionHeaders,
+} from "./lib/rush.ts";
 import {
     type Component,
     Editor,
@@ -51,94 +51,11 @@ type QnAResult =
     | { kind: "editor"; text: string }
     | null;
 
-type ThinkingLevel = "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
-
-type ModeSpec = {
-    provider?: string;
-    modelId?: string;
-    thinkingLevel?: ThinkingLevel;
-};
-const RUSH_MODE = "rush";
-
-function getProjectModesPath(cwd: string): string {
-    return join(cwd, ".pi", "modes.json");
-}
-
-function getGlobalModesPath(): string {
-    return join(getAgentDir(), "modes.json");
-}
-
-function loadRushModeSpec(cwd: string): ModeSpec | null {
-    const candidates = [getProjectModesPath(cwd), getGlobalModesPath()];
-    for (const p of candidates) {
-        if (!existsSync(p)) continue;
-        let parsed: unknown;
-        try {
-            parsed = JSON.parse(readFileSync(p, "utf8"));
-        } catch {
-            continue;
-        }
-        const modes =
-            parsed && typeof parsed === "object"
-                ? (parsed as { modes?: unknown }).modes
-                : undefined;
-        if (!modes || typeof modes !== "object") continue;
-        const spec = (modes as Record<string, unknown>)[RUSH_MODE];
-        if (!spec || typeof spec !== "object") continue;
-        const obj = spec as Record<string, unknown>;
-        const provider =
-            typeof obj.provider === "string" ? obj.provider : undefined;
-        const modelId =
-            typeof obj.modelId === "string" ? obj.modelId : undefined;
-        const THINKING_LEVELS: readonly ThinkingLevel[] = [
-            "minimal",
-            "low",
-            "medium",
-            "high",
-            "xhigh",
-            "max",
-        ];
-        const thinkingLevel = THINKING_LEVELS.includes(
-            obj.thinkingLevel as ThinkingLevel,
-        )
-            ? (obj.thinkingLevel as ThinkingLevel)
-            : undefined;
-        if (!provider || !modelId) continue;
-        return { provider, modelId, thinkingLevel };
-    }
-    return null;
-}
-
 function extractText(response: { content: { type: string; text?: string }[] }): string {
     return response.content
         .filter((c): c is { type: "text"; text: string } => c.type === "text")
         .map((c) => c.text)
         .join("\n");
-}
-
-// opencode / opencode-go providers route requests by session; without an
-// x-opencode-session header they reject with 400 MissingSessionID. This
-// mirrors pi's internal provider-attribution getSessionHeaders().
-const OPENCODE_HOST = "opencode.ai";
-function sessionHeaders(
-    model: { provider: string; baseUrl: string },
-    sessionId: string | undefined,
-): Record<string, string> {
-    if (!sessionId) return {};
-    let hostMatches = false;
-    try {
-        hostMatches = new URL(model.baseUrl).hostname === OPENCODE_HOST;
-    } catch {
-        // ignore malformed URLs
-    }
-    if (
-        model.provider !== "opencode" &&
-        model.provider !== "opencode-go" &&
-        !hostMatches
-    ) {
-        return {};
-    }
-    return { "x-opencode-session": sessionId, "x-opencode-client": "pi" };
 }
 
 const SYSTEM_PROMPT = `You are a question extractor. Given text from a conversation, extract any questions that need answering.
