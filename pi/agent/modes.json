@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "currentMode": "smart",
+  "currentMode": "rush",
   "modes": {
     "default": {
       "provider": "opencode-go",
