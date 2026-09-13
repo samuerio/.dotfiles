@@ -1102,8 +1102,8 @@ async function dispatchBackgroundTask(
 	].join(" ");
 
 	// 8. Fire and forget. Errors here leave a created worktree/session behind —
-	// point the caller at /background-tasks (close) for cleanup.
-	const cleanupHint = `worktree/session already created — clean up with /background-tasks (close ${alias})`;
+	// point the caller at /background-tasks for cleanup (interactive only).
+	const cleanupHint = `worktree/session already created (clean up: user runs /background-tasks, select "${alias}", then Close)`;
 	const sent = await pi.exec("tmux", ["-S", env.socketPath, "send-keys", "-t", tmuxTarget, "-l", "--", childCommand]);
 	if (sent.code !== 0) {
 		return {
@@ -1148,7 +1148,7 @@ function formatDispatchText(result: DispatchResult): string {
 		`Worktree: ${result.worktreePath}`,
 		`Attach: ${result.attachCommand}`,
 		`Monitor: ${result.monitorCommand}`,
-		`Clean up when done: /background-tasks → close ${result.alias}`,
+		`Clean up when done (user, interactive): run /background-tasks, select "${result.alias}", then Close.`,
 	].join("\n");
 }
 
@@ -1669,6 +1669,8 @@ export default function (pi: ExtensionAPI): void {
 		promptSnippet: "Dispatch a one-shot background task to a fresh isolated worktree; returns immediately.",
 		promptGuidelines: [
 			"background_task is fire-and-forget — returns immediately, the user observes via /background-tasks.",
+			"Keep background_task's prompt free of commit instructions; leave the work uncommitted in the worktree so the user can review before anything lands.",
+			"Never clean up a background task yourself (worktree removal, session kill, run dir deletion); the user closes it via /background-tasks after reviewing.",
 		],
 		parameters: Type.Object({
 			alias: Type.String({
