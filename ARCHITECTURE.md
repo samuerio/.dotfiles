@@ -15,12 +15,13 @@ IDE 级编辑能力，集成 `telescope`/`fzf` 搜索与 `opencode.nvim` AI 工�
 
 ### `pi/agent/extensions/`
 
-pi coding agent 的自定义 TypeScript 扩展集，仓库中除 `nvim/` 外最活跃的子系统。分两类：（1）TUI 斜杠命令与工具，覆盖上下文与文件管理、
-会话编排与交接、background-task（后台任务派发：git worktree + tmux 子会话 + 结果回报）、会话监视与拆解、统一编辑、代码审查、迭代/循环、
-tmux 分屏、模式与提示词编辑；（2）非命令扩展，注册自定义 stdio LLM provider（qoder-stdio）
-与 turn 生命周期事件钩子（完成通知、装饰性加载提示）。依赖 pi 运行时库 `@earendil-works/pi-coding-agent`、
-`pi-tui`、`pi-ai`、`pi-agent-core`。子代理运行时不在本目录实现，见 `pi/agent/` 的 packages 边界；
-本目录仅保留 `subagent/models-allowlist.json` 等本地策略配置。
+pi coding agent 的自定义 TypeScript 扩展集，仓库中除 `nvim/` 外最活跃的子系统。按职责分组：
+会话编排与交接（`continue`、`pick-session`、`handoff`、`session-breakdown`、`background-task`（后台任务派发：
+git worktree + tmux 子会话 + 结果回报）、`tmux-split-fork`）、TUI 工具与编辑（`preview`、`view-image`、`files`、
+`context`、`unified-edit`、`review`、`answer`、`btw`（在主会话旁开启独立旁路线程））、
+模式与提示词编辑（`prompt-editor`）、监控与装饰（`cache-hit-monitor`、`notify`、`whimsical`、`inline`），
+以及注册自定义 stdio LLM provider 的 `qoder-stdio-provider`。依赖 pi 运行时库 `@earendil-works/pi-coding-agent`、
+`pi-tui`、`pi-ai`。子代理运行时不在本目录实现，见 `pi/agent/` 的 packages 边界。
 
 **Architecture Invariant:** 扩展只能调用 pi 公开的 ExtensionAPI 与事件钩子，禁止直接操作 pi 内部状态。
 
@@ -28,24 +29,20 @@ tmux 分屏、模式与提示词编辑；（2）非命令扩展，注册自定�
 
 pi coding agent 的运行时配置中心。`models.json` 定义多 provider 的模型清单与成本参数；`modes.json` 定义
 default/rush/smart/deep 四种工作模式及其模型绑定；`keybindings.json` 定制 TUI 键位；`settings.json` 存放
-agent 全局设置，并通过 `packages` 声明第三方扩展包（当前为 `git:github.com/eggmasonvalue/pi-subagent`，
-提供隔离子代理能力，检出落在 `git/`）；`auth.json` 管理 API 密钥；`prompts/` 存放可复用提示词模板
-（`init.md`、`investigate.md`、`translate-paragraph.md` 等）。`AGENTS.md` 定义 agent 行为规范。
+agent 全局设置，并通过 `packages` 声明第三方扩展包（当前指向仓库外的本地路径 `workspace/pi-subagent`，
+提供隔离子代理能力）；`auth.json` 管理 API 密钥；`trust.json` 记录项目信任状态；`prompts/` 存放可复用
+提示词模板（`prototype.md`、`simplify.md`、`translate-paragraph.md`）。`AGENTS.md` 定义 agent 行为规范。
+`sessions/`、`tmux-subagents/` 与 `bin/`（内置 `fd` 二进制）为运行时与工具产物，随使用生成。
 
 **API Boundary:** `models.json` 是 provider/模型清单的唯一来源，扩展不直接读取；`modes.json` 由 `prompt-editor` 扩展
 提供 TUI 编辑入口，运行时与扩展共享读写。第三方扩展经 `settings.json` 的 `packages` 安装，不与本地
 `extensions/` 源码混写。
 
-### `spec/`
-
-功能规格与设计文档目录。每个子目录对应一个特性或改进方案（如 `watch-session-command`、
-`notify-window-level`、`vscode-config-cross-platform`、`migrate-mac-rime-dicts`），存放 `plan.md` 设计草案与部分 `README.md` 实现总结，与 `pi/agent/extensions/` 形成设计-实现对偶。
-
 ### `research/`
 
-扩展架构研究与设计笔记。涵盖 pi 扩展架构决策（如 `answer-extension.md`、`review-extension-architecture.md`）
-与 pi-subagent 实现分析（`pi-subagent-implementation.md` 等），为 `pi/agent/extensions/` 与 packages 边界提供设计参考。
-相关产出也可能落在 `pi/research/`。
+扩展架构研究与设计笔记。涵盖 pi 扩展架构决策（如 `answer-extension.md`、`review-extension-architecture.md`）、
+pi-subagent 实现分析（`pi-subagent-implementation.md` 等）与伪代码方法论（`pseudocode.md`），
+为 `pi/agent/extensions/` 与 packages 边界提供设计参考。
 
 ### `agents/skills/`
 
