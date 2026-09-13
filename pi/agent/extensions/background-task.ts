@@ -7,15 +7,12 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 
 import {
-	DEFAULT_MAX_BYTES,
-	DEFAULT_MAX_LINES,
 	DynamicBorder,
 	SessionManager,
 	buildSessionContext,
 	getMarkdownTheme,
 	migrateSessionEntries,
 	parseSessionEntries,
-	truncateHead,
 	type ExtensionAPI,
 	type ExtensionCommandContext,
 	type ExtensionContext,
@@ -83,10 +80,6 @@ async function copyToClipboard(pi: ExtensionAPI, text: string): Promise<boolean>
  * ANSI-aware width. A second wrapLine layer was off-by-padding and worse.
  */
 const BLANK_ROW = "\u200B";
-
-/** Log action: pane tail lines while running, output lines once settled. */
-const LOG_PANE_TAIL = 12;
-const LOG_OUTPUT_LINES = 12;
 
 // ─── Widgets ──────────────────────────────────────────────────────
 
@@ -494,21 +487,19 @@ async function selectTask(
 	return displayToFacts.get(choice) ?? null;
 }
 
-type TaskAction = "log" | "addToPrompt" | "result" | "preview" | "vscode" | "close";
+type TaskAction = "status" | "addToPrompt" | "result" | "preview" | "vscode" | "close";
 
-/** Action labels for the selector, filtered by facts (session → log; settled → addToPrompt/result; worktree → vscode/close). */
+/** Action labels for the selector, filtered by facts (worktree → status/vscode/close; settled → result; session file → addToPrompt/preview). */
 function taskActionItems(facts: TaskFacts): SelectItem[] {
 	const items: SelectItem[] = [];
-	if (facts.sessionExists) {
-		items.push({ value: "log", label: "Log (live pane / settled output)" });
-	}
-	if (facts.sessionFile) {
-		items.push({ value: "addToPrompt", label: "Add session to prompt" });
+	if (facts.worktreePath !== undefined) {
+		items.push({ value: "status", label: "Status (state / attach)" });
 	}
 	if (facts.taskStatus) {
 		items.push({ value: "result", label: "Add result to prompt" });
 	}
 	if (facts.sessionFile) {
+		items.push({ value: "addToPrompt", label: "Add session to prompt" });
 		items.push({ value: "preview", label: "Preview session" });
 	}
 	if (facts.worktreePath !== undefined) {
@@ -603,14 +594,14 @@ async function runCloseAction(
 	ctx.ui.notify(formatCloseText(result), "info");
 }
 
-async function runLogAction(
+async function runStatusAction(
 	pi: ExtensionAPI,
 	ctx: ExtensionCommandContext,
 	facts: TaskFacts,
 ): Promise<void> {
 	const { name: taskName } = facts;
 
-	// Log observes the current task: a missing worktree fails fast.
+	// Status observes the current task: a missing worktree fails fast.
 	if (facts.worktreePath === undefined) {
 		ctx.ui.notify(`Background task "${taskName}" does not exist (no worktree).`, "error");
 		return;
@@ -621,41 +612,22 @@ async function runLogAction(
 		ctx.ui.notify("Failed to resolve repo root for background-task artifacts.", "error");
 		return;
 	}
-	const session = taskSessionName(taskUuid(taskName));
 
 	const result = await readTaskResult(env.tasksDir, taskName);
 	const startedAt = await readTaskStartedAt(env.tasksDir, taskName);
 	const duration = formatDuration(startedAt, result?.finishedAt);
 
-	// Attach line + footer render only while the session still exists.
+	// Attach line renders only while the tmux session still exists.
 	// Include --task-root so the copied command works from any directory.
 	const attachCommand = facts.sessionExists ? taskAttachCommand(taskName, env.repoRoot) : undefined;
-
-	if (!result && !facts.sessionExists) {
-		ctx.ui.notify(
-			`Background task "${taskName}" has not settled and its tmux session no longer exists — nothing to observe. Clean up via /background-tasks (close).`,
-			"error",
-		);
-		return;
-	}
-
-	let paneOutput = "";
-	if (!result) {
-		const paneTarget = await discoverPaneTarget(pi, env.socketPath, session);
-		if (!paneTarget) {
-			ctx.ui.notify(`No pane found for session "${session}".`, "error");
-			return;
-		}
-		paneOutput = await capturePaneOutput(pi, env.socketPath, paneTarget, LOG_PANE_TAIL);
-	}
 
 	let attachCopied = false;
 	if (attachCommand) {
 		attachCopied = await copyToClipboard(pi, attachCommand);
 	}
 
-	const lines = formatLogWidgetLines(taskName, facts.worktreePath, attachCommand, attachCopied, result, paneOutput, duration);
-	ctx.ui.setWidget("background-task-log", buildWidget(lines), { placement: "aboveEditor" });
+	const lines = formatLogWidgetLines(taskName, facts.worktreePath, attachCommand, attachCopied, result, duration);
+	ctx.ui.setWidget("background-task-status", buildWidget(lines), { placement: "aboveEditor" });
 }
 
 async function runVscodeAction(
@@ -688,7 +660,7 @@ function addSessionToPrompt(ctx: ExtensionCommandContext, sessionFile: string, m
 /**
  * Add the settled task's result output to the editor: the shortest path to
  * "continue from the task result" without loading the whole child session.
- * Failed tasks get the error appended (formatLogWidgetLines convention).
+ * Failed tasks get the error appended (the status widget shows the same line).
  */
 async function runAddResultAction(
 	pi: ExtensionAPI,
@@ -797,46 +769,6 @@ async function runSessionsFlow(pi: ExtensionAPI, ctx: ExtensionCommandContext): 
 
 	addSessionToPrompt(ctx, selected.path);
 }
-
-// ─── tmux Helpers ─────────────────────────────────────────────────
-
-async function discoverPaneTarget(
-	pi: ExtensionAPI,
-	socket: string,
-	name: string,
-): Promise<string | null> {
-	const result = await pi.exec("tmux", [
-		"-S", socket,
-		"list-panes", "-s", "-t", name,
-		"-F", "#{session_name}:#{window_index}.#{pane_index}",
-	]);
-	if (result.code !== 0) return null;
-	const first = result.stdout.trim().split("\n")[0]?.trim();
-	return first || null;
-}
-
-async function capturePaneOutput(
-	pi: ExtensionAPI,
-	socket: string,
-	paneTarget: string,
-	lines: number = 200,
-): Promise<string> {
-	// Capture extra history: large terminals pad the bottom with blank lines, so
-	// the true tail is often above the last N rows of raw capture.
-	const fetchLines = Math.max(lines * 4, 80);
-	const result = await pi.exec("tmux", [
-		"-S", socket,
-		"capture-pane", "-S", `-${fetchLines}`, "-J", "-p", "-t", paneTarget,
-	]);
-	if (result.code !== 0) return "";
-	const allLines = result.stdout.split("\n");
-	// Drop trailing blank padding before taking the last N meaningful lines
-	while (allLines.length > 0 && allLines[allLines.length - 1].trim() === "") {
-		allLines.pop();
-	}
-	return allLines.slice(-lines).join("\n");
-}
-
 // ─── Formatting Helpers ───────────────────────────────────────────
 
 function formatDuration(startedAt: number | undefined, finishedAt = Date.now()): string | undefined {
@@ -847,21 +779,16 @@ function formatDuration(startedAt: number | undefined, finishedAt = Date.now()):
 	return `${minutes}m ${seconds % 60}s`;
 }
 
-function truncateTaskText(text: string): string {
-	const truncated = truncateHead(text, { maxBytes: DEFAULT_MAX_BYTES, maxLines: DEFAULT_MAX_LINES });
-	if (!truncated.truncated) return truncated.content;
-	return `${truncated.content}\n\n[Output truncated. Full output is available in the child session file.]`;
-}
-
-// ─── Pane Log Widgets ─────────────────────────────────────────────
+// ─── Status Widgets ───────────────────────────────────────────────
 
 /**
- * Log action widget: subagent-style renderResult layout.
- * Running → live pane tail; settled → result output (+ error on failed).
- * The attach line renders only when the tmux session still exists
- * (attachCommand is undefined otherwise), with " (copied)" appended when the
- * command was copied to the clipboard. The worktree line always renders
- * (runLogAction requires the worktree to exist).
+ * Status action widget: state-only card, no output text.
+ * Status line (✓/✗/● + alias + status · duration); a truncated Error line
+ * under the status line on failed; attach line only while the tmux session
+ * still exists (attachCommand undefined otherwise), with " (copied)" appended
+ * when the command was copied to the clipboard; provider/model line once
+ * settled; worktree line always renders (runStatusAction requires the
+ * worktree to exist).
  */
 function formatLogWidgetLines(
 	alias: string,
@@ -869,7 +796,6 @@ function formatLogWidgetLines(
 	attachCommand: string | undefined,
 	attachCopied: boolean,
 	result: BackgroundTaskResult | null,
-	paneOutput: string,
 	duration?: string,
 ): WidgetLine[] {
 	const status = result ? result.status : "running";
@@ -885,6 +811,12 @@ function formatLogWidgetLines(
 		{ text: alias, color: "toolTitle", bold: true },
 		{ text: ` · ${status}${duration ? ` · ${duration}` : ""}`, color: "muted" },
 	]);
+	if (status === "failed" && result?.error?.trim()) {
+		// One truncated line; the full error lives in result.json / the child session.
+		const errorFirstLine = result.error.trim().split("\n")[0] ?? "";
+		const errorLine = errorFirstLine.length > 160 ? `${errorFirstLine.slice(0, 159)}…` : errorFirstLine;
+		lines.push([{ text: `  Error: ${errorLine}`, color: "error" }]);
+	}
 	if (attachCommand) {
 		lines.push([{ text: `  ${attachCommand}${attachCopied ? " (copied)" : ""}`, color: "accent" }]);
 	}
@@ -895,29 +827,6 @@ function formatLogWidgetLines(
 	}
 	lines.push([{ text: `  worktree: ${worktreePath}`, color: "dim" }]);
 	lines.push("");
-
-	if (status === "running") {
-		const cleaned = paneOutput.replace(/\s+$/, "");
-		const tail = cleaned.split("\n").slice(-LOG_PANE_TAIL);
-		if (!cleaned.trim() || tail.length === 0 || (tail.length === 1 && !tail[0].trim())) {
-			lines.push([{ text: "(no output yet)", color: "muted" }]);
-		} else {
-			for (const row of tail) lines.push([{ text: row, color: "dim" }]);
-		}
-	} else if (result) {
-		let rawOutput = result.output.trim();
-		if (result.status === "failed" && result.error?.trim()) {
-			rawOutput += `${rawOutput ? "\n\n" : ""}Error: ${result.error.trim()}`;
-		}
-		const output = truncateTaskText(rawOutput || "(no text output)");
-		const rows = output.split("\n");
-		for (const row of rows.slice(0, LOG_OUTPUT_LINES)) {
-			lines.push([{ text: row, color: "toolOutput" }]);
-		}
-		if (rows.length > LOG_OUTPUT_LINES) {
-			lines.push([{ text: `… (+${rows.length - LOG_OUTPUT_LINES} more lines)`, color: "muted" }]);
-		}
-	}
 	return lines;
 }
 
@@ -1681,12 +1590,12 @@ export default function (pi: ExtensionAPI): void {
 
 	// Clear background-task widgets when a new turn starts so they don't block conversation output.
 	pi.on("turn_start", async (_event, ctx) => {
-		ctx.ui.setWidget("background-task-log", undefined);
+		ctx.ui.setWidget("background-task-status", undefined);
 	});
 
 	// ── /background-tasks ──  (single entry point: task list → action → execute, loop)
 	pi.registerCommand("background-tasks", {
-		description: "List background tasks and run an action (log / add to prompt / add result / preview / vscode / close); 'sessions' picks a child session (resume / add to prompt)",
+		description: "List background tasks and run an action (status / add to prompt / add result / preview / vscode / close); 'sessions' picks a child session (resume / add to prompt)",
 		handler: async (args, ctx) => {
 			// `/background-tasks sessions`: child-session history picker.
 			if (args.trim() === "sessions") {
@@ -1705,8 +1614,8 @@ export default function (pi: ExtensionAPI): void {
 				if (!action) continue;
 
 				switch (action) {
-					case "log":
-						await runLogAction(pi, ctx, selected);
+					case "status":
+						await runStatusAction(pi, ctx, selected);
 						break;
 					case "addToPrompt":
 						if (!selected.sessionFile) {
