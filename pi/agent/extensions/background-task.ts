@@ -719,7 +719,7 @@ async function runAddResultAction(
 /** Sanity cap for picker row labels. */
 const SESSION_LABEL_MAX = 100;
 
-/** Session row label: name (set at dispatch: "<alias> - <description>") or first message. */
+/** Session row label: name (set at dispatch: description) or first message. */
 function sessionDisplayLabel(info: SessionInfo): string {
 	const text = (info.name ?? info.firstMessage ?? "").replace(/[\x00-\x1f\x7f]/g, " ").trim();
 	const label = text.length > 0 ? text : "(no title)";
@@ -1179,7 +1179,7 @@ async function dispatchBackgroundTask(
 		"--thinking", thinking,
 		"--session-dir", sessionDir,
 		"--session-id", `${uuid}-${randomUUID().slice(0, 6)}`,
-		"--name", `${alias} - ${description}`,
+		"--name", description,
 		"--approve",
 		"--extension", EXTENSION_PATH,
 		`@${promptPath}`,
