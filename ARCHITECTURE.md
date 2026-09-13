@@ -19,11 +19,11 @@ pi coding agent 的自定义 TypeScript 扩展集，仓库中除 `nvim/` 外最�
 会话编排与交接（`continue`、`pick-session`、`handoff`、`session-breakdown`、`background-task`（后台任务派发：
 git worktree + tmux 子会话 + 结果回报）、`tmux-split-fork`）、TUI 工具与编辑（`preview`、`view-image`、`files`、
 `context`、`unified-edit`、`review`、`answer`、`btw`（在主会话旁开启独立旁路线程））、
-模式与提示词编辑（`prompt-editor`）、监控与装饰（`cache-hit-monitor`、`notify`、`whimsical`、`inline`），
-以及注册自定义 stdio LLM provider 的 `qoder-stdio-provider`。依赖 pi 运行时库 `@earendil-works/pi-coding-agent`、
+模式与提示词编辑（`prompt-editor`）、监控与装饰（`cache-hit-monitor`、`notify`、`whimsical`、`inline`）。
+依赖 pi 运行时库 `@earendil-works/pi-coding-agent`、
 `pi-tui`、`pi-ai`。子代理运行时不在本目录实现，见 `pi/agent/` 的 packages 边界。
 扩展间共享的非扩展模块放在 `lib/` 子目录（如 `lib/rush.ts`：从 modes.json 解析 rush 模式的 provider/
-model/thinkingLevel 并处理 opencode 会话头）。pi 只把 `extensions/*.ts` 顶层文件与含 `index.ts` 的子目录
+model/thinkingLevel，供 `answer` 与 `handoff` 发起一次性 LLM 请求时使用）。pi 只把 `extensions/*.ts` 顶层文件与含 `index.ts` 的子目录
 识别为扩展，`lib/` 子目录不会被自动加载。
 
 **Architecture Invariant:** 扩展只能调用 pi 公开的 ExtensionAPI 与事件钩子，禁止直接操作 pi 内部状态。
@@ -33,19 +33,15 @@ model/thinkingLevel 并处理 opencode 会话头）。pi 只把 `extensions/*.ts
 pi coding agent 的运行时配置中心。`models.json` 定义多 provider 的模型清单与成本参数；`modes.json` 定义
 default/rush/smart/deep 四种工作模式及其模型绑定；`keybindings.json` 定制 TUI 键位；`settings.json` 存放
 agent 全局设置，并通过 `packages` 声明第三方扩展包（当前指向仓库外的本地路径 `workspace/pi-subagent`，
-提供隔离子代理能力）；`auth.json` 管理 API 密钥；`trust.json` 记录项目信任状态；`prompts/` 存放可复用
-提示词模板（`prototype.md`、`simplify.md`、`translate-paragraph.md`）。`AGENTS.md` 定义 agent 行为规范。
+提供隔离子代理能力，其模型与工具配置由 `subagent.json` 提供）；`telegram.json` 配置 Telegram bot
+远程交互通道；`auth.json` 管理 API 密钥；`trust.json` 记录项目信任状态；`prompts/` 存放可复用
+提示词模板（`prototype.md`、`simplify.md`、`clarify.md`、`summary.md`、`translate-paragraph.md`）。
+`AGENTS.md` 定义 agent 行为规范。
 `sessions/`、`tmux-subagents/` 与 `bin/`（内置 `fd` 二进制）为运行时与工具产物，随使用生成。
 
 **API Boundary:** `models.json` 是 provider/模型清单的唯一来源，扩展不直接读取；`modes.json` 由 `prompt-editor` 扩展
 提供 TUI 编辑入口，运行时与扩展共享读写。第三方扩展经 `settings.json` 的 `packages` 安装，不与本地
 `extensions/` 源码混写。
-
-### `research/`
-
-扩展架构研究与设计笔记。涵盖 pi 扩展架构决策（如 `answer-extension.md`、`review-extension-architecture.md`）、
-pi-subagent 实现分析（`pi-subagent-implementation.md` 等）与伪代码方法论（`pseudocode.md`），
-为 `pi/agent/extensions/` 与 packages 边界提供设计参考。
 
 ### `agents/skills/`
 
@@ -65,9 +61,9 @@ OpenCode AI 助手的配置中心。`opencode.json` 定义 provider、模型与 
 zsh shell 环境配置。以 oh-my-zsh 为框架，Powerlevel10k 为主题，`my_patches.zsh` 承载个人定制逻辑，
 `.p10k.zsh` 定义提示符外观。作为所有命令行工作流的基础入口。
 
-### `tmux/`
+### `tmux/`、根目录 `.tmux.conf`
 
-tmux 终端复用器配置与自动化脚本。`.tmux.conf` 与 `.tmux.conf.local` 定义键位前缀、状态栏样式与
+tmux 终端复用器配置与自动化脚本。仓库根的 `.tmux.conf` 与 `.tmux.conf.local` 定义键位前缀、状态栏样式与
 CSI-u 扩展键序列；`tmux/scripts/` 提供会话初始化与窗格监控脚本。与 `agents/skills/tmux/` 共享
 tmux 控制惯例（private socket、pane capture）。
 
@@ -103,7 +99,8 @@ IDE/编辑器配置。`vscode/` 区分 macOS 与 Windows 的键位与设置；`i
 - **AI 集成：** Neovim（`opencode.nvim`）、pi 扩展（`pi/agent/extensions/`）、pi agent 配置（`pi/agent/`）、
 `opencode` 配置、`agents/skills` 构成三层 AI 辅助体系，分别嵌入编辑器、agent 框架与命令行。
 - **提示词迁移：** 原 `pi/agent/prompts/` 中的 explain、plan-spec、mental-map、refine 等提示词已迁移为
-`agents/skills/` 中的独立 skill，遵循"一个 skill 一个目录"的自治边界。
+`agents/skills/` 中的独立 skill，遵循"一个 skill 一个目录"的自治边界；clarify 与 summary 则回归为
+prompts 模板驱动的 `/clarify`、`/summary` 命令。
 - **跨平台一致性：** Linux（`i3`）与 macOS（`yabai`）桌面层、各平台 IDE 配置、`karabiner`/`autohotkey`/`rime`
 共同维护跨系统的键位与操作习惯。
 - **配置边界：** 每个工具独占一个顶层目录，不跨目录耦合；agent skills 遵循"一个目录一个技能"的自治边界。
