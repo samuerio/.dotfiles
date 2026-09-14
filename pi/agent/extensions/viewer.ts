@@ -1,16 +1,16 @@
 /**
- * Markdown Preview Extension
+ * Markdown Viewer Extension
  *
  * Renders a markdown file for the user in a scrollable overlay viewer.
  *
  * - Tool `show_markdown(path)`: for the agent to present a markdown file it
  *   just wrote (plans, reports, docs). Non-blocking: the tool returns
  *   immediately and the overlay stays open until the user presses Esc.
- * - Command `/preview [path]`: manually preview a markdown file. With no
- *   argument, reopens the most recently previewed file in this session
+ * - Command `/view [path]`: manually view a markdown file. With no
+ *   argument, reopens the most recently viewed file in this session
  *   (tracked in a session entry, so it survives restarts and is per branch).
  *
- * Only one preview overlay is open at a time; a new preview closes the
+ * Only one viewer overlay is open at a time; a new view closes the
  * previous one. In headless mode (no UI) both paths degrade to printing the
  * absolute file path.
  */
@@ -23,7 +23,7 @@ import {
     type Theme,
     type KeybindingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import path from "node:path";
 import os from "node:os";
 import { stat, readFile } from "node:fs/promises";
@@ -38,51 +38,51 @@ import {
 } from "@earendil-works/pi-tui";
 import type { OverlayHandle } from "@earendil-works/pi-tui";
 
-type PreviewDetails = { path: string; error?: string };
+type ViewerDetails = { path: string; error?: string };
 
-/** Handle of the currently open preview overlay (single instance). */
-let activePreviewHandle: OverlayHandle | null = null;
+/** Handle of the currently open viewer overlay (single instance). */
+let activeViewerHandle: OverlayHandle | null = null;
 
-// --- Last-preview state (same pattern as inline.ts) ---
+// --- Last-viewed state (same pattern as inline.ts) ---
 
-const PREVIEW_STATE_KEY = "preview-state";
+const VIEWER_STATE_KEY = "viewer-state";
 
-interface PreviewState {
+interface ViewerState {
     path: string;
 }
 
-/** In-memory cache of the most recently previewed file (per current branch). */
-let lastPreviewPath: string | null = null;
+/** In-memory cache of the most recently viewed file (per current branch). */
+let lastViewedPath: string | null = null;
 
-function persistPreviewPath(pi: ExtensionAPI, filePath: string): void {
-    lastPreviewPath = filePath;
-    pi.appendEntry(PREVIEW_STATE_KEY, { path: filePath } satisfies PreviewState);
+function persistViewedPath(pi: ExtensionAPI, filePath: string): void {
+    lastViewedPath = filePath;
+    pi.appendEntry(VIEWER_STATE_KEY, { path: filePath } satisfies ViewerState);
 }
 
-function loadPreviewPathFromBranch(branch: SessionEntry[]): string | null {
+function loadViewedPathFromBranch(branch: SessionEntry[]): string | null {
     for (let i = branch.length - 1; i >= 0; i--) {
         const entry = branch[i];
         if (
             entry.type === "custom" &&
-            entry.customType === PREVIEW_STATE_KEY &&
+            entry.customType === VIEWER_STATE_KEY &&
             entry.data &&
-            typeof (entry.data as PreviewState).path === "string"
+            typeof (entry.data as ViewerState).path === "string"
         ) {
-            return (entry.data as PreviewState).path;
+            return (entry.data as ViewerState).path;
         }
     }
     return null;
 }
 
-function reconstructPreviewState(ctx: ExtensionContext): void {
-    lastPreviewPath = loadPreviewPathFromBranch(ctx.sessionManager.getBranch());
+function reconstructViewerState(ctx: ExtensionContext): void {
+    lastViewedPath = loadViewedPathFromBranch(ctx.sessionManager.getBranch());
 }
 
-function getLastPreviewPath(ctx: ExtensionContext): string | null {
-    if (lastPreviewPath === null) {
-        reconstructPreviewState(ctx);
+function getLastViewedPath(ctx: ExtensionContext): string | null {
+    if (lastViewedPath === null) {
+        reconstructViewerState(ctx);
     }
-    return lastPreviewPath;
+    return lastViewedPath;
 }
 
 function expandHome(filePath: string): string {
@@ -91,7 +91,7 @@ function expandHome(filePath: string): string {
     return filePath;
 }
 
-function resolvePreviewPath(cwd: string, filePath: string): string {
+function resolveViewPath(cwd: string, filePath: string): string {
     return path.resolve(cwd, expandHome(filePath.trim()));
 }
 
@@ -126,7 +126,7 @@ async function readMarkdownFile(
     }
 }
 
-class MarkdownPreviewOverlayComponent {
+class MarkdownViewerOverlayComponent {
     private filePath: string;
     private fileName: string;
     private markdown: Markdown;
@@ -303,18 +303,18 @@ class MarkdownPreviewOverlayComponent {
     }
 }
 
-async function openPreview(
+async function openViewer(
     pi: ExtensionAPI,
     ctx: ExtensionContext,
     filePath: string,
     content: string,
 ): Promise<void> {
-    // Record as the session's most recent preview, then close any previously
-    // open preview (single instance).
-    persistPreviewPath(pi, filePath);
-    if (activePreviewHandle) {
-        const handle = activePreviewHandle;
-        activePreviewHandle = null;
+    // Record as the session's most recently viewed file, then close any
+    // previously open viewer (single instance).
+    persistViewedPath(pi, filePath);
+    if (activeViewerHandle) {
+        const handle = activeViewerHandle;
+        activeViewerHandle = null;
         handle.hide();
     }
 
@@ -325,7 +325,7 @@ async function openPreview(
 
     await ctx.ui.custom<void>(
         (tui, theme, keybindings, done) => {
-            return new MarkdownPreviewOverlayComponent(
+            return new MarkdownViewerOverlayComponent(
                 tui,
                 theme,
                 keybindings,
@@ -333,8 +333,8 @@ async function openPreview(
                 content,
                 () => {
                     runtime.closed = true;
-                    if (activePreviewHandle === runtime.handle) {
-                        activePreviewHandle = null;
+                    if (activeViewerHandle === runtime.handle) {
+                        activeViewerHandle = null;
                      }
                     done();
                  },
@@ -349,35 +349,58 @@ async function openPreview(
                     handle.hide();
                      return;
                  }
-                activePreviewHandle = handle;
+                activeViewerHandle = handle;
              },
          },
     ).catch((error) => {
-        if (activePreviewHandle === runtime.handle) {
-            activePreviewHandle = null;
+        if (activeViewerHandle === runtime.handle) {
+            activeViewerHandle = null;
          }
         ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
     });
 }
 
-export default function previewExtension(pi: ExtensionAPI) {
-    // Rebuild the last-preview cache on session load / tree navigation so a
-    // no-argument /preview follows the current branch.
+/** Reopen the most recently viewed file, or warn when nothing was viewed yet. */
+async function viewLastFile(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
+    const last = getLastViewedPath(ctx);
+    if (!last) {
+        ctx.ui.notify(
+            "No markdown viewed yet in this session. Usage: /view <path-to-markdown>",
+            "warning",
+        );
+        return;
+    }
+    if (!ctx.hasUI) {
+        console.log(`Viewer not available (headless mode). File: ${resolveViewPath(ctx.cwd, last)}`);
+        return;
+    }
+    const filePath = resolveViewPath(ctx.cwd, last);
+    const result = await readMarkdownFile(filePath);
+    if ("error" in result) {
+        ctx.ui.notify(result.error, "error");
+        return;
+    }
+    await openViewer(pi, ctx, filePath, result.content);
+}
+
+export default function viewerExtension(pi: ExtensionAPI) {
+    // Rebuild the last-viewed cache on session load / tree navigation so a
+    // no-argument /view follows the current branch.
     pi.on("session_start", async (_event, ctx) => {
-        reconstructPreviewState(ctx);
+        reconstructViewerState(ctx);
     });
     pi.on("session_tree", async (_event, ctx) => {
-        reconstructPreviewState(ctx);
+        reconstructViewerState(ctx);
     });
 
     pi.registerTool({
         name: "show_markdown",
         label: "Show Markdown",
         description:
-            "Render a markdown file for the user in a scrollable preview overlay. " +
+            "Render a markdown file for the user in a scrollable viewer overlay. " +
             "Call this after writing or updating a markdown file (plans, reports, docs) " +
             "so the user can read the rendered result. Non-blocking: returns immediately; " +
-            "the user closes the preview with Esc.",
+            "the user closes the viewer with Esc.",
         parameters: Type.Object({
             path: Type.String({
                 description: "Path to the markdown file (absolute or relative to cwd)",
@@ -385,7 +408,7 @@ export default function previewExtension(pi: ExtensionAPI) {
          }),
 
         async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-            const filePath = resolvePreviewPath(ctx.cwd, params.path);
+            const filePath = resolveViewPath(ctx.cwd, params.path);
             const result = await readMarkdownFile(filePath);
             if ("error" in result) {
                 return {
@@ -395,8 +418,8 @@ export default function previewExtension(pi: ExtensionAPI) {
              }
 
             if (!ctx.hasUI) {
-                persistPreviewPath(pi, filePath);
-                const text = `Preview not available (headless mode). File: ${filePath}`;
+                persistViewedPath(pi, filePath);
+                const text = `Viewer not available (headless mode). File: ${filePath}`;
                 return {
                     content: [{ type: "text", text }],
                     details: { path: filePath },
@@ -405,17 +428,17 @@ export default function previewExtension(pi: ExtensionAPI) {
 
             // Fire-and-forget: do not await; the tool returns immediately and the
             // user closes the overlay with Esc. done() handles cleanup.
-            void openPreview(pi, ctx, filePath, result.content);
+            void openViewer(pi, ctx, filePath, result.content);
 
             return {
-                content: [{ type: "text", text: `Opened preview: ${filePath}` }],
+                content: [{ type: "text", text: `Opened viewer: ${filePath}` }],
                 details: { path: filePath },
              };
          },
 
         renderCall(args, theme, context) {
             const rawPath = typeof args.path === "string" ? args.path : "";
-            const filePath = rawPath ? shortenPath(resolvePreviewPath(context.cwd, rawPath), context.cwd) : "";
+            const filePath = rawPath ? shortenPath(resolveViewPath(context.cwd, rawPath), context.cwd) : "";
             const text =
                 theme.fg("toolTitle", theme.bold("show_markdown ")) +
                 theme.fg("accent", filePath);
@@ -426,7 +449,7 @@ export default function previewExtension(pi: ExtensionAPI) {
             if (isPartial) {
                 return new Text(theme.fg("warning", "Processing..."), 0, 0);
              }
-            const details = result.details as PreviewDetails | undefined;
+            const details = result.details as ViewerDetails | undefined;
             if (details?.error) {
                 return new Text(theme.fg("error", `Error: ${details.error}`), 0, 0);
              }
@@ -434,35 +457,34 @@ export default function previewExtension(pi: ExtensionAPI) {
          },
     });
 
-    pi.registerCommand("preview", {
+    pi.registerCommand("view", {
         description:
-            "Preview a markdown file in an overlay viewer. With no argument, " +
-            "reopens the most recently previewed file in this session.",
+            "View a markdown file in an overlay viewer. With no argument, " +
+            "reopens the most recently viewed file in this session.",
         handler: async (args, ctx) => {
             let target = (args ?? "").trim();
             if (!target) {
-                const last = getLastPreviewPath(ctx);
-                if (!last) {
-                    ctx.ui.notify(
-                        "No markdown previewed yet in this session. Usage: /preview <path-to-markdown>",
-                        "warning",
-                    );
-                    return;
-                }
-                target = last;
+                await viewLastFile(pi, ctx);
+                return;
             }
             if (!ctx.hasUI) {
-                console.log(`Preview not available (headless mode). File: ${resolvePreviewPath(ctx.cwd, target)}`);
+                console.log(`Viewer not available (headless mode). File: ${resolveViewPath(ctx.cwd, target)}`);
                  return;
              }
 
-            const filePath = resolvePreviewPath(ctx.cwd, target);
+            const filePath = resolveViewPath(ctx.cwd, target);
             const result = await readMarkdownFile(filePath);
             if ("error" in result) {
                 ctx.ui.notify(result.error, "error");
                  return;
              }
-            await openPreview(pi, ctx, filePath, result.content);
+            await openViewer(pi, ctx, filePath, result.content);
          },
+    });
+
+    // shift+alt+v: reopen the most recently viewed file, same as no-arg /view.
+    pi.registerShortcut(Key.shiftAlt("v"), {
+        description: "Reopen the last markdown viewer (/view)",
+        handler: (ctx) => viewLastFile(pi, ctx),
     });
 }

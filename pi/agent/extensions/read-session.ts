@@ -893,7 +893,7 @@ function renderSessionResult(styled: string, expanded: boolean, theme: any) {
 
 /**
  * Display-only path shortening, matching the built-in read renderer's
- * convention (see the show_markdown preview work): cwd-relative when the
+ * convention (see the show_markdown viewer work): cwd-relative when the
  * path lives under the process cwd, otherwise the $HOME prefix collapsed
  * to `~`. Purely cosmetic (expandHome reverses both forms); used in
  * renderCall text.

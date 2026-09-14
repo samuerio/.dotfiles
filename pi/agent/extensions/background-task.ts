@@ -1355,7 +1355,7 @@ async function loadPreviewSessionMessages(sessionFile: string): Promise<PreviewM
 }
 
 /**
- * Session preview overlay: self-contained copy of preview.ts's markdown
+ * Session preview overlay: self-contained copy of viewer.ts's markdown
  * viewer (scroll / half-page / page / fullscreen). Renders the transcript
  * text through the Markdown component so ## headers get heading styles.
  */
