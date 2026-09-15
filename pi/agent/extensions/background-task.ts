@@ -979,8 +979,6 @@ interface DispatchResult {
 	worktreePath?: string;
 	tmuxSession?: string;
 	attachCommand?: string;
-	/** Slash command the user runs to observe this task. */
-	monitorCommand?: string;
 	provider?: string;
 	model?: string;
 	thinking?: string;
@@ -1137,7 +1135,6 @@ async function dispatchBackgroundTask(
 		worktreePath,
 		tmuxSession: session,
 		attachCommand,
-		monitorCommand: "/background-tasks",
 		provider,
 		model,
 		thinking,
@@ -1150,11 +1147,10 @@ function formatDispatchText(result: DispatchResult): string {
 		return result.error ?? `Failed to dispatch background task "${result.alias}".`;
 	}
 	return [
-		`Dispatched background task "${result.alias}" to tmux session "${result.tmuxSession}".`,
+		`Dispatched background task "${result.alias}".`,
 		`Worktree: ${result.worktreePath}`,
 		`Attach: ${result.attachCommand}`,
-		`Monitor: ${result.monitorCommand}`,
-		`Clean up when done (user, interactive): run /background-tasks, select "${result.alias}", then Close.`,
+		`Observe progress or clean up via /background-tasks (select "${result.alias}").`,
 	].join("\n");
 }
 
