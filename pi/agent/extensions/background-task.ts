@@ -286,7 +286,10 @@ function registerTaskChildReporter(pi: ExtensionAPI, resultPath: string): void {
 		) => void
 	)("agent_settled", async (_event, ctx) => {
 		await report(ctx);
-		ctx.shutdown();
+		// First settle reports the dispatched task's result; the child stays
+		// alive at the interactive prompt so the user can attach and take over
+		// the session. The `reported` flag keeps later settles from
+		// overwriting result.json.
 	});
 
 	pi.on("session_shutdown", async (_event, ctx) => {
@@ -1075,7 +1078,10 @@ async function dispatchBackgroundTask(
 		return { ok: false, alias, worktreePath, error: remain.stderr.trim() || "Failed to set remain-on-exit." };
 	}
 
-	// 7. Child command: interactive Pi, unconditional --approve (autonomous run).
+	// 7. Child command: interactive Pi, --approve trusts project-local files for
+	// the run (projectTrustOverride: loads project extensions/settings/packages
+	// without the trust prompt). It is not a tool auto-approval switch; pi has
+	// no per-tool confirmation dialog mechanism.
 	// Session id is unique per dispatch (<uuid>-<random>): pi resumes an
 	// existing session when the id matches, so a fixed uuid id would carry the
 	// previous run's context into the re-dispatched task.
@@ -1670,6 +1676,7 @@ export default function (pi: ExtensionAPI): void {
 		promptGuidelines: [
 			"background_task is fire-and-forget — returns immediately, the user observes via /background-tasks.",
 			"Keep background_task's prompt free of commit instructions; leave the work uncommitted in the worktree so the user can review before anything lands.",
+			"Write file paths in background_task's prompt relative to the worktree root (the child Pi's cwd is the fresh worktree, which contains all committed repo files, so relative paths also work for read-only references). Never put an absolute main-repo path in the prompt: the child follows literal paths and would edit the main repo, bypassing worktree isolation. If the child needs uncommitted main-repo content as context, paste the relevant snippet into the prompt instead of a path.",
 			"Never clean up a background task yourself (worktree removal, session kill, run dir deletion); the user closes it via /background-tasks after reviewing.",
 		],
 		parameters: Type.Object({
@@ -1677,7 +1684,8 @@ export default function (pi: ExtensionAPI): void {
 				description: "Task alias, used as the branch name (e.g. feat/my-feature). Must not already exist.",
 			}),
 			prompt: Type.String({
-				description: "The task for the agent to perform. Be specific about what needs to be done and include any relevant context.",
+				description:
+					"The task for the agent to perform. Be specific about what needs to be done and include any relevant context. Reference files by paths relative to the child Pi's worktree; never absolute paths into the main repo.",
 			}),
 			description: Type.String({
 				description: "A very short description of the task that can be displayed to the user.",
