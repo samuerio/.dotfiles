@@ -1149,7 +1149,6 @@ function formatDispatchText(result: DispatchResult): string {
 	return [
 		`Dispatched background task "${result.alias}".`,
 		`Worktree: ${result.worktreePath}`,
-		`Attach: ${result.attachCommand}`,
 		`Observe progress or clean up via /background-tasks (select "${result.alias}").`,
 	].join("\n");
 }
