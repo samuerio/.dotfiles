@@ -18,7 +18,7 @@
  *
  * Architecture Invariant: the model-facing tool parameters are only `prompt`
  * and `description`;
- * model/thinking/tools/noSkills are NOT per-call params; they live in
+ * model/thinking/tools/skills are NOT per-call params; they live in
  * the spec (code constants for specialized, subagent.json for inline).
  */
 
@@ -46,7 +46,12 @@ export interface SubagentSpec {
 	model?: string;
 	thinking?: string;
 	tools?: string[];
-	noSkills: boolean;
+	/**
+	 * Explicit skill allowlist for the child process: file/dir paths passed
+	 * via `--skill <path>`. Required — every spec must declare it (use `[]`
+	 * to run with no skills).
+	 */
+	skills: string[];
 }
 
 /** Model-facing parameters: `prompt` (the child's task) and `description` (short label). */
@@ -367,7 +372,11 @@ export class Subagent {
 		if (spec.model) args.push("--model", spec.model);
 		if (spec.thinking) args.push("--thinking", spec.thinking);
 		if (spec.tools && spec.tools.length > 0) args.push("--tools", spec.tools.join(","));
-		if (spec.noSkills) args.push("--no-skills");
+		// Always disable skill discovery; skills load only from the explicit
+		// `--skill <path>` allowlist declared in the spec (`--no-skills` does
+		// not suppress explicitly passed `--skill` entries).
+		args.push("--no-skills");
+		for (const skillPath of spec.skills) args.push("--skill", skillPath);
 
 		let tmpPromptDir: string | null = null;
 		let tmpPromptPath: string | null = null;
@@ -650,7 +659,7 @@ export class Subagent {
  *
  * Each specialized subagent (finder, oracle) is a code-level `SubagentSpec`
  * constant (pure agent runtime params: systemPrompt/model/thinking/tools/
- * noSkills) plus a separate tool-description constant (the model's discovery
+ * skills) plus a separate tool-description constant (the model's discovery
  * surface). Tool registration metadata is passed explicitly at the
  * `pi.registerTool` call site in the extension entry at the bottom of this
  * file, not baked into the spec. Adding a third specialized subagent = add a
@@ -736,7 +745,7 @@ Relevant files:
 	model: "opencode-go/deepseek-v4-flash",
 	thinking: "medium",
 	tools: ["read", "bash"],
-	noSkills: true,
+	skills: [],
 };
 
 export const ORACLE_DESCRIPTION = `Consult the Oracle - an AI advisor powered by OpenAI's GPT-5 reasoning model that can plan, review, and provide expert guidance.
@@ -819,19 +828,20 @@ IMPORTANT: Only your last message is returned to the main agent and displayed to
 	model: "opencode-go/glm-5.2",
 	thinking: "max",
 	tools: ["read", "bash"],
-	noSkills: true,
+	skills: [],
 };
 
 /**
  * Default configuration for inline subagent runs, read from
- * `~/.pi/agent/subagent.json`. All fields optional; omitted fields fall back to
- * the child pi process's own defaults.
+ * `~/.pi/agent/subagent.json`. `skills` is required (the explicit skill
+ * allowlist); other fields are optional and fall back to the child pi
+ * process's own defaults.
  */
 interface InlineConfig {
 	model?: string;
 	thinking?: string;
 	tools?: string[];
-	noSkills?: boolean;
+	skills: string[];
 }
 
 /**
@@ -841,24 +851,24 @@ interface InlineConfig {
  */
 function loadInlineConfig(): { config: InlineConfig; error?: string } {
 	const configPath = path.join(getAgentDir(), "subagent.json");
-	if (!fs.existsSync(configPath)) return { config: {} };
+	if (!fs.existsSync(configPath)) return { config: { skills: [] } };
 
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(fs.readFileSync(configPath, "utf-8"));
 	} catch (error) {
 		return {
-			config: {},
+			config: { skills: [] },
 			error: `Invalid JSON in inline config: ${configPath} (${error instanceof Error ? error.message : String(error)})`,
 		};
 	}
 
 	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-		return { config: {}, error: `Inline config must be a JSON object: ${configPath}` };
+		return { config: { skills: [] }, error: `Inline config must be a JSON object: ${configPath}` };
 	}
 
 	const raw = parsed as Record<string, unknown>;
-	const config: InlineConfig = {};
+	const config: InlineConfig = { skills: [] };
 
 	if (typeof raw.model === "string" && raw.model.trim()) config.model = raw.model.trim();
 	if (typeof raw.thinking === "string" && raw.thinking.trim()) config.thinking = raw.thinking.trim();
@@ -866,7 +876,26 @@ function loadInlineConfig(): { config: InlineConfig; error?: string } {
 		const tools = raw.tools.filter((t): t is string => typeof t === "string" && t.trim().length > 0).map((t) => t.trim());
 		if (tools.length > 0) config.tools = tools;
 	}
-	if (typeof raw.noSkills === "boolean") config.noSkills = raw.noSkills;
+	// `skills` is the single user-facing knob for the child's skills: the
+	// explicit allowlist handed to the child as `--skill <path>` entries.
+	// Missing or malformed key is a config error so execute throws instead of
+	// silently changing which skills the child sees.
+	if (!Array.isArray(raw.skills)) {
+		return {
+			config: { skills: [] },
+			error: `${configPath}: missing required field "skills" — set [] to disable all skills, or list skill file/dir paths to enable`,
+		};
+	}
+	// Keep non-empty string entries; expand a leading `~` to the home dir —
+	// spawn uses `shell: false`, so no shell expands `~` for us. Paths are
+	// passed through as-is (no existence check).
+	const home = os.homedir();
+	config.skills = raw.skills
+		.filter((s): s is string => typeof s === "string" && s.trim().length > 0)
+		.map((s) => {
+			const trimmed = s.trim();
+			return trimmed === "~" || trimmed.startsWith("~/") ? path.join(home, trimmed.slice(1)) : trimmed;
+		});
 
 	return { config };
 }
@@ -903,7 +932,7 @@ export default function (pi: ExtensionAPI) {
 	const defaultTaskInstance = new Subagent({
 		name: "task",
 		systemPrompt: "",
-		noSkills: true,
+		skills: [],
 	});
 	const { config: taskInlineConfig } = loadInlineConfig();
 	pi.registerTool({
@@ -923,7 +952,7 @@ export default function (pi: ExtensionAPI) {
 				model: inlineConfig.model,
 				thinking: inlineConfig.thinking,
 				tools: inlineConfig.tools,
-				noSkills: inlineConfig.noSkills ?? true,
+				skills: inlineConfig.skills,
 			};
 			const instance = new Subagent(inlineSpec);
 			return instance.execute(_toolCallId, params, signal, onUpdate, ctx);
