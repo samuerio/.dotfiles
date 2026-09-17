@@ -664,7 +664,9 @@ export class Subagent {
  * `pi.registerTool` call site in the extension entry at the bottom of this
  * file, not baked into the spec. Adding a third specialized subagent = add a
  * SPEC constant + a DESCRIPTION constant + a registration block in the
- * extension entry.
+ * extension entry. A specialized subagent may also live as a sibling
+ * extension file with its own resource dir (see librarian.ts), reusing the
+ * exported Subagent machinery.
  */
 
 /**
