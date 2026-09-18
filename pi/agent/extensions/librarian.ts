@@ -1,13 +1,13 @@
 /**
  * Librarian subagent extension (sibling file): specialized spec + tool
- * registration, reusing the Subagent machinery exported from task.ts.
+ * registration, reusing the Subagent machinery from `lib/subagent.ts`.
  *
  * Registers one native pi tool:
  *   - `librarian` : codebase-understanding subagent for repositories outside
  *     the local workspace; accesses remote repos via the `librarian` skill's
  *     cached checkouts under ~/.cache/checkouts.
  *
- * Unlike finder/oracle (inlined in task.ts), this subagent ships with a
+ * Unlike finder/oracle (no resource dir), this subagent ships with a
  * resource dir: the `librarian` skill lives next to this file under
  * `librarian/skills/librarian`, resolved at module load via import.meta and
  * passed to the child as an explicit `--skill <path>` allowlist entry.
@@ -16,7 +16,7 @@
 import { fileURLToPath } from "node:url";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Subagent, SubagentParams, type SubagentSpec } from "./task.ts";
+import { Subagent, SubagentParams, type SubagentSpec } from "./lib/subagent.ts";
 
 // ─── Skill Resource Resolution ────────────────────────────────────
 

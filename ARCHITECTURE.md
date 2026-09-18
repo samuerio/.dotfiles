@@ -21,11 +21,15 @@ git worktree + tmux 子会话 + 结果回报）、`tmux-split-fork`）、TUI 工
 `context`、`unified-edit`、`review`、`answer`、`btw`（在主会话旁开启独立旁路线程））、
 模式与提示词编辑（`prompt-editor`）、监控与装饰（`cache-hit-monitor`、`notify`、`whimsical`、`inline`）。
 依赖 pi 运行时库 `@earendil-works/pi-coding-agent`、
-`pi-tui`、`pi-ai`。子代理运行时（`task.ts`：finder/oracle/task 三个子代理工具，spawn 隔离子 pi 进程）与
-session 查看工具（`read-session.ts`：read_session、read_session_compaction、read_session_entry 三件套，
-只读解析 session JSONL）也都是本目录的顶层扩展。
-扩展间共享的非扩展模块放在 `lib/` 子目录（如 `lib/rush.ts`：从 modes.json 解析 rush 模式的 provider/
-model/thinkingLevel，供 `answer` 与 `handoff` 发起一次性 LLM 请求时使用）。pi 只把 `extensions/*.ts` 顶层文件与含 `index.ts` 的子目录
+`pi-tui`、`pi-ai`。子代理运行时（`lib/subagent.ts`：spawn 隔离子 pi 进程的 Subagent 机制库；
+`task.ts`/`finder.ts`/`oracle.ts`/`librarian.ts` 四个兄弟扩展各自注册一个子代理工具）与 session 工具
+（`read-session.ts`：read_session、read_session_compaction、read_session_entry 三件套，只读解析 session
+JSONL；`find-session.ts`：search_sessions 工具 + /search-sessions 命令，基于活跃分支搜索当前项目的会话）
+也都是本目录的顶层扩展。
+扩展间共享的非扩展模块放在 `lib/` 子目录（`lib/rush.ts`：从 modes.json 解析 rush 模式的 provider/
+model/thinkingLevel，供 `answer` 与 `handoff` 发起一次性 LLM 请求时使用；`lib/subagent.ts`：Subagent
+机制库；`lib/session-common.ts`：session JSONL 解析管线，供 `read-session` 与 `find-session` 共用）。
+pi 只把 `extensions/*.ts` 顶层文件与含 `index.ts` 的子目录
 识别为扩展，`lib/` 子目录不会被自动加载。
 
 **Architecture Invariant:** 扩展只能调用 pi 公开的 ExtensionAPI 与事件钩子，禁止直接操作 pi 内部状态。
@@ -34,7 +38,8 @@ model/thinkingLevel，供 `answer` 与 `handoff` 发起一次性 LLM 请求时�
 
 pi coding agent 的运行时配置中心。`models.json` 定义多 provider 的模型清单与成本参数；`modes.json` 定义
 default/rush/smart/deep 四种工作模式及其模型绑定；`keybindings.json` 定制 TUI 键位；`settings.json` 存放
-agent 全局设置（不再使用 `packages` 声明第三方扩展包）；子代理能力由本地扩展 `task.ts` 提供，其模型与
+agent 全局设置（不再使用 `packages` 声明第三方扩展包）；子代理能力由本地扩展提供（`task`/`finder`/
+`oracle`/`librarian` 四个工具，机制在 `extensions/lib/subagent.ts`），其中 inline `task` 工具的模型与
 工具配置由 `~/.pi/agent/subagent.json`（getAgentDir() 解析）提供；`telegram.json` 配置 Telegram bot
 远程交互通道；`auth.json` 管理 API 密钥；`trust.json` 记录项目信任状态；`prompts/` 存放可复用
 提示词模板（`prototype.md`、`simplify.md`、`clarify.md`、`summary.md`、`translate-paragraph.md`）。
@@ -43,7 +48,7 @@ agent 全局设置（不再使用 `packages` 声明第三方扩展包）；子�
 
 **API Boundary:** `models.json` 是 provider/模型清单的唯一来源，扩展不直接读取；`modes.json` 由 `prompt-editor` 扩展
 提供 TUI 编辑入口，运行时与扩展共享读写。子代理运行时与 session 查看工具均为本地 `extensions/`
-顶层扩展（`task.ts`、`read-session.ts`），不与本地其他扩展源码混写。
+顶层扩展与 `lib/` 共享模块（`lib/subagent.ts`、`lib/session-common.ts`、`lib/rush.ts`），不与本地其他扩展源码混写。
 
 ### `agents/skills/`
 
