@@ -3,8 +3,10 @@
  *
  * Renders a markdown file for the user in a scrollable overlay viewer.
  *
- * - Tool `show_markdown(path)`: for the agent to present a markdown file it
- *   just wrote (plans, reports, docs). Non-blocking: the tool returns
+ * - Tool `show_markdown(path, changeSummary?)`: for the agent to present a
+ *   markdown file it just wrote or updated (plans, reports, docs), optionally
+ *   with a concise summary of what changed shown above the body.
+ *   Non-blocking: the tool returns
  *   immediately and the overlay stays open until the user presses Esc.
  * - Command `/view [path]`: manually view a markdown file. With no
  *   argument, reopens the most recently viewed file in this session
@@ -130,6 +132,7 @@ class MarkdownViewerOverlayComponent {
     private filePath: string;
     private fileName: string;
     private markdown: Markdown;
+    private changeSummary: Markdown | null;
     private scrollOffset = 0;
     private viewHeight = 0;
     private totalLines = 0;
@@ -146,6 +149,7 @@ class MarkdownViewerOverlayComponent {
         filePath: string,
         content: string,
         onClose: () => void,
+        changeSummary?: string,
     ) {
         this.tui = tui;
         this.theme = theme;
@@ -155,6 +159,10 @@ class MarkdownViewerOverlayComponent {
         this.onClose = onClose;
         const body = content.trim() ? content : "_Empty file._";
         this.markdown = new Markdown(body, 1, 0, getMarkdownTheme());
+        const summaryText = changeSummary?.trim();
+        this.changeSummary = summaryText
+            ? new Markdown(summaryText, 1, 0, getMarkdownTheme())
+            : null;
     }
 
     handleInput(keyData: string): void {
@@ -215,12 +223,24 @@ class MarkdownViewerOverlayComponent {
         const contentHeight = Math.max(1, maxHeight - headerLines - footerLines - borderLines);
 
         const markdownLines = this.markdown.render(innerWidth);
-        this.totalLines = markdownLines.length;
+
+        const summaryLines = this.changeSummary
+            ? [
+                  this.theme.fg("accent", " Changes"),
+                  ...this.changeSummary.render(innerWidth),
+                  "",
+                  this.theme.fg("borderMuted", "─".repeat(innerWidth)),
+                  "",
+              ]
+            : [];
+        const contentLines = [...summaryLines, ...markdownLines];
+
+        this.totalLines = contentLines.length;
         this.viewHeight = contentHeight;
         const maxScroll = Math.max(0, this.totalLines - contentHeight);
         this.scrollOffset = Math.max(0, Math.min(this.scrollOffset, maxScroll));
 
-        const visibleLines = markdownLines.slice(this.scrollOffset, this.scrollOffset + contentHeight);
+        const visibleLines = contentLines.slice(this.scrollOffset, this.scrollOffset + contentHeight);
         const lines: string[] = [];
 
         if (!this.fullscreen) {
@@ -308,6 +328,7 @@ async function openViewer(
     ctx: ExtensionContext,
     filePath: string,
     content: string,
+    changeSummary?: string,
 ): Promise<void> {
     // Record as the session's most recently viewed file, then close any
     // previously open viewer (single instance).
@@ -338,6 +359,7 @@ async function openViewer(
                      }
                     done();
                  },
+                changeSummary,
             );
          },
         {
@@ -399,13 +421,23 @@ export default function viewerExtension(pi: ExtensionAPI) {
         description:
             "Render a markdown file for the user in a scrollable viewer overlay. " +
             "Call this after writing or updating a markdown file (plans, reports, docs) " +
-            "so the user can read the rendered result. Non-blocking: returns immediately; " +
-            "the user closes the viewer with Esc.",
+            "so the user can read the rendered result. When the file was modified, " +
+            "include changeSummary: 1-3 sentences of user-facing prose describing " +
+            "the changes; omit it when only presenting an unmodified file. " +
+            "Non-blocking: returns immediately; the user closes the viewer with Esc.",
         parameters: Type.Object({
             path: Type.String({
                 description: "Path to the markdown file (absolute or relative to cwd)",
-             }),
-         }),
+            }),
+            changeSummary: Type.Optional(
+                Type.String({
+                    description:
+                        "Concise summary of what changed in the file. " +
+                        "Include it when the file was just modified: 1-3 sentences of " +
+                        "user-facing prose, no diffs. Omit when presenting an unmodified file.",
+                }),
+            ),
+        }),
 
         async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
             const filePath = resolveViewPath(ctx.cwd, params.path);
@@ -419,7 +451,10 @@ export default function viewerExtension(pi: ExtensionAPI) {
 
             if (!ctx.hasUI) {
                 persistViewedPath(pi, filePath);
-                const text = `Viewer not available (headless mode). File: ${filePath}`;
+                const summary = params.changeSummary?.trim();
+                const text = summary
+                    ? `Viewer not available (headless mode). File: ${filePath}\nChanges:\n${summary}`
+                    : `Viewer not available (headless mode). File: ${filePath}`;
                 return {
                     content: [{ type: "text", text }],
                     details: { path: filePath },
@@ -428,7 +463,7 @@ export default function viewerExtension(pi: ExtensionAPI) {
 
             // Fire-and-forget: do not await; the tool returns immediately and the
             // user closes the overlay with Esc. done() handles cleanup.
-            void openViewer(pi, ctx, filePath, result.content);
+            void openViewer(pi, ctx, filePath, result.content, params.changeSummary);
 
             return {
                 content: [{ type: "text", text: `Opened viewer: ${filePath}` }],
