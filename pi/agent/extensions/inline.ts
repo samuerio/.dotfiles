@@ -1,5 +1,4 @@
 import {
-    completeSimple,
     type AssistantMessage,
     type UserMessage,
 } from "@earendil-works/pi-ai/compat";
@@ -9,11 +8,16 @@ import type {
     ExtensionContext,
     SessionEntry,
 } from "@earendil-works/pi-coding-agent";
-import { BorderedLoader, getAgentDir } from "@earendil-works/pi-coding-agent";
-import { existsSync, readFileSync } from "node:fs";
+import { BorderedLoader } from "@earendil-works/pi-coding-agent";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+    loadRushModeSpec,
+    rushComplete,
+    RUSH_MODE,
+} from "./lib/rush.ts";
 
 type ExtensionUI = ExtensionCommandContext["ui"];
 
@@ -73,53 +77,6 @@ interface InlineGroup {
 interface InlineBatchState {
     groups: InlineGroup[];
     nextIndex: number;
-}
-
-type ModeSpec = {
-    provider?: string;
-    modelId?: string;
-    thinkingLevel?: string;
-};
-const RUSH_MODE = "rush";
-
-function getProjectModesPath(cwd: string): string {
-    return join(cwd, ".pi", "modes.json");
-}
-
-function getGlobalModesPath(): string {
-    return join(getAgentDir(), "modes.json");
-}
-
-function loadRushModeSpec(cwd: string): ModeSpec | null {
-    const candidates = [getProjectModesPath(cwd), getGlobalModesPath()];
-    for (const p of candidates) {
-        if (!existsSync(p)) continue;
-        let parsed: unknown;
-        try {
-            parsed = JSON.parse(readFileSync(p, "utf8"));
-        } catch {
-            continue;
-        }
-        const modes =
-            parsed && typeof parsed === "object"
-                ? (parsed as { modes?: unknown }).modes
-                : undefined;
-        if (!modes || typeof modes !== "object") continue;
-        const spec = (modes as Record<string, unknown>)[RUSH_MODE];
-        if (!spec || typeof spec !== "object") continue;
-        const obj = spec as Record<string, unknown>;
-        const provider =
-            typeof obj.provider === "string" ? obj.provider : undefined;
-        const modelId =
-            typeof obj.modelId === "string" ? obj.modelId : undefined;
-        const thinkingLevel =
-            typeof obj.thinkingLevel === "string"
-                ? obj.thinkingLevel
-                : undefined;
-        if (!provider || !modelId) continue;
-        return { provider, modelId, thinkingLevel };
-    }
-    return null;
 }
 
 function extractText(response: AssistantMessage): string {
@@ -378,11 +335,12 @@ export default function (pi: ExtensionAPI) {
                 `Mode '${RUSH_MODE}' references unknown model ${rushSpec.provider}/${rushSpec.modelId}`,
             );
         }
-        const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-        if (!auth.ok) {
-            return fail(`Auth failed: ${auth.error}`);
+        if (!ctx.modelRegistry.hasConfiguredAuth(model)) {
+            return fail(
+                `No auth configured for ${rushSpec.provider}/${rushSpec.modelId}`,
+            );
         }
-        const { apiKey, headers } = auth;
+        const sessionId = ctx.sessionManager.getSessionId();
 
         const describe = async (
             scan: string,
@@ -393,12 +351,24 @@ export default function (pi: ExtensionAPI) {
                 content: [{ type: "text", text: scan }],
                 timestamp: Date.now(),
             };
-            const response = await completeSimple(
+            // One-shot rush call through the shared helper (mechanism notes
+            // live on rushComplete in lib/rush.ts).
+            const response = await rushComplete(
                 model,
+                ctx.modelRegistry,
+                sessionId,
                 { systemPrompt: SYSTEM_PROMPT, messages: [userMessage] },
-                { apiKey, headers, signal },
+                { signal },
             );
             if (response.stopReason === "aborted") return null;
+            // complete resolves (never throws) on request failures:
+            // surface the provider's errorMessage instead of folding the
+            // failed response into an "empty result" below.
+            if (response.stopReason === "error") {
+                throw new Error(
+                    `inline describe failed: ${response.errorMessage ?? response.stopReason}`,
+                );
+            }
             const text = extractText(response);
             if (!text) throw new Error("Empty inline result");
             return text;

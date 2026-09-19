@@ -13,8 +13,8 @@
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { completeSimple, type UserMessage } from "@earendil-works/pi-ai/compat";
-import { loadRushModeSpec, RUSH_MODE, sessionHeaders } from "./lib/rush.ts";
+import { type UserMessage } from "@earendil-works/pi-ai/compat";
+import { loadRushModeSpec, RUSH_MODE, rushComplete } from "./lib/rush.ts";
 import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { BorderedLoader, convertToLlm, serializeConversation } from "@earendil-works/pi-coding-agent";
 
@@ -129,9 +129,10 @@ export default function (pi: ExtensionAPI) {
 				loader.onAbort = () => done(null);
 
 				const doGenerate = async () => {
-					const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-					if (!auth.ok) {
-						throw new Error(auth.error);
+					if (!ctx.modelRegistry.hasConfiguredAuth(model)) {
+						throw new Error(
+							`No auth configured for ${rushSpec.provider}/${rushSpec.modelId}`,
+						);
 					}
 
 					const userMessage: UserMessage = {
@@ -145,23 +146,30 @@ export default function (pi: ExtensionAPI) {
 						timestamp: Date.now(),
 					};
 
-					const sessionId = ctx.sessionManager.getSessionId?.();
-					const response = await completeSimple(
+					// One-shot rush call through the shared helper (mechanism
+					// notes live on rushComplete in lib/rush.ts).
+					const response = await rushComplete(
 						model,
+						ctx.modelRegistry,
+						ctx.sessionManager.getSessionId?.(),
 						{ systemPrompt: SYSTEM_PROMPT, messages: [userMessage] },
 						{
-							apiKey: auth.apiKey,
-							headers: {
-								...auth.headers,
-								...sessionHeaders(model, sessionId),
-							},
 							signal: loader.signal,
-							reasoning: rushSpec.thinkingLevel,
+							reasoningEffort: rushSpec.thinkingLevel,
 						},
 					);
 
 					if (response.stopReason === "aborted") {
 						return null;
+					}
+
+					// complete resolves (never throws) on request failures:
+					// surface the provider's errorMessage instead of silently
+					// producing an empty handoff prompt below.
+					if (response.stopReason === "error") {
+						throw new Error(
+							`handoff generate failed: ${response.errorMessage ?? response.stopReason}`,
+						);
 					}
 
 					return response.content

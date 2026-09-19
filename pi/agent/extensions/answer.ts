@@ -10,10 +10,7 @@
  * 4. Submits the compiled answers when done
  */
 
-import {
-    completeSimple,
-    type UserMessage,
-} from "@earendil-works/pi-ai/compat";
+import { type UserMessage } from "@earendil-works/pi-ai/compat";
 import type {
     ExtensionAPI,
     ExtensionContext,
@@ -22,7 +19,7 @@ import { BorderedLoader } from "@earendil-works/pi-coding-agent";
 import {
     loadRushModeSpec,
     RUSH_MODE,
-    sessionHeaders,
+    rushComplete,
 } from "./lib/rush.ts";
 import {
     type Component,
@@ -535,10 +532,10 @@ export default function (pi: ExtensionAPI) {
                 loader.onAbort = () => done(null);
 
                 const doExtract = async () => {
-                    const auth =
-                        await ctx.modelRegistry.getApiKeyAndHeaders(model);
-                    if (!auth.ok) {
-                        throw new Error(auth.error);
+                    if (!ctx.modelRegistry.hasConfiguredAuth(model)) {
+                        throw new Error(
+                            `No auth configured for ${rushSpec.provider}/${rushSpec.modelId}`,
+                        );
                     }
                     const userMessage: UserMessage = {
                         role: "user",
@@ -546,20 +543,19 @@ export default function (pi: ExtensionAPI) {
                         timestamp: Date.now(),
                     };
 
-                    const response = await completeSimple(
+                    // One-shot rush call through the shared helper
+                    // (mechanism notes live on rushComplete in lib/rush.ts).
+                    const response = await rushComplete(
                         model,
+                        ctx.modelRegistry,
+                        sessionId,
                         {
                             systemPrompt: SYSTEM_PROMPT,
                             messages: [userMessage],
                         },
                         {
-                            apiKey: auth.apiKey,
-                            headers: {
-                                ...auth.headers,
-                                ...sessionHeaders(model, sessionId),
-                            },
                             signal: loader.signal,
-                            reasoning: rushSpec.thinkingLevel,
+                            reasoningEffort: rushSpec.thinkingLevel,
                         },
                     );
 

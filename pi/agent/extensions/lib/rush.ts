@@ -10,7 +10,13 @@
  * `extensions/*.ts` files and subdirectories with index.ts/package.json.
  */
 
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import type {
+	Api,
+	AssistantMessage,
+	Context,
+	Model,
+} from "@earendil-works/pi-ai";
+import { getAgentDir, type ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -97,4 +103,45 @@ export function sessionHeaders(
 		return {};
 	}
 	return { "x-opencode-session": sessionId, "x-opencode-client": "pi" };
+}
+
+export interface RushCompleteOptions {
+	signal?: AbortSignal;
+	/**
+	 * API-level reasoning effort passed straight through to
+	 * ModelRegistry.complete; the api layer maps it through the model's own
+	 * thinkingLevelMap (e.g. unsupported levels drop). Omit for defaults.
+	 */
+	reasoningEffort?: ThinkingLevel;
+}
+
+/**
+ * One-shot LLM call via ModelRegistry.complete — the same shape as pi's
+ * official example extensions (handoff/summarize/qna): auth resolution
+ * (apiKey/OAuth refresh/baseUrl override/env/provider headers) happens
+ * internally; callers never assemble credentials manually.
+ *
+ * The opencode/opencode-go `x-opencode-session` routing header is only
+ * injected by pi core's agent-loop streamFn (sdk.js); ModelRegistry.complete
+ * and pi-ai itself never add it, so extension-issued calls must supply it via
+ * the official transformHeaders hook. Session headers go first so caller
+ * headers win on conflict, matching pi core's attribution merge order.
+ */
+export async function rushComplete(
+	model: Model<Api>,
+	registry: ModelRegistry,
+	sessionId: string | undefined,
+	context: Context,
+	options?: RushCompleteOptions,
+): Promise<AssistantMessage> {
+	return registry.complete(model, context, {
+		signal: options?.signal,
+		cacheRetention: "none",
+		sessionId,
+		reasoningEffort: options?.reasoningEffort,
+		transformHeaders: (headers) => ({
+			...sessionHeaders(model, sessionId),
+			...headers,
+		}),
+	});
 }
