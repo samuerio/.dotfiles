@@ -418,10 +418,10 @@ export const READ_SESSION_COMPACTION_DESCRIPTION =
 	"Reconstruct the content a specific compaction's summary was derived from: the previous " +
 	"compaction summary plus the raw messages that compaction summarized. Pass a pi session (file " +
 	"path or session id, same rules as read_session) and a compaction entry id. " +
-	"Returns the previous summary as a compactionSummary " +
-	"block, then the raw messages summarized, plus a trailing envelope line (counts, " +
-	"span=<firstRawId>..<firstKeptEntryId>). For the first compaction there is no previous " +
-	"summary, so only the raw is returned. Output is not truncated. Read-only.";
+	"Returns the previous summary as a compactionSummary block, then the raw messages summarized, " +
+	"plus a trailing envelope line (counts, span=<firstRawId>..<firstKeptEntryId>). For the first " +
+	"compaction there is no previous summary, so only the raw is returned. Output is not truncated. " +
+	"Read-only.";
 
 export const ReadSessionCompactionParams = Type.Object({
 	session: Type.String({
@@ -572,13 +572,11 @@ export const READ_ENTRY_DESCRIPTION =
 	"Read the full content of a specific entry inside a pi session — the content a read_session " +
 	"stub truncates. Pass a session (file path or session id, same rules as read_session) and the " +
 	"id= carried by a truncated stub in read_session or read_session_compaction output. " +
-	"Returns the complete content dispatched by " +
-	"entry kind: toolResult → text parts verbatim, non-text parts as placeholders, and the tool's " +
-	"details rendered as JSON when present (subagent results keep their full output in details); " +
-	"bashExecution (`!` command) → the command plus its full multiline output; assistant toolCall " +
-	"→ each call's full pretty-printed arguments; custom_message → the full text of its content " +
-	"(non-text parts are not rendered; details is extension-internal metadata and is not returned); " +
-	"branch_summary → the summary text in full; user message → the full text. Untruncated. Read-only.";
+	"Returns the complete content dispatched by entry kind: toolResult → full text plus the tool's " +
+	"details as JSON when present (subagent results keep their full output there); bashExecution " +
+	"(`!` command) → the command plus its full multiline output; assistant toolCall → each call's " +
+	"full pretty-printed arguments; custom_message → the full text of its content; branch_summary " +
+	"→ the summary text in full; user message → the full text. Untruncated. Read-only.";
 
 export const ReadEntryParams = Type.Object({
 	session: Type.String({
