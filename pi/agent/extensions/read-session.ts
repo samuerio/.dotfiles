@@ -95,29 +95,12 @@ const BASH_OUTPUT_PREVIEW = 300;
 // ============================================================================
 
 export const READ_SESSION_DESCRIPTION =
-	"Read a pi session JSONL file and return its resolved transcript. Pass a session file path (~ " +
-	"expands) or a session id (pi --session semantics: exact id first, then prefix match — current " +
-	"project tier before global, most recently modified wins on prefix ambiguity). Id lookup only " +
-	"covers sessions under ~/.pi/agent/sessions/<project>/; sessions outside that layout (e.g. " +
-	"subagent sessions) are only reachable by path, which a subagent envelope reports as session=. " +
-	"Returns the active-branch " +
-	"transcript with compaction applied: user/assistant text, tool calls, error results, and " +
-	"compaction/branch summaries, plus a trailing envelope line " +
-	"(cwd, entry/message counts, thinking level, model) as a footnote. " +
-	"compaction/branch summaries. entries= counts context entries while messages= counts rendered " +
-	"messages; state-change entries (model_change, thinking_level_change) project to no messages, " +
-	"so entries may exceed messages. compactionSummary block headers carry the compaction entry id " +
-	"(id=xxxx tokensBefore=N) and branchSummary headers carry fromId=; pass a compaction id to " +
-	"read_session_compaction to read the original content that compaction replaced. Tool calls and results carry a " +
-	"shared truncated toolCallId key ([call-xxxx]) so parallel calls match to their results. Entry ids are the drill " +
-	"handles for read_session_entry: toolResult stubs (## toolResult:<name> (id=xxxx, ~size)) → full result content, " +
-	"toolCall lines (→ name(args) [call-xxxx] (id=xxxx)) → full call arguments, bash blocks (## bash (exit=N)) → the " +
-	"command and its output, folded to a one-line preview with a trailing " +
-	"[truncated, full output: read_session_entry id=xxxx] marker when over 300 chars (the id lives only in that " +
-	"marker — short outputs are fully rendered and need no drill), and successful toolResult stubs carry a " +
-	"~size (result text length) telling whether the full result is worth drilling. Read-only. " +
-	"Pass leafId to inspect a specific branch tip; omit it for the current leaf (the file's last " +
-	"entry).";
+	"Read a pi session JSONL file and return its resolved transcript. Pass a session file path or a session id. " +
+	"Returns the active-branch transcript with compaction applied — user/assistant text, tool calls, " +
+	"results, and compaction/branch summaries — plus a trailing envelope line with session metadata. " +
+	"Long tool results, tool-call arguments, and bash output appear as truncated stubs carrying an id=; " +
+	"pass that id to read_session_entry for the full content, or a compactionSummary's id to " +
+	"read_session_compaction for the content it replaced. Read-only.";
 
 export const ReadSessionParams = Type.Object({
 	session: Type.String({
@@ -434,8 +417,8 @@ export async function readSession(
 export const READ_SESSION_COMPACTION_DESCRIPTION =
 	"Reconstruct the content a specific compaction's summary was derived from: the previous " +
 	"compaction summary plus the raw messages that compaction summarized. Pass a pi session (file " +
-	"path or session id, same rules as read_session) and a compaction entry id (from a compactionSummary " +
-	"block header in read_session output). Returns the previous summary as a compactionSummary " +
+	"path or session id, same rules as read_session) and a compaction entry id. " +
+	"Returns the previous summary as a compactionSummary " +
 	"block, then the raw messages summarized, plus a trailing envelope line (counts, " +
 	"span=<firstRawId>..<firstKeptEntryId>). For the first compaction there is no previous " +
 	"summary, so only the raw is returned. Output is not truncated. Read-only.";
@@ -587,11 +570,9 @@ export async function readSessionCompaction(
 
 export const READ_ENTRY_DESCRIPTION =
 	"Read the full content of a specific entry inside a pi session — the content a read_session " +
-	"stub truncates. Pass a session (file path or session id, same rules as read_session) and an " +
-	"entry id — the id= on a ## toolResult:<name> (id=xxxx, ~size) stub line, on a → tool-call line " +
-	"(→ name(args) [call-xxxx] (id=xxxx)), or in the [truncated, full output: read_session_entry id=xxxx] marker of " +
-	"a ## bash (exit=N) block whose output was folded, in read_session " +
-	"output or read_session_compaction span output. Returns the complete content dispatched by " +
+	"stub truncates. Pass a session (file path or session id, same rules as read_session) and the " +
+	"id= carried by a truncated stub in read_session or read_session_compaction output. " +
+	"Returns the complete content dispatched by " +
 	"entry kind: toolResult → text parts verbatim, non-text parts as placeholders, and the tool's " +
 	"details rendered as JSON when present (subagent results keep their full output in details); " +
 	"bashExecution (`!` command) → the command plus its full multiline output; assistant toolCall " +
@@ -606,7 +587,10 @@ export const ReadEntryParams = Type.Object({
 	}),
 	entryId: Type.String({
 		description:
-			"Entry id to drill into. Ids are listed on ## toolResult:<name> (id=xxxx, ~size) stub lines, → tool-call lines (→ name(args) [call-xxxx] (id=xxxx)), and in the [truncated, full output: read_session_entry id=xxxx] marker of folded ## bash (exit=N) blocks in read_session output and read_session_compaction span output; ids for user, custom_message, and branch_summary entries come from the entry= handle on search_sessions hits.",
+			"Entry id to drill into. The id= on a toolResult stub, a → tool-call line, or a folded " +
+			"## bash (exit=N) block in read_session output or read_session_compaction span output; ids " +
+			"for user, custom_message, and branch_summary entries come from the entry= handle on " +
+			"search_sessions hits.",
 	}),
 });
 

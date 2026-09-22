@@ -76,15 +76,14 @@ const SEARCH_SESSIONS_DESCRIPTION =
     "keyword or /regex/, over the resolved active branch of each session (abandoned branches are not " +
     "searched). Searches user/assistant body text, custom injected messages (the search tool's own " +
     "search-sessions output excluded), and branch_summary/compaction summaries; tool results are never " +
-    "searched (they contain whole-file contents and command output that drown matches). Assistant " +
-    "toolCall text is opt-in via includeToolCalls. Custom_message and branch_summary hits drill to " +
+    "searched (they contain whole-file contents and command output that drown matches). Custom_message " +
+    "and branch_summary hits drill to " +
     "their full text via read_session_entry; compaction originals are restored with " +
     "read_session_compaction. Returns " +
     "hits sorted newest-first, each as " +
     "session=<path> id=<sessionId> entry=<entryId> ts=<timestamp> role=<role> plus a snippet: pass the " +
     "path or id to read_session for the full transcript, or entry=<entryId> to read_session_entry to " +
-    "drill into the exact entry. The live session is excluded by default (includeCurrentSession to " +
-    "include it). Read-only.";
+    "drill into the exact entry. Read-only.";
 
 export const SearchSessionsParams = Type.Object({
     query: Type.String({
