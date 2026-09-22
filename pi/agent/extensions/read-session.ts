@@ -568,6 +568,13 @@ export async function readSessionCompaction(
  *     output, verbatim (no one-line collapsing, no preview cut).
  *   - assistant message with toolCall parts → each call's name + full
  *     pretty-printed arguments (the counterpart to the 120-char preview).
+ *   - custom_message entry → the full text of `content` (string content
+ *     verbatim; array content's text parts joined with blank lines; image and
+ *     other non-text parts are silently skipped). `details` is extension-
+ *     internal metadata and is NOT returned.
+ *   - branch_summary entry → the `summary` text in full.
+ *   - user message → the full text (`textOf`: text parts only, non-text
+ *     parts silently ignored).
  *
  * Same discovery → drill pairing as `read_session_compaction`: the stub
  * header formats are the contract between the tools.
@@ -588,7 +595,9 @@ export const READ_ENTRY_DESCRIPTION =
 	"entry kind: toolResult → text parts verbatim, non-text parts as placeholders, and the tool's " +
 	"details rendered as JSON when present (subagent results keep their full output in details); " +
 	"bashExecution (`!` command) → the command plus its full multiline output; assistant toolCall " +
-	"→ each call's full pretty-printed arguments. Untruncated. Read-only.";
+	"→ each call's full pretty-printed arguments; custom_message → the full text of its content " +
+	"(non-text parts are not rendered; details is extension-internal metadata and is not returned); " +
+	"branch_summary → the summary text in full; user message → the full text. Untruncated. Read-only.";
 
 export const ReadEntryParams = Type.Object({
 	session: Type.String({
@@ -597,7 +606,7 @@ export const ReadEntryParams = Type.Object({
 	}),
 	entryId: Type.String({
 		description:
-			"Entry id to drill into. Ids are listed on ## toolResult:<name> (id=xxxx, ~size) stub lines, → tool-call lines (→ name(args) [call-xxxx] (id=xxxx)), and in the [truncated, full output: read_session_entry id=xxxx] marker of folded ## bash (exit=N) blocks in read_session output and read_session_compaction span output.",
+			"Entry id to drill into. Ids are listed on ## toolResult:<name> (id=xxxx, ~size) stub lines, → tool-call lines (→ name(args) [call-xxxx] (id=xxxx)), and in the [truncated, full output: read_session_entry id=xxxx] marker of folded ## bash (exit=N) blocks in read_session output and read_session_compaction span output; ids for user, custom_message, and branch_summary entries come from the entry= handle on search_sessions hits.",
 	}),
 });
 
@@ -605,7 +614,7 @@ export interface ReadEntryDetails {
 	path: string;
 	entryCount: number;
 	/** Resolved entry kind — filled at execute time (renderCall only has the id). */
-	kind: "toolResult" | "bashExecution" | "toolCall";
+	kind: "toolResult" | "bashExecution" | "toolCall" | "customMessage" | "branchSummary" | "user";
 	/** kind=toolResult. */
 	tool?: string;
 	callId?: string;
@@ -617,6 +626,12 @@ export interface ReadEntryDetails {
 	calls?: number;
 	/** kind=toolCall. Compact TUI preview lines: `name {json}` per call. */
 	preview?: string;
+	/** kind=customMessage. */
+	customType?: string;
+	/** kind=customMessage. TUI display flag of the originating custom_message entry. */
+	display?: boolean;
+	/** kind=branchSummary. Id of the entry the branch forked from. */
+	fromId?: string;
 }
 
 type ToolResultAgentMessage = Extract<AgentMessage, { role: "toolResult" }>;
@@ -681,11 +696,13 @@ function renderAssistantToolCallsContent(msg: AssistantAgentMessage): string {
 
 /**
  * Locate the target entry and render its full content verbatim (no envelope:
- * the transcript stub already carries the identity metadata). Dispatches on
- * the entry's kind; throws with a descriptive
+ * the transcript stub already carries the identity metadata). Dispatches
+ * first on the entry's type (custom_message / branch_summary entries drill
+ * directly), then on the message role within message entries; throws with a
+ * descriptive
  * message for unresolvable session references, unknown ids, and entry kinds
- * with nothing to drill into (user/custom messages are fully rendered by
- * read_session; compaction entries belong to read_session_compaction).
+ * with nothing to drill into (state-metadata entry types project no
+ * transcript content; compaction entries belong to read_session_compaction).
  */
 export async function readSessionEntry(
 	session: string,
@@ -702,17 +719,50 @@ export async function readSessionEntry(
 				"and in the truncation marker of folded ## bash (exit=N) blocks in read_session output.",
 		);
 	}
-	if (target.type !== "message") {
-		const hint = target.type === "compaction" ? " Use read_session_compaction for compaction entries." : "";
+	let body: string;
+	let kind: ReadEntryDetails["kind"];
+	let kindDetails: Partial<ReadEntryDetails> = {};
+	if (target.type === "custom_message") {
+		// details is extension-internal metadata (never sent to the LLM), so
+		// it is deliberately NOT rendered into the body; it surfaces only via
+		// the customType/display fields in the returned details.
+		body =
+			typeof target.content === "string"
+				? target.content
+				: target.content
+						.map((part) => (part.type === "text" && typeof part.text === "string" ? part.text : ""))
+						.filter((text) => text !== "")
+						.join("\n\n");
+		if (!body.trim()) body = "(no text content)";
+		kind = "customMessage";
+		kindDetails = { customType: target.customType, display: target.display };
+		return { text: body, details: { path: filePath, entryCount: sessionEntries.length, kind, ...kindDetails } };
+	} else if (target.type === "branch_summary") {
+		// The upstream projection only emits a message when summary exists;
+		// a missing summary means there is nothing to drill into.
+		if (!target.summary) {
+			throw new Error(`read_session_entry: branch_summary entry "${entryId}" carries no summary.`);
+		}
+		body = target.summary;
+		kind = "branchSummary";
+		kindDetails = { fromId: target.fromId };
+		return { text: body, details: { path: filePath, entryCount: sessionEntries.length, kind, ...kindDetails } };
+	} else if (target.type === "compaction") {
+		// Compaction entries DO project (compactionSummary blocks in
+		// read_session, annotated id= tokensBefore=) and DO have drillable
+		// content — just not here: read_session_compaction reconstructs the
+		// original messages the summary replaced.
 		throw new Error(
-			`read_session_entry: entry "${entryId}" is a ${target.type} entry, not a drillable message entry.${hint}`,
+			`read_session_entry: entry "${entryId}" is a compaction entry. Use read_session_compaction for compaction entries.`,
+		);
+	} else if (target.type !== "message") {
+		throw new Error(
+			`read_session_entry: entry "${entryId}" is a ${target.type} entry; ${target.type} entries are ` +
+				"state metadata that do not project into the transcript and carry no drillable content.",
 		);
 	}
 	const msg = target.message;
 
-	let body: string;
-	let kind: ReadEntryDetails["kind"];
-	let kindDetails: Partial<ReadEntryDetails> = {};
 	if (msg.role === "toolResult") {
 		const toolMsg: ToolResultAgentMessage = msg;
 		body = renderToolResultContent(toolMsg) || "(empty tool result)";
@@ -740,10 +790,15 @@ export async function readSessionEntry(
 				.map((part) => `${part.name} ${JSON.stringify(part.arguments)}`)
 				.join("\n"),
 		};
+	} else if (msg.role === "user") {
+		// Defensive: search hits should only ever land here for entries that
+		// carry text, but handle the empty case instead of returning "".
+		body = textOf(msg.content) || "(no text)";
+		kind = "user";
+		kindDetails = {};
 	} else {
 		throw new Error(
-			`read_session_entry: entry "${entryId}" is a ${msg.role} message; only toolResult, bashExecution, and assistant-with-toolCalls entries carry drillable content. ` +
-				"User and custom messages are already rendered in full by read_session.",
+			`read_session_entry: entry "${entryId}" is a message with unexpected role "${msg.role}"; only toolResult, bashExecution, and assistant-with-toolCalls messages carry drillable content.`,
 		);
 	}
 
