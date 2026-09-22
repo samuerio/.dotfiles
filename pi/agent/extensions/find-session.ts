@@ -19,6 +19,11 @@
  * ref is therefore always drillable by the existing tool trio. No index, no
  * cross-project search, no tool-result search (upstream defaults, kept).
  *
+ * Summary invariant: a compaction/branch_summary hit never duplicates an
+ * original-message hit within the same session — the raw messages compacted
+ * away are no longer in buildContextEntries' active-branch projection, so the
+ * summary is the only searchable copy of that stretch of history.
+ *
  * ─ Output contract ─
  * No fourth read tool. Each hit emits both a session path and a session id:
  *
@@ -63,12 +68,19 @@ const DEFAULT_MAX_RESULTS = 50;
 const HARD_MAX_RESULTS = 1000;
 const TOOL_CALL_ARGS_PREVIEW = 400;
 
+/** custom_message customTypes that are THIS family's own injected output; searching them self-amplifies. */
+const SELF_EXCLUDED_CUSTOM_TYPES = new Set(["search-sessions"]);
+
 const SEARCH_SESSIONS_DESCRIPTION =
     "Search the CURRENT PROJECT's pi sessions (one level: ~/.pi/agent/sessions/<project>/) for a " +
     "keyword or /regex/, over the resolved active branch of each session (abandoned branches are not " +
-    "searched). Only user and assistant text is searched; tool results are never searched (they contain " +
-    "whole-file contents and command output that drown matches), assistant toolCall text is opt-in via " +
-    "includeToolCalls. Returns hits sorted newest-first, each as " +
+    "searched). Searches user/assistant body text, custom injected messages (the search tool's own " +
+    "search-sessions output excluded), and branch_summary/compaction summaries; tool results are never " +
+    "searched (they contain whole-file contents and command output that drown matches). Assistant " +
+    "toolCall text is opt-in via includeToolCalls. Custom_message and branch_summary hits drill to " +
+    "their full text via read_session_entry; compaction originals are restored with " +
+    "read_session_compaction. Returns " +
+    "hits sorted newest-first, each as " +
     "session=<path> id=<sessionId> entry=<entryId> ts=<timestamp> role=<role> plus a snippet: pass the " +
     "path or id to read_session for the full transcript, or entry=<entryId> to read_session_entry to " +
     "drill into the exact entry. The live session is excluded by default (includeCurrentSession to " +
@@ -81,11 +93,6 @@ export const SearchSessionsParams = Type.Object({
             "/regex/flags form. The g and y flags are stripped if present (they break index-based snippet " +
             "positioning and leak lastIndex state across messages).",
     }),
-    role: Type.Optional(
-        Type.Union([Type.Literal("user"), Type.Literal("assistant")], {
-            description: "Filter on message role. Omit to search both.",
-        }),
-    ),
     since: Type.Optional(
         Type.String({
             description:
@@ -126,7 +133,8 @@ export interface SearchHit {
     entryId: string;
     /** Message timestamp from the session entry. */
     timestamp: string;
-    role: "user" | "assistant";
+    /** Message role as emitted by sessionEntryToContextMessages. */
+    role: string;
     /** Match plus surrounding context (120 chars before / 240 after). */
     snippet: string;
 }
@@ -196,6 +204,32 @@ function toolCallHaystack(
 }
 
 /**
+ * Extract the searchable haystack for one message; empty string means not
+ * searchable. Role knowledge converges here: user/assistant/custom carry
+ * their body in msg.content, branchSummary/compactionSummary carry it in
+ * msg.summary (content is absent on those), and every other role
+ * (toolResult, bashExecution, ...) is unsearchable. Assistant toolCall text
+ * is appended opt-in via includeToolCalls.
+ */
+function haystackFor(msg: AgentMessage, includeToolCalls: boolean): string {
+    if (
+        msg.role === "user" ||
+        msg.role === "assistant" ||
+        msg.role === "custom"
+    ) {
+        let text = textOf(msg.content);
+        if (msg.role === "assistant" && includeToolCalls) {
+            text += `\n${toolCallHaystack(msg)}`;
+        }
+        return text;
+    }
+    if (msg.role === "branchSummary" || msg.role === "compactionSummary") {
+        return msg.summary;
+    }
+    return "";
+}
+
+/**
  * Validate an explicitly passed maxResults. Invalid explicit values throw
  * loudly (0, negative, NaN, non-integer); silently correcting them would hide
  * a caller bug. The hard cap is applied silently (a larger value is a
@@ -227,13 +261,11 @@ export function buildSnippet(haystack: string, index: number): string {
 /** Parse a slash-command argument string into search options + the query. */
 export function parseSearchArgs(args: string): {
     query: string;
-    role: "user" | "assistant" | undefined;
     since: string | undefined;
     until: string | undefined;
     maxResults: number | undefined;
     includeToolCalls: boolean;
 } {
-    let role: "user" | "assistant" | undefined;
     let since: string | undefined;
     let until: string | undefined;
     let maxResults: number | undefined;
@@ -244,14 +276,6 @@ export function parseSearchArgs(args: string): {
         if (token.startsWith("--")) {
             const [flag, value] = token.slice(2).split("=", 2);
             switch (flag) {
-                case "role":
-                    if (value !== "user" && value !== "assistant") {
-                        throw new Error(
-                            `--role must be user or assistant (got "${value ?? ""}").`,
-                        );
-                    }
-                    role = value;
-                    break;
                 case "since":
                     since = value;
                     break;
@@ -266,7 +290,7 @@ export function parseSearchArgs(args: string): {
                     break;
                 default:
                     throw new Error(
-                        `unknown flag --${flag} (supported: role, since, until, max, include-tool-calls).`,
+                        `unknown flag --${flag} (supported: since, until, max, include-tool-calls).`,
                     );
             }
             continue;
@@ -277,9 +301,9 @@ export function parseSearchArgs(args: string): {
     const query = queryParts.join(" ").trim();
     if (!query)
         throw new Error(
-            "usage: /search-sessions [--role=user|assistant] [--since=ISO] [--until=ISO] [--max=N] [--include-tool-calls] <query>",
+            "usage: /search-sessions [--since=ISO] [--until=ISO] [--max=N] [--include-tool-calls] <query>",
         );
-    return { query, role, since, until, maxResults, includeToolCalls };
+    return { query, since, until, maxResults, includeToolCalls };
 }
 
 /** Display-only path shortening (matches read-session.ts shortenPath): cwd-relative or ~-collapsed. */
@@ -303,7 +327,6 @@ function shortenPath(p: string): string {
 
 export interface SearchSessionsOptions {
     query: string;
-    role?: "user" | "assistant";
     since?: string;
     until?: string;
     includeToolCalls?: boolean;
@@ -346,7 +369,6 @@ export async function searchSessions(
     if (untilMs !== undefined && Number.isNaN(untilMs))
         throw new Error(`search_sessions: invalid until "${options.until}".`);
     const includeToolCalls = options.includeToolCalls === true;
-    const roleFilter = options.role;
 
     const sessions = await SessionManager.list(process.cwd());
     const currentAbs = options.currentSessionFile
@@ -411,18 +433,20 @@ export async function searchSessions(
                 break;
             }
             for (const msg of sessionEntryToContextMessages(entry)) {
-                if (msg.role !== "user" && msg.role !== "assistant") continue;
-                if (roleFilter && msg.role !== roleFilter) continue;
+                // Self-reference guard: the slash command injects its own
+                // result as a custom message; searching it would self-amplify.
+                if (
+                    msg.role === "custom" &&
+                    SELF_EXCLUDED_CUSTOM_TYPES.has(msg.customType)
+                )
+                    continue;
 
-                // Haystack: user/assistant text (+ opt-in toolCall text for
-                // assistant), truncated before matching (ReDoS bound).
-                let haystack = textOf(msg.content);
-                if (msg.role === "assistant" && includeToolCalls) {
-                    haystack += `\n${toolCallHaystack(msg)}`;
-                }
+                // Haystack via haystackFor (empty = unsearchable role), then
+                // truncated before matching (ReDoS bound).
+                let haystack = haystackFor(msg, includeToolCalls);
+                if (!haystack) continue;
                 if (haystack.length > MAX_HAYSTACK_CHARS)
                     haystack = haystack.slice(0, MAX_HAYSTACK_CHARS);
-                if (!haystack) continue;
 
                 const match = haystack.match(re);
                 if (!match) continue;
@@ -588,7 +612,6 @@ export default function (pi: ExtensionAPI) {
             try {
                 const result = await searchSessions({
                     query: params.query,
-                    role: params.role as "user" | "assistant" | undefined,
                     since: params.since,
                     until: params.until,
                     includeToolCalls: params.includeToolCalls,
