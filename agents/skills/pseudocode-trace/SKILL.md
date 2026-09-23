@@ -27,13 +27,13 @@ Use when the user gives (or references) a function/method plus concrete input va
 
 If no concrete input is given, ask for one (or propose a reasonable representative input and state the assumption) — this technique is input-driven; without an input there's no single path to trace.
 
-### Core principles (non-negotiable)
+### Core principles
 
 1. **Only the executed path.** Render pseudocode for the branch(es) actually taken by the given input. Untaken `ELSE`/branches are omitted entirely, not shown-and-marked-as-skipped.
 
 2. **Values only — never verdicts.** Every inline comment shows a raw value, a computed result, or a state mutation as `oldValue → newValue`. Never write "条件成立"/"condition met"/"valid"/"true" — the reader infers the outcome from the value itself.
 
-3. **Real execution over recall.** If a code execution tool is available, prefer instrumenting and running over manual reasoning — more reliable for loops, boundaries, multi-branch logic. Otherwise, fall back to careful manual reasoning.
+3. **Reason first, execute to verify.** Manual reasoning is the default path for producing the trace. For complex cases (deep loops, boundary conditions, stacked branches) where a computed value is uncertain, optionally run the instrumented code to verify the actual values before annotating.
 
 ### Format
 
