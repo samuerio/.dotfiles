@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "currentMode": "rush",
+  "currentMode": "smart",
   "modes": {
     "default": {
       "provider": "opencode-go",
@@ -14,7 +14,7 @@
     },
     "smart": {
       "provider": "opencode-go",
-      "modelId": "omen-alpha",
+      "modelId": "glm-5.2",
       "thinkingLevel": "medium"
     },
     "deep": {
