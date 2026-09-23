@@ -11,7 +11,7 @@ description: >
 
 # Pseudocode Trace
 
-Render a function's actual execution path for a **specific input** as pseudocode annotated with inline variable-value comments — the effect of stepping through a debugger with breakpoints at each meaningful line, without actually running the code.
+Render a function's actual execution path for a **specific input** as pseudocode annotated with inline variable-value comments — the effect of stepping through a debugger with breakpoints at each meaningful line, without actually running the code. Persist the trace to a file (see Output Path); keep the chat reply minimal.
 
 ### When to use this
 
@@ -47,8 +47,18 @@ FUNCTION calculateDiscount(user, order):
 
 **Guard clauses** — still get a line with the deciding value(s), no "not met" text.
 
-### Self-check before presenting
+### Self-check before writing
 
 Every inline comment must contain a concrete value and zero interpretive words. Rewrite or delete any comment that fails this.
+
+### Output Path
+
+Save the trace as `trace.md` under `.pi/trace/[YYYYMMDD-HHMMSS]-[slug]/` — timestamp taken when this skill runs, kebab-case slug from the traced function/method (e.g. `.pi/trace/20260725-143000-searchsessions/trace.md`).
+
+Document structure: a `# [Function] Trace` heading, the INPUT line(s), the trace blocks, and any omission notes — nothing else.
+
+After writing the file, use this exact phrasing:
+
+> Trace saved — run `code [output-path] &` to review.
 
 📎 `references/examples.md` — 5 worked examples (branching, loop+early-exit, guard-clause chain, state mutation, real async codebase function)
