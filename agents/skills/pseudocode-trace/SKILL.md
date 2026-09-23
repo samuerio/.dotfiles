@@ -39,6 +39,8 @@ FUNCTION calculateDiscount(user, order):
     RETURN order.amount - finalDiscount      # 520-122 → 398
 ```
 
+**Context state** — ambient values that decide the path but are not arguments (module-level variables, config files, env vars) go in a `CONTEXT:` block after INPUT, each entry with its source (`CONTEXT: ~/.pi/agent/subagent.json={…}, MAX_RETRIES=3`). Include only entries read on the executed path; values stated there count as readable-from-preceding-lines for the `old → new` rule. Fields of argument objects stay in INPUT.
+
 **Annotation discipline** — annotate only lines whose value is not directly readable from the line itself (skip trivial `lo = 0 # lo=0`). Comments carry bare values (`# 52`, `# 1`). A `computation → result` chain needs no name (`# 14:30-14:05 → 25`); name each value only when a comment lists several independent values (`# entry.id="entry-004", timestamp="...", role="assistant"`). Use `old → new` only when the previous state is not readable from the line or the preceding lines (destructive transforms like `# ["a","a","pear"] → ["a","pear"]`, or trajectories across collapsed loop iterations like `# remaining: 100→20→0`). On IF lines, substitute the deciding values into the condition expression (`IF order.amount >= 500: # 520 >= 500`) — not a variable list.
 
 **Loops** — group iterations as an indented comment block, abbreviate >6-8 iterations (first/last + collapsed middle).

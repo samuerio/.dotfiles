@@ -124,7 +124,9 @@ Shows the method applied to a denser multi-level function — `CONTINUE`/`BREAK`
 
 ```
 INPUT: query="timeout", maxResults=undefined, since=undefined, until=undefined,
-       includeCurrentSession=undefined, currentSessionFile="~/.pi/.../live.jsonl"
+       includeCurrentSession=undefined
+CONTEXT: currentSessionFile="~/.pi/.../live.jsonl" (the running session),
+         MAX_SESSION_FILE_BYTES=5242880 (module constant)
 
 FUNCTION searchSessions(options):
     re ← compileQuery("timeout")             # /timeout/i
