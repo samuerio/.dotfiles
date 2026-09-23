@@ -1,20 +1,12 @@
 ---
 name: pseudocode-trace
 description: >
-  Simulate a debugger breakpoint walkthrough for a function/method given a
-  concrete input — render the actual-executed logic as pseudocode with
-  inline variable-value trace comments, like stepping through with a
-  debugger. Use this whenever the user wants to "understand"/"explain"/
-  "walk through"/"trace"/"debug" how a piece of code behaves for a specific
-  input, wants to see "what happens at each step", asks for a
-  "breakpoint"-style or "snapshot"-style view of variable state, or wants
-  to visualize control flow (branches taken, loop iterations, recursion
-  depth) for given arguments. Trigger even if the user doesn't use the word
-  "trace" explicitly — e.g. "if I call this with x=5, what happens?",
-  "walk me through this function", "show me the state at each step". Do
-  not use for full static code review, performance profiling, or when the
-  user wants exhaustive coverage of every branch (untaken branches) rather
-  than the actual path for their given input.
+  Simulate a debugger walkthrough for a function/method given a concrete
+  input — render the actually-executed path as pseudocode with inline
+  variable-value trace comments. Use when the user wants to understand,
+  walk through, trace, or debug how a piece of code behaves for specific
+  arguments (e.g. "if I call this with x=5, what happens?", "show me the
+  state at each step"), even if the word "trace" is absent.
 ---
 
 # Pseudocode Trace
@@ -31,27 +23,27 @@ If no concrete input is given, ask for one (or propose a reasonable representati
 
 1. **Only the executed path.** Render pseudocode for the branch(es) actually taken by the given input. Untaken `ELSE`/branches are omitted entirely, not shown-and-marked-as-skipped.
 
-2. **Values only — never verdicts.** Every inline comment shows a raw value, a computed result, or a state mutation as `oldValue → newValue`. Never write "条件成立"/"condition met"/"valid"/"true" — the reader infers the outcome from the value itself.
+2. **Values only — never verdicts.** Every inline comment shows a raw value or a computed result. Never write "condition holds"/"condition met"/"valid"/"true" — the reader infers the outcome from the value itself.
 
 3. **Reason first, execute to verify.** Manual reasoning is the default path for producing the trace. For complex cases (deep loops, boundary conditions, stacked branches) where a computed value is uncertain, optionally run the instrumented code to verify the actual values before annotating.
 
 ### Format
 
 ```
-输入: <param1>=<value1>, <param2>=<value2>, ...
+INPUT: user.level=VIP, order.amount=520
 
-FUNCTION name(params):
-    line of pseudocode                      # var=value
-    IF condition:                            # var(s) used = their values
-        line of pseudocode                   # resultVar=value
-    RETURN expr                              # expr evaluated → returned value
+FUNCTION calculateDiscount(user, order):
+    baseDiscount ← order.amount * 0.1        # 52
+    IF order.amount >= 500:                  # 520 >= 500
+        baseDiscount ← baseDiscount + 20     # 72
+    RETURN order.amount - finalDiscount      # 520-122 → 398
 ```
+
+**Annotation discipline** — annotate only lines whose value is not directly readable from the line itself (skip trivial `lo = 0 # lo=0`). Comments carry bare values (`# 52`, `# 1`). A `computation → result` chain needs no name (`# 14:30-14:05 → 25`); name each value only when a comment lists several independent values (`# entry.id="entry-004", timestamp="...", role="assistant"`). Use `old → new` only when the previous state is not readable from the line or the preceding lines (destructive transforms like `# ["a","a","pear"] → ["a","pear"]`, or trajectories across collapsed loop iterations like `# remaining: 100→20→0`). On IF lines, substitute the deciding values into the condition expression (`IF order.amount >= 500: # 520 >= 500`) — not a variable list.
 
 **Loops** — group iterations as an indented comment block, abbreviate >6-8 iterations (first/last + collapsed middle).
 
 **Recursion** — tag each call with `depth=N`.
-
-**State mutation** — show `oldValue → newValue` only for real field/object mutations.
 
 **Guard clauses** — still get a line with the deciding value(s), no "not met" text.
 
