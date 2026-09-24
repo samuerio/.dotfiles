@@ -6,10 +6,15 @@
  * - skills
  * - project context files (AGENTS.md / CLAUDE.md)
  * - current context window usage + session totals (tokens/cost)
+ * - compaction stats (count, estimated freed tokens, summarization cost)
  */
 
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, ToolResultEvent } from "@earendil-works/pi-coding-agent";
-import { DynamicBorder } from "@earendil-works/pi-coding-agent";
+import {
+	DynamicBorder,
+	estimateTokens as estimateMessageTokens,
+	sessionEntryToContextMessages,
+} from "@earendil-works/pi-coding-agent";
 import { Container, Key, Text, matchesKey, type Component, type TUI } from "@earendil-works/pi-tui";
 import os from "node:os";
 import path from "node:path";
@@ -143,7 +148,7 @@ type SkillLoadedEntryData = {
 
 function getLoadedSkillsFromSession(ctx: ExtensionContext): Set<string> {
 	const out = new Set<string>();
-	for (const e of ctx.sessionManager.getEntries()) {
+	for (const e of ctx.sessionManager.getBranch()) {
 		if ((e as any)?.type !== "custom") continue;
 		if ((e as any)?.customType !== SKILL_LOADED_ENTRY) continue;
 		const data = (e as any)?.data as SkillLoadedEntryData | undefined;
@@ -183,7 +188,7 @@ function sumSessionUsage(ctx: ExtensionCommandContext): {
 	let cacheWrite = 0;
 	let totalCost = 0;
 
-	for (const entry of ctx.sessionManager.getEntries()) {
+	for (const entry of ctx.sessionManager.getBranch()) {
 		if ((entry as any)?.type !== "message") continue;
 		const msg = (entry as any)?.message;
 		if (!msg || msg.role !== "assistant") continue;
@@ -204,6 +209,64 @@ function sumSessionUsage(ctx: ExtensionCommandContext): {
 		totalTokens: input + output + cacheRead + cacheWrite,
 		totalCost,
 	};
+}
+
+type CompactionStats = {
+	count: number;
+	savedTokens: number;
+	summaryCost: number;
+};
+
+function formatTokensCompact(n: number): string {
+	if (n >= 100_000) return `${Math.round(n / 1000)}K`;
+	if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
+	return `${Math.max(0, Math.round(n))}`;
+}
+
+/**
+ * Compaction stats over the active branch (getBranch(), chronological order).
+ *
+ * saved = tokensBefore - (summary + keptTail + staticOverhead): tokensBefore
+ * comes from real usage, which includes the static overhead (system prompt +
+ * tool definitions), so the after side must add it back. keptTail uses pi's
+ * own estimator over context messages, which handles nested compaction and
+ * branch_summary entries natively (estimated by their summary text). Entries
+ * with a missing or off-branch firstKeptEntryId still count (and add their
+ * cost) but skip the saved estimate instead of inflating it.
+ */
+function computeCompactionStats(branchEntries: any[], staticOverhead: number): CompactionStats | null {
+	const idxById = new Map<string, number>();
+	for (let i = 0; i < branchEntries.length; i++) {
+		const id = branchEntries[i]?.id;
+		if (typeof id === "string") idxById.set(id, i);
+	}
+
+	let count = 0;
+	let savedTokens = 0;
+	let summaryCost = 0;
+
+	for (let i = 0; i < branchEntries.length; i++) {
+		const entry = branchEntries[i];
+		if (entry?.type !== "compaction") continue;
+		count++;
+		summaryCost += extractCostTotal(entry.usage);
+
+		const keptIdx = typeof entry.firstKeptEntryId === "string" ? (idxById.get(entry.firstKeptEntryId) ?? -1) : -1;
+		if (keptIdx < 0 || keptIdx >= i) continue;
+
+		let keptTail = 0;
+		for (let j = keptIdx; j < i; j++) {
+			for (const msg of sessionEntryToContextMessages(branchEntries[j])) {
+				keptTail += estimateMessageTokens(msg);
+			}
+		}
+		const summaryTokens = Math.ceil((entry.summary?.length ?? 0) / 4);
+		const after = summaryTokens + keptTail + staticOverhead;
+		const before = Number(entry.tokensBefore ?? 0) || 0;
+		savedTokens += Math.max(0, before - after);
+	}
+
+	return count > 0 ? { count, savedTokens, summaryCost } : null;
 }
 
 function shortenPath(p: string, cwd: string): string {
@@ -270,6 +333,7 @@ type ContextViewData = {
 	skills: string[];
 	loadedSkills: string[];
 	session: { totalTokens: number; totalCost: number };
+	compactions: CompactionStats | null;
 };
 
 class ContextView implements Component {
@@ -393,6 +457,17 @@ class ContextView implements Component {
 				muted(" · ") +
 				text(formatUsd(this.data.session.totalCost)),
 		);
+		if (this.data.compactions) {
+			const c = this.data.compactions;
+			lines.push(
+				muted("Compactions: ") +
+					text(`${c.count}`) +
+					muted(" · freed ") +
+					text(`~${formatTokensCompact(c.savedTokens)}`) +
+					muted(" tok · summary cost ") +
+					text(formatUsd(c.summaryCost)),
+			);
+		}
 
 		this.body.setText(lines.join("\n"));
 		this.cachedWidth = width;
@@ -522,6 +597,7 @@ export default function contextExtension(pi: ExtensionAPI) {
 			const remainingTokens = ctxWindow > 0 ? Math.max(0, ctxWindow - effectiveTokens) : 0;
 
 			const sessionUsage = sumSessionUsage(ctx);
+			const compactionStats = computeCompactionStats(ctx.sessionManager.getBranch(), systemPromptTokens + toolsTokens);
 
 			const makePlainText = () => {
 				const lines: string[] = [];
@@ -539,6 +615,11 @@ export default function contextExtension(pi: ExtensionAPI) {
 				lines.push(`Extensions (${extensionFiles.length}): ${extensionFiles.length ? joinComma(extensionFiles) : "(none)"}`);
 				lines.push(`Skills (${skills.length}): ${skills.length ? joinComma(skills) : "(none)"}`);
 				lines.push(`Session: ${sessionUsage.totalTokens.toLocaleString()} tokens · ${formatUsd(sessionUsage.totalCost)}`);
+				if (compactionStats) {
+					lines.push(
+						`Compactions: ${compactionStats.count} · freed ~${formatTokensCompact(compactionStats.savedTokens)} tok · summary cost ${formatUsd(compactionStats.summaryCost)}`,
+					);
+				}
 				return lines.join("\n");
 			};
 
@@ -568,6 +649,7 @@ export default function contextExtension(pi: ExtensionAPI) {
 				skills,
 				loadedSkills,
 				session: { totalTokens: sessionUsage.totalTokens, totalCost: sessionUsage.totalCost },
+				compactions: compactionStats,
 			};
 
 			await ctx.ui.custom<void>((tui, theme, _kb, done) => {
