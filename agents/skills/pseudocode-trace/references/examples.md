@@ -1,10 +1,6 @@
 # Pseudocode Trace — Worked Examples
 
-These examples strictly follow the format and core principles in SKILL.md — use them to calibrate how much detail to show, when to write `old → new`, and what must never be written. A note exists only to explain what a reader applying the SKILL rules to the visible lines could not reconstruct — a non-default fold, a subtle form choice; anything the lines already display, or any rule default, gets no note.
-
----
-
-## Example 1: Linear branching (independent IFs stacking state)
+## Example 1: Linear branching
 
 ```
 INPUT: user.level=VIP, order.amount=520, isFirstOrder=false, coupon="SAVE50"
@@ -53,7 +49,7 @@ FUNCTION deductStock(qty, warehouses):
 
 ---
 
-## Example 3: Guard-clause chain (all guards untaken)
+## Example 3: Guard-clause chain
 
 ```
 INPUT: creditScore=680, monthlyIncome=15000, debtRatio=0.3, requestAmount=200000
@@ -71,7 +67,7 @@ FUNCTION loanApproval(applicant):
 
 ---
 
-## Example 4: Field state mutation
+## Example 4: Caller-object mutation (side effect)
 
 ```
 INPUT: now=14:30, lastActive=14:05, timeoutThreshold=20min, rememberMe=false
@@ -91,9 +87,7 @@ FUNCTION checkSession(session, now):
 
 ---
 
-## Example 5: Real async codebase function (branching, CONTINUE/BREAK, nested loops)
-
-Shows the method applied to a denser multi-level function — `CONTINUE`/`BREAK` control flow and nested loops (session loop → entry loop → message loop), with non-matching middle iterations omitted.
+## Example 5: Real async codebase function
 
 ```
 INPUT: query="timeout", maxResults=undefined, since=undefined, until=undefined,
@@ -140,7 +134,6 @@ FUNCTION searchSessions(options):
         contextEntries ← buildContextEntries(entries)
                                               # contextEntries.length=9
 
-        # entries[0..2] did not match re — omitted from the trace
         FOR entry IN contextEntries:
             FOR msg IN sessionEntryToContextMessages(entry):
                                               # entry.id="entry-004", entry.timestamp="2026-09-10T08:12:00Z", msg.role="assistant"
@@ -154,7 +147,7 @@ FUNCTION searchSessions(options):
                     role: "assistant", snippet: buildSnippet(haystack, 18)
                 }]                           # hits.length=1
 
-    hits.sort(...)                           # hits.length=1, order unchanged
+    hits.sort(...)                           # hits.length=1
 
     RETURN { hits, truncated, skippedFiles, scanned }
                                               # hits.length=1, truncated=false,
@@ -162,13 +155,11 @@ FUNCTION searchSessions(options):
 ```
 
 Omission choices:
-- `entries[0..2]` (no match) collapse into a single line instead of per-entry `match=null → CONTINUE` — iterations with no substantive effect on the state trajectory get folded.
+- `entries[0..2]` (no match) are omitted from the trace instead of per-entry `match=null → CONTINUE`.
 
 ---
 
-## Example 6: Multi-function call chain (event-driven state accumulation)
-
-The executed path spans three functions across two files: `task.ts execute` builds a spec from an ambient config file and delegates to the shared `Subagent.execute` body in `lib/subagent.ts`, which calls `run` — the spawn plus event-stream state machine — then assembles the final model-facing result. Demonstrates the call-chain conventions — `## <file> <function>` block headings, `# → <function>` jump annotations, ambient config in CONTEXT — plus the `old → new` scope rule: old values listed in the state-init block never take the arrow, while `contextTokens` (assigned, not accumulated) keeps it.
+## Example 6: Multi-function call chain
 
 ```
 INPUT: params={prompt: "find buildEnvelope in lib/subagent.ts", description: "explain buildEnvelope"},
@@ -205,15 +196,22 @@ FUNCTION run(cwd, prompt, signal, onUpdate, makeDetails):
     runId ← "1790207328770-k3x9qf"
     sessionDir ← path.join(getAgentDir(), "sessions", "task", runId)
                                              # "/home/zhe/.pi/agent/sessions/task/1790207328770-k3x9qf"
+    mkdir(sessionDir, { recursive: true })
     args ← ["--mode","json","-p","--session-dir",sessionDir,"--model",
             "opencode-go/deepseek-v4.1-flash","--thinking","medium",
             "--tools","write,edit,read,bash,finder","--no-skills"]    # 12 items
-    proc ← spawn("/usr/bin/node", [cli.js, ...args], { cwd, stdio:["ignore","pipe","pipe"] })
-
     currentResult ← { agent:"task", prompt, exitCode:0, messages:[], stderr:"",
                       usage:{ input:0, output:0, cacheRead:0, cacheWrite:0, cost:0,
                               contextTokens:0, turns:0 },
                       model:"opencode-go/deepseek-v4.1-flash", thinking:"medium" }
+    IF spec.systemPrompt.trim():             # "You are pi, a powerful AI coding agent. ..."
+        tmpPromptDir ← mkdtemp("/tmp/pi-subagent-")    # "/tmp/pi-subagent-Xr7Qa2"
+        tmpPromptPath ← tmpPromptDir + "/prompt-task.md"
+        writeFile(tmpPromptPath, INLINE_BASE_SYSTEM_PROMPT, { mode: 0o600 })
+        args.push("--system-prompt", tmpPromptPath)    # 14 items
+    args.push(prompt)                                  # 15 items
+    wasAborted ← false
+    proc ← spawn("/usr/bin/node", [cli.js, ...args], { cwd, stdio:["ignore","pipe","pipe"] })
 
     # event 1: {"type":"session","id":"sess-a7f3d2e1"}
     currentResult.sessionId ← "sess-a7f3d2e1"          # undefined → "sess-a7f3d2e1"
@@ -241,12 +239,13 @@ FUNCTION run(cwd, prompt, signal, onUpdate, makeDetails):
 
     # proc "close" with code 0
     currentResult.exitCode ← 0
+    unlinkSync(tmpPromptPath)                # → removed
+    rmdirSync(tmpPromptDir)                  # → removed
     RETURN currentResult
 ```
 
 Omission choices:
 - `sessionId` and event-2 `stopReason` keep `old → new` because undefined is expressed only by absence — readable nowhere.
-- `contextTokens` keeps the arrow in event 4 even though 36119 is readable above: its siblings accumulate (`4823+35800`), it is assigned, and the arrow is the value-form way to say "replaced, not added".
-- `loadInlineConfig()` is folded into its caller — every guard inside it passes on this input. A walkthrough that needs its compound guards gives it a block of its own.
-- The `emitUpdate()` calls after each event are omitted — they mirror state already shown and add none.
-- The temp-file system-prompt dance, stderr accumulation, and stdout line-buffering plumbing are folded away — they add no state the reader needs. `getPiInvocation` is folded into the spawn line (`/usr/bin/node` = process.execPath, `cli.js` = the running pi bundle), and `resolveSessionFile` into the envelope's session path (sessionDir + the run dir's first .jsonl).
+- `loadInlineConfig()` is folded into its caller — every guard inside it passes on this input.
+- The `emitUpdate()` calls after each event are folded: they re-emit the already-traced snapshot to `onUpdate`, so they carry no new state.
+- `getPiInvocation` is folded into the spawn line (`/usr/bin/node` = process.execPath, `cli.js` = the running pi bundle), `resolveSessionFile` into the envelope's session path (sessionDir + the run dir's first .jsonl), and `writePromptToTempFile` into its two effects (`mkdtemp` + `writeFile`). The child's stderr buffer and the stdout line-buffering locals stay folded.

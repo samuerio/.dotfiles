@@ -39,6 +39,12 @@ FUNCTION calculateDiscount(user, order):
     RETURN order.amount - finalDiscount      # 520-122 → 398
 ```
 
+**State scope** — state is everything the executed path changes: local bindings, caller or shared object fields (Example 4), and observable external state (files, directories, processes, emissions). A side effect is a state change and earns a line like any assignment.
+
+**Side effects** — render each by what changed: a caller or shared object field as `target.field ← value` with the old value per the readability rule; artifact creation with the artifact's value (`tmpDir ← mkdtemp("/tmp/pi-subagent-")  # "/tmp/pi-subagent-Xr7Qa2"`), its teardown as a paired line (`rmdirSync(tmpDir)  # → removed`); state that outlives the call (spawned process, written file, created directory) always appears. A re-emission of already-traced state (`emitUpdate(snapshot)`) folds with a note; diagnostic output (console/stderr writes) folds by default with disclosure.
+
+**Folds and omissions** — folding may drop only lines the rest of the trace does not depend on: pure reads, pure helpers, bookkeeping placeholders, re-emissions of already-traced state. Every fold is disclosed in Omission notes, and a folded side effect is disclosed as an omitted state change, never as "no state". A note carries only what the lines cannot: it never restates a rule or a value the trace already shows.
+
 **Context state** — ambient values that decide the path but are not arguments (module-level variables, config files, env vars) go in a `CONTEXT:` block after INPUT, each entry with its source (`CONTEXT: ~/.pi/agent/subagent.json={…}, MAX_RETRIES=3`). Include only entries read on the executed path; values stated there count as readable-from-preceding-lines for the `old → new` rule. Fields of argument objects stay in INPUT.
 
 **Annotation discipline** — annotate only lines whose value is not directly readable from the line itself (skip trivial `lo = 0 # lo=0`). Every comment is exactly one of five forms; anything not reducible to one of them gets deleted, not reworded:
@@ -46,7 +52,7 @@ FUNCTION calculateDiscount(user, order):
 1. A bare value (`# 52`, `# 3 items`).
 2. A `computation → result` chain (`# 14:30-14:05 → 25`); no name unless one comment lists several independent values (`# entry.id="entry-004", timestamp="...", role="assistant"`).
 3. A substituted condition (`IF order.amount >= 500: # 520 >= 500`) — the deciding values go into the condition expression, not a variable list.
-4. An `old → new` mutation (scope rule below).
+4. An `old → new` mutation (scope rule below), including artifact teardown (`# → removed`).
 5. A control-flow pointer (`# → <function>`, `# 0 iterations`).
 
 Mechanism and consequence prose ("so the child gets no skills", "overwrite, not accumulate") is never a comment form — recast it as values: a plain-assigned field beside accumulating siblings shows as `# 36119 → 100312` against their `# 4823+35800 → 40623` chains, and the reader sees "replaced, not added" without being told.
@@ -69,7 +75,7 @@ Mechanism and consequence prose ("so the child gets no skills", "overwrite, not 
 
 ### Self-check before writing
 
-Every inline comment must be one of the five allowed forms, carry a concrete value, and contain zero interpretive words (verdicts, consequences, mechanism prose) and zero invented notation. Rewrite or delete any comment that fails this.
+Every inline comment must be one of the five allowed forms, carry a concrete value or a value-form transition, and contain zero interpretive words (verdicts, consequences, mechanism prose) and zero invented notation. Rewrite or delete any comment that fails this.
 
 ### Output Path
 
