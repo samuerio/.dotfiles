@@ -1,6 +1,6 @@
 # Pseudocode Trace — Worked Examples
 
-These examples strictly follow the format and core principles in SKILL.md — use them to calibrate how much detail to show, when to write `old → new`, and what must never be written.
+These examples strictly follow the format and core principles in SKILL.md — use them to calibrate how much detail to show, when to write `old → new`, and what must never be written. A note exists only to explain what a reader applying the SKILL rules to the visible lines could not reconstruct — a non-default fold, a subtle form choice; anything the lines already display, or any rule default, gets no note.
 
 ---
 
@@ -27,8 +27,6 @@ FUNCTION calculateDiscount(user, order):
     RETURN order.amount - finalDiscount      # 520-122 → 398
 ```
 
-Note: the first-order-bonus branch is absent entirely — `isFirstOrder=false` puts that logic (if it exists in the real function) off this input's execution path. `baseDiscount ← 0` gets no comment: the value is the line itself.
-
 ---
 
 ## Example 2: Loop with early exit
@@ -40,9 +38,6 @@ FUNCTION deductStock(qty, warehouses):
     remaining ← qty                          # 100
 
     FOR wh IN warehouses:
-        IF remaining <= 0: BREAK
-            # iter 1: 100 <= 0
-            # iter 2: 20 <= 0
         deduct ← MIN(wh.stock, remaining)
             # iter 1: MIN(80, 100) → 80
             # iter 2: MIN(50, 20) → 20
@@ -53,34 +48,19 @@ FUNCTION deductStock(qty, warehouses):
             # iter 1: 100 - 80 → 20
             # iter 2: 20 - 20 → 0
 
-    IF remaining > 0:                        # 0 > 0
-        RETURN "insufficient stock"
-
     RETURN "success"
 ```
 
-Note: `wh.stock` and `remaining` persist across iterations, but every previous value is readable — from the INPUT line or from the substituted left operand inside the comment — so bare `computation → result` chains suffice. `deduct` is a fresh per-iteration value, so it gets the computed result only. `old → new` is reserved for mutations whose previous state is not readable anywhere; see Example 4.
-
 ---
 
-## Example 3: Guard-clause chain
+## Example 3: Guard-clause chain (all guards untaken)
 
 ```
 INPUT: creditScore=680, monthlyIncome=15000, debtRatio=0.3, requestAmount=200000
 
 FUNCTION loanApproval(applicant):
-    IF applicant.creditScore < 600:          # 680 < 600
-        RETURN "rejected - low credit"
-
-    IF applicant.debtRatio > 0.5:            # 0.3 > 0.5
-        RETURN "rejected - high debt"
-
     maxLoanAmount ← applicant.income * 12 * 5
                                              # 15000 * 12 * 5 → 900000
-
-    IF applicant.requestAmount > maxLoanAmount:
-                                             # 200000 > 900000
-        RETURN "manual review"
 
     approvedRate ← 4.5 - (applicant.creditScore - 600) / 100
                                              # 4.5 - (680-600)/100 → 3.7
@@ -88,8 +68,6 @@ FUNCTION loanApproval(applicant):
     RETURN {status: "approved", rate: approvedRate}
                                              # {status: "approved", rate: 3.7}
 ```
-
-Note: every non-triggering guard keeps its line with the substituted condition — `680 < 600` lets the reader run the comparison themselves instead of being told "condition not met".
 
 ---
 
@@ -103,9 +81,6 @@ INPUT: now=14:30, lastActive=14:05, timeoutThreshold=20min, rememberMe=false
 FUNCTION checkSession(session, now):
     idleMinutes ← now - session.lastActive   # 14:30 - 14:05 → 25
 
-    IF session.rememberMe:                   # false
-        RETURN "valid"
-
     IF idleMinutes > session.timeoutThreshold:
                                              # 25 > 20
         session.status ← "expired"           # "active" → "expired"
@@ -113,8 +88,6 @@ FUNCTION checkSession(session, now):
 
     RETURN "valid"
 ```
-
-Note: this is the case `old → new` is reserved for — the previous status "active" is readable neither from the line (which shows only the new value) nor from the preceding lines or input. Everywhere else, bare values or `computation → result` chains suffice.
 
 ---
 
@@ -160,10 +133,6 @@ FUNCTION searchSessions(options):
 
         # --- session[2]: old-session.jsonl ---
         stat ← fs.statSync(session.path)     # stat.size=45000
-        IF stat.size > MAX_SESSION_FILE_BYTES:
-                                             # 45000 > 5242880
-            skippedFiles ← skippedFiles + [entry]
-            CONTINUE
 
         { header, entries } ← loadSessionEntries(session.path)
                                               # header.id="sess-old-01", entries.length=12
@@ -193,6 +162,91 @@ FUNCTION searchSessions(options):
 ```
 
 Omission choices:
-- The `IF hits.length >= max` early-exit check (evaluated before each session) is omitted — `hits.length=0` never approached `max=50`, so repeating that check per session is pure noise.
 - `entries[0..2]` (no match) collapse into a single line instead of per-entry `match=null → CONTINUE` — iterations with no substantive effect on the state trajectory get folded.
-- `session[2]` keeps its size-guard line with the substituted condition `# 45000 > 5242880` — same guard convention as Examples 3 and 4: the line and its body stay, the deciding values show it was not taken.
+
+---
+
+## Example 6: Multi-function call chain (event-driven state accumulation)
+
+The executed path spans three functions across two files: `task.ts execute` builds a spec from an ambient config file and delegates to the shared `Subagent.execute` body in `lib/subagent.ts`, which calls `run` — the spawn plus event-stream state machine — then assembles the final model-facing result. Demonstrates the call-chain conventions — `## <file> <function>` block headings, `# → <function>` jump annotations, ambient config in CONTEXT — plus the `old → new` scope rule: old values listed in the state-init block never take the arrow, while `contextTokens` (assigned, not accumulated) keeps it.
+
+```
+INPUT: params={prompt: "find buildEnvelope in lib/subagent.ts", description: "explain buildEnvelope"},
+       ctx={cwd: "/home/zhe/workspace/.dotfiles"}, signal=undefined,
+       onUpdate=<harness streaming callback>
+CONTEXT: ~/.pi/agent/subagent.json = { model: "opencode-go/deepseek-v4.1-flash", thinking: "medium",
+                                       tools: ["write","edit","read","bash","finder"], skills: [] }
+
+## task.ts execute
+
+FUNCTION execute(_toolCallId, params, signal, onUpdate, ctx):
+    { config, error } ← loadInlineConfig()             # error=undefined
+    inlineSpec ← { name:"task", systemPrompt:INLINE_BASE_SYSTEM_PROMPT,
+                   model:"opencode-go/deepseek-v4.1-flash", thinking:"medium",
+                   tools:["write","edit","read","bash","finder"], skills:[] }
+    instance ← new Subagent(inlineSpec)
+    RETURN instance.execute(...)                       # → execute (lib/subagent.ts)
+
+## lib/subagent.ts execute
+
+FUNCTION execute(_toolCallId, params, signal, onUpdate, ctx):
+    makeDetails ← results => ({ results })
+    result ← this.run(ctx.cwd, params.prompt, signal, onUpdate, makeDetails)   # → run
+    RETURN { content: [{ type: "text", text: this.buildTaskBlock(result) }],
+             details: makeDetails([result]) }
+                                             # buildTaskBlock → "[agent=task status=done
+                                             #   model=opencode-go/deepseek-v4.1-flash thinking=medium
+                                             #   turns=2 cost=0.0062 exit=end
+                                             #   session=.../sess-a7f3d2e1.jsonl]\nbuildEnvelope ..."
+
+## lib/subagent.ts run
+
+FUNCTION run(cwd, prompt, signal, onUpdate, makeDetails):
+    runId ← "1790207328770-k3x9qf"
+    sessionDir ← path.join(getAgentDir(), "sessions", "task", runId)
+                                             # "/home/zhe/.pi/agent/sessions/task/1790207328770-k3x9qf"
+    args ← ["--mode","json","-p","--session-dir",sessionDir,"--model",
+            "opencode-go/deepseek-v4.1-flash","--thinking","medium",
+            "--tools","write,edit,read,bash,finder","--no-skills"]    # 12 items
+    proc ← spawn("/usr/bin/node", [cli.js, ...args], { cwd, stdio:["ignore","pipe","pipe"] })
+
+    currentResult ← { agent:"task", prompt, exitCode:0, messages:[], stderr:"",
+                      usage:{ input:0, output:0, cacheRead:0, cacheWrite:0, cost:0,
+                              contextTokens:0, turns:0 },
+                      model:"opencode-go/deepseek-v4.1-flash", thinking:"medium" }
+
+    # event 1: {"type":"session","id":"sess-a7f3d2e1"}
+    currentResult.sessionId ← "sess-a7f3d2e1"          # undefined → "sess-a7f3d2e1"
+
+    # event 2: message_end — msg1={role:"assistant", content:[toolCall read], stopReason:"toolUse",
+    #          usage:{input:4823, output:96, cacheRead:31200, cacheWrite:0, cost:0.0031,
+    #          totalTokens:36119}}
+    currentResult.messages ← [msg1]
+    currentResult.stopReason ← "toolUse"               # undefined → "toolUse"
+    currentResult.usage ← { turns:1, input:4823, output:96, cacheRead:31200,
+                            cacheWrite:0, cost:0.0031, contextTokens:36119 }
+
+    # event 3: tool_result_end — toolResult={role:"user", content:[toolResult read]}
+    currentResult.messages ← [msg1, toolResult]
+
+    # event 4: message_end — msg3={role:"assistant", content:[text "buildEnvelope ..."],
+    #          stopReason:"end", usage:{input:35800, output:512, cacheRead:64000,
+    #          cacheWrite:0, cost:0.0031, totalTokens:100312}}
+    currentResult.messages ← [msg1, toolResult, msg3]
+    currentResult.stopReason ← "end"
+    currentResult.usage ← { turns:2, input:40623, output:608, cacheRead:95200,
+                            cacheWrite:0, cost:0.0062, contextTokens:100312 }
+                                                        # 4823+35800, 96+512, 31200+64000,
+                                                        # 0.0031+0.0031; contextTokens 36119 → 100312
+
+    # proc "close" with code 0
+    currentResult.exitCode ← 0
+    RETURN currentResult
+```
+
+Omission choices:
+- `sessionId` and event-2 `stopReason` keep `old → new` because undefined is expressed only by absence — readable nowhere.
+- `contextTokens` keeps the arrow in event 4 even though 36119 is readable above: its siblings accumulate (`4823+35800`), it is assigned, and the arrow is the value-form way to say "replaced, not added".
+- `loadInlineConfig()` is folded into its caller — every guard inside it passes on this input. A walkthrough that needs its compound guards gives it a block of its own.
+- The `emitUpdate()` calls after each event are omitted — they mirror state already shown and add none.
+- The temp-file system-prompt dance, stderr accumulation, and stdout line-buffering plumbing are folded away — they add no state the reader needs. `getPiInvocation` is folded into the spawn line (`/usr/bin/node` = process.execPath, `cli.js` = the running pi bundle), and `resolveSessionFile` into the envelope's session path (sessionDir + the run dir's first .jsonl).
