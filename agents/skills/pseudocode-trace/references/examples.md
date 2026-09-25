@@ -2,7 +2,10 @@
 
 All examples follow the core output model: executed pseudocode, plus sparse
 synthetic TRACE probes. A TRACE comment is always only the current value of its
-expression — never a calculation, transition, or explanation.
+expression, and it exists only when omitting that value would make a later
+executed step materially harder to follow. Default budget: 0-5 probes per
+function block; prefer one later, more informative TRACE over several
+intermediate ones.
 
 ## Example 1: Linear branching
 
@@ -15,26 +18,27 @@ FUNCTION calculateDiscount(user, order):
 
     IF user.level == "VIP":
         baseDiscount ← order.amount * 0.1
-        TRACE baseDiscount    # 52
 
     IF order.amount >= 500:
         baseDiscount ← baseDiscount + 20
-        TRACE baseDiscount    # 72
 
     IF user.hasCoupon(coupon):
         baseDiscount ← baseDiscount + 50
         TRACE baseDiscount    # 122
 
     finalDiscount ← MIN(baseDiscount, order.amount * 0.5)
-    TRACE finalDiscount    # 122
 
     result ← order.amount - finalDiscount
     TRACE result    # 398
     RETURN result
 ```
 
-No condition carries a comment or TRACE: `order.amount >= 500` is decided by
-INPUT, `user.hasCoupon` by the `user.coupons` entry in INPUT.
+Two probes only: the accumulated discount after the last mutation, and the
+final result. The intermediate `# 52` / `# 72` values and the duplicate
+`finalDiscount` (= 122) are omitted; a later, more informative TRACE captures
+the meaningful result. No condition carries a comment or TRACE: branch
+membership is decided by values already in INPUT (`order.amount`,
+`user.coupons`).
 
 ---
 
@@ -48,7 +52,7 @@ FUNCTION deductStock(qty, warehouses):
 
     FOR wh IN warehouses:
 
-        # --- iteration 1: WH1 ---
+        # --- iteration 1: WH1 (first representative iteration) ---
         deduct ← MIN(wh.stock, remaining)
         TRACE deduct    # 80
 
@@ -58,7 +62,7 @@ FUNCTION deductStock(qty, warehouses):
         remaining ← remaining - deduct
         TRACE remaining    # 20
 
-        # --- iteration 2: WH2 ---
+        # --- iteration 2: WH2 (final iteration) ---
         deduct ← MIN(wh.stock, remaining)
         TRACE deduct    # 20
 
@@ -71,9 +75,12 @@ FUNCTION deductStock(qty, warehouses):
     RETURN "success"
 ```
 
-`remaining ← qty` needs no TRACE (qty is in INPUT). The three loop values are
-TRACE'd because each depends on dynamic state. A trivial flag inside the loop
-body (`done ← true`) would not be TRACE'd.
+`remaining ← qty` needs no TRACE (qty is in INPUT). Each traced value is
+dynamic state that changes the outcome: the deduction amounts, the stock that
+was actually consumed, and what remains to deduct. A trivial flag inside the
+loop body (`done ← true`) would not be TRACE'd. With many mechanically similar
+iterations, the middle would compress; the two shown here already are the
+first representative and the final iteration.
 
 ---
 
@@ -92,8 +99,10 @@ FUNCTION loanApproval(applicant):
     RETURN { status: "approved", rate: approvedRate }
 ```
 
-The RETURN object carries no annotation: both fields are directly readable
-(literal, and `approvedRate` was just TRACE'd).
+Both computations produce values not otherwise visible anywhere in the trace,
+and `approvedRate` is referenced by name in the RETURN object, so its value
+needs one probe. The RETURN object carries no annotation. A literal return
+(`RETURN "success"`) would carry no TRACE at all.
 
 ---
 
@@ -114,8 +123,10 @@ FUNCTION checkSession(session, now):
     RETURN "valid"
 ```
 
-`session.status ← "expired"` is a literal assignment — no TRACE. The mutation
-itself stays as an executed line: it is the side effect on the caller's object.
+`TRACE idleMinutes` is the one decision-relevant probe: its value decides the
+branch. `session.status ← "expired"` is a literal assignment and carries no
+TRACE; the mutation itself stays as an executed line because it is the side
+effect on the caller's object.
 
 ---
 
@@ -130,11 +141,7 @@ CONTEXT: currentSessionFile="~/.pi/.../live.jsonl" (the running session),
 FUNCTION searchSessions(options):
     re ← compileQuery("timeout")
     max ← validateMaxResults(undefined)
-    TRACE max    # 50
-
     sessions ← SessionManager.list(cwd)
-    TRACE sessions.length    # 3
-
     currentAbs ← resolve(currentSessionFile)
 
     hits ← []
@@ -153,45 +160,42 @@ FUNCTION searchSessions(options):
 
         IF stat.size > MAX_SESSION_FILE_BYTES:
             skippedFiles ← skippedFiles + [entry]
-            TRACE skippedFiles    # ["big-session.jsonl (8192 KB)"]
             CONTINUE
 
         # --- session[2]: old-session.jsonl ---
         stat ← fs.statSync(session.path)
-        TRACE stat.size    # 45000
 
         { header, entries } ← loadSessionEntries(session.path)
-        TRACE header.id        # "sess-old-01"
-        TRACE entries.length   # 12
-
         scanned ← scanned + 1
-        TRACE scanned    # 1
 
         contextEntries ← buildContextEntries(entries)
-        TRACE contextEntries.length    # 9
 
         FOR entry IN contextEntries:
             FOR msg IN sessionEntryToContextMessages(entry):
                 haystack ← haystackFor(msg, includeToolCalls)
                 match ← haystack.match(re)
-                TRACE match    # { index: 18, [0]: "timeout" }
+                TRACE match.index    # 18
 
                 hits ← hits + [{
                     sessionPath: "old-session.jsonl", sessionId: "sess-old-01",
                     entryId: "entry-004", timestamp: "2026-09-10T08:12:00Z",
                     role: "assistant", snippet: buildSnippet(haystack, 18)
                 }]
-                TRACE hits.length    # 1
 
     hits.sort(...)
 
     RETURN { hits, truncated, skippedFiles, scanned }
 ```
 
-`IF stat.size > MAX_SESSION_FILE_BYTES` carries no condition comment: the
-deciding values are already visible from the TRACE and CONTEXT. The returned
-object carries no annotation: all its dynamic fields were TRACE'd where they
-were produced.
+The trace answers two questions: why `big-session.jsonl` was skipped, and why
+`old-session.jsonl` produced the hit. `TRACE stat.size    # 8388608` is
+decision-relevant (against `MAX_SESSION_FILE_BYTES=5242880` in CONTEXT it
+explains the skip); `TRACE match.index    # 18` shows where the match was
+found. Everything removed is bookkeeping or progress telemetry (`max`,
+`sessions.length`, `entries.length`, `scanned`, `contextEntries.length`,
+`hits.length`, the old session's `stat.size`): omitting any of them makes no
+later step harder to follow. The constructed hit and the returned object are
+readable directly from the pseudocode.
 
 Omission choices:
 - `entries[0..2]` (no match) are omitted from the trace instead of per-entry `match=null → CONTINUE`.
@@ -212,8 +216,6 @@ CONTEXT: ~/.pi/agent/subagent.json = { model: "opencode-go/deepseek-v4.1-flash",
 
 FUNCTION execute(_toolCallId, params, signal, onUpdate, ctx):
     { config, error } ← loadInlineConfig()
-    TRACE error    # undefined
-
     inlineSpec ← { name:"task", systemPrompt:INLINE_BASE_SYSTEM_PROMPT,
                    model:"opencode-go/deepseek-v4.1-flash", thinking:"medium",
                    tools:["write","edit","read","bash","finder"], skills:[] }
@@ -246,74 +248,59 @@ FUNCTION run(cwd, prompt, signal, onUpdate, makeDetails):
                       model:"opencode-go/deepseek-v4.1-flash", thinking:"medium" }
 
     IF spec.systemPrompt.trim():
-        tmpPromptDir ← mkdtemp("/tmp/pi-subagent-")
-        TRACE tmpPromptDir    # "/tmp/pi-subagent-Xr7Qa2"
-        tmpPromptPath ← tmpPromptDir + "/prompt-task.md"
-        writeFile(tmpPromptPath, INLINE_BASE_SYSTEM_PROMPT, { mode: 0o600 })
-        TRACE exists(tmpPromptPath)    # true
+        tmpPromptPath ← writeTemporaryPrompt(INLINE_BASE_SYSTEM_PROMPT)
         args.push("--system-prompt", tmpPromptPath)
     args.push(prompt)
 
     wasAborted ← false
     proc ← spawn("/usr/bin/node", [cli.js, ...args], { cwd, stdio:["ignore","pipe","pipe"] })
-    TRACE proc.pid    # 48127
 
     # event 1: {"type":"session","id":"sess-a7f3d2e1"}
     currentResult.sessionId ← "sess-a7f3d2e1"
     emitUpdate(currentResult)
 
-    # event 2: message_end — msg1={role:"assistant", content:[toolCall read], stopReason:"toolUse",
-    #          usage:{input:4823, output:96, cacheRead:31200, cacheWrite:0, cost:0.0031,
-    #          totalTokens:36119}}
+    # event 2: message_end (msg1={role:"assistant", content:[toolCall read], stopReason:"toolUse"})
     currentResult.messages ← [msg1]
-    TRACE currentResult.messages.length    # 1
     currentResult.stopReason ← "toolUse"
-    currentResult.usage ← { turns:1, input:4823, output:96, cacheRead:31200,
-                            cacheWrite:0, cost:0.0031, contextTokens:36119 }
     emitUpdate(currentResult)
 
-    # event 3: tool_result_end — toolResult={role:"user", content:[toolResult read]}
+    # event 3: tool_result_end (toolResult={role:"user", content:[toolResult read]})
     currentResult.messages ← [msg1, toolResult]
-    TRACE currentResult.messages.length    # 2
     emitUpdate(currentResult)
 
-    # event 4: message_end — msg3={role:"assistant", content:[text "buildEnvelope ..."],
-    #          stopReason:"end", usage:{input:35800, output:512, cacheRead:64000,
-    #          cacheWrite:0, cost:0.0031, totalTokens:100312}}
+    # event 4: message_end (msg3={role:"assistant", content:[text "buildEnvelope ..."], stopReason:"end"})
     currentResult.messages ← [msg1, toolResult, msg3]
-    TRACE currentResult.messages.length    # 3
     currentResult.stopReason ← "end"
     currentResult.usage ← { turns:2, input:40623, output:608, cacheRead:95200,
                             cacheWrite:0, cost:0.0062, contextTokens:100312 }
-    TRACE currentResult.usage.input          # 40623
-    TRACE currentResult.usage.output         # 608
-    TRACE currentResult.usage.cacheRead      # 95200
-    TRACE currentResult.usage.contextTokens  # 100312
     emitUpdate(currentResult)
 
     # proc "close" with code 0
     currentResult.exitCode ← 0
-    unlinkSync(tmpPromptPath)
-    TRACE exists(tmpPromptPath)    # false
-    rmdirSync(tmpPromptDir)
+    removeTemporaryPrompt(tmpPromptPath)
 
     RETURN currentResult
 ```
 
 Key choices:
-- Every real side effect stays visible: `mkdir`, `writeFile`, `spawn`,
-  `emitUpdate` (×3), `unlinkSync`, `rmdirSync`. `emitUpdate` is never folded —
-  the callback invocation itself is a side effect, even though
-  `currentResult` was already traced.
-- Literal assignments (`sessionId ← "sess-a7f3d2e1"`,
-  `stopReason ← "toolUse"`) carry no TRACE.
-- The event-4 `usage` TRACE exposes only the fields the reader needs to see
-  the aggregation (4823+35800 → 40623 is the reader's job, not the comment's);
-  the full object is not dumped.
-- `TRACE error    # undefined` after `loadInlineConfig()` is a helper return
-  value that decides the path — worth one probe.
+- Meaningful side effects stay visible: `mkdir`, `spawn`, the conceptual
+  temporary-prompt write/removal, and the three `emitUpdate` callback
+  invocations. `emitUpdate` is never folded: the callback invocation itself is
+  a side effect, even though `currentResult` was already traced.
+- Temporary-directory creation (`mkdtemp`), the prompt-file `writeFile`,
+  `unlinkSync`, and `rmdirSync` are compacted into the conceptual operations
+  `writeTemporaryPrompt` / `removeTemporaryPrompt`: their individual ordering
+  and results are irrelevant to understanding the traced call. The effects
+  never disappear semantically; only the resolution is lowered.
+- `TRACE result.exitCode    # 0` is the single decision-relevant probe: the
+  subagent run's outcome flows into the caller's returned task block.
+- The event-4 `usage` literal is directly readable from its own assignment, so
+  it carries no TRACE.
+- No probe proves that failure guards did not fire (`error`, `wasAborted`):
+  the normal path does not need to demonstrate absent failure conditions.
 
 Omission choices:
-- `loadInlineConfig()` internals are folded — every guard inside it passes on this input; only the deciding return value is probed.
-- `getPiInvocation` is folded into the spawn line (`/usr/bin/node` = process.execPath, `cli.js` = the running pi bundle), `resolveSessionFile` into the envelope's session path, and `writePromptToTempFile` into its two effects (`mkdtemp` + `writeFile`). The child's stderr buffer and the stdout line-buffering locals stay folded.
-- The three `emitUpdate(currentResult)` calls are kept as executed lines; only their arguments were already traced, so no additional TRACE is attached.
+- `loadInlineConfig()` internals are folded: every guard inside it passes on this input.
+- The event-2 intermediate `usage` update is folded into the event-4 final aggregation, which is the state the RETURN actually carries.
+- `getPiInvocation` is folded into the spawn line (`/usr/bin/node` = process.execPath, `cli.js` = the running pi bundle), and `resolveSessionFile` into the envelope's session path. The child's stderr buffer and the stdout line-buffering locals stay folded.
+- Temporary-directory creation, prompt-file write, unlink, and directory cleanup are grouped into the conceptual temporary-prompt operations, as listed under Key choices.
