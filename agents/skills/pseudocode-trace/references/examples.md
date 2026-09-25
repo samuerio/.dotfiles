@@ -1,11 +1,6 @@
 # Pseudocode Trace — Worked Examples
 
-All examples follow the core output model: executed pseudocode, plus sparse
-synthetic TRACE probes. A TRACE comment is always only the current value of its
-expression, and it exists only when omitting that value would make a later
-executed step materially harder to follow. Default budget: 0-5 probes per
-function block; prefer one later, more informative TRACE over several
-intermediate ones.
+These examples demonstrate the output conventions defined in `SKILL.md`.
 
 ## Example 1: Linear branching
 
@@ -38,7 +33,9 @@ final result. The intermediate `# 52` / `# 72` values and the duplicate
 `finalDiscount` (= 122) are omitted; a later, more informative TRACE captures
 the meaningful result. No condition carries a comment or TRACE: branch
 membership is decided by values already in INPUT (`order.amount`,
-`user.coupons`).
+`user.coupons`). The same rule covers a returned object that references a
+computed value by name (`RETURN { status: "approved", rate: approvedRate }`):
+probe the variable where it is computed, never the RETURN line.
 
 ---
 
@@ -54,8 +51,6 @@ FUNCTION deductStock(qty, warehouses):
 
         # --- iteration 1: WH1 (first representative iteration) ---
         deduct ← MIN(wh.stock, remaining)
-        TRACE deduct    # 80
-
         wh.stock ← wh.stock - deduct
         TRACE wh.stock    # 0
 
@@ -64,8 +59,6 @@ FUNCTION deductStock(qty, warehouses):
 
         # --- iteration 2: WH2 (final iteration) ---
         deduct ← MIN(wh.stock, remaining)
-        TRACE deduct    # 20
-
         wh.stock ← wh.stock - deduct
         TRACE wh.stock    # 30
 
@@ -75,38 +68,16 @@ FUNCTION deductStock(qty, warehouses):
     RETURN "success"
 ```
 
-`remaining ← qty` needs no TRACE (qty is in INPUT). Each traced value is
-dynamic state that changes the outcome: the deduction amounts, the stock that
-was actually consumed, and what remains to deduct. A trivial flag inside the
-loop body (`done ← true`) would not be TRACE'd. With many mechanically similar
+`remaining ← qty` needs no TRACE (qty is in INPUT). `deduct` is not TRACE'd:
+its effect is captured by the two later, more informative post-state probes
+(`wh.stock` and `remaining`). A trivial flag inside the loop body
+(`done ← true`) would not be TRACE'd. With many mechanically similar
 iterations, the middle would compress; the two shown here already are the
 first representative and the final iteration.
 
 ---
 
-## Example 3: Complex computation and derived return value
-
-```
-INPUT: creditScore=680, monthlyIncome=15000, debtRatio=0.3, requestAmount=200000
-
-FUNCTION loanApproval(applicant):
-    maxLoanAmount ← applicant.income * 12 * 5
-    TRACE maxLoanAmount    # 900000
-
-    approvedRate ← 4.5 - (applicant.creditScore - 600) / 100
-    TRACE approvedRate    # 3.7
-
-    RETURN { status: "approved", rate: approvedRate }
-```
-
-Both computations produce values not otherwise visible anywhere in the trace,
-and `approvedRate` is referenced by name in the RETURN object, so its value
-needs one probe. The RETURN object carries no annotation. A literal return
-(`RETURN "success"`) would carry no TRACE at all.
-
----
-
-## Example 4: Caller-object mutation (side effect)
+## Example 3: Caller-object mutation (side effect)
 
 ```
 INPUT: session.status="active", session.lastActive=14:05,
@@ -130,7 +101,7 @@ effect on the caller's object.
 
 ---
 
-## Example 5: Real async codebase function
+## Example 4: Real async codebase function
 
 ```
 INPUT: query="timeout", maxResults=undefined, since=undefined, until=undefined,
@@ -203,7 +174,7 @@ Omission choices:
 
 ---
 
-## Example 6: Multi-function call chain with side effects
+## Example 5: Multi-function call chain with side effects
 
 ```
 INPUT: params={prompt: "find buildEnvelope in lib/subagent.ts", description: "explain buildEnvelope"},
