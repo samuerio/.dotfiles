@@ -2,44 +2,7 @@
 
 These examples demonstrate the output conventions defined in `SKILL.md`.
 
-## Example 1: Linear branching
-
-```
-INPUT: user.level=VIP, order.amount=520, coupon="SAVE50",
-       user.coupons=["SAVE50", "WELCOME10"]
-
-FUNCTION calculateDiscount(user, order):
-    baseDiscount ← 0
-
-    IF user.level == "VIP":
-        baseDiscount ← order.amount * 0.1
-
-    IF order.amount >= 500:
-        baseDiscount ← baseDiscount + 20
-
-    IF user.hasCoupon(coupon):
-        baseDiscount ← baseDiscount + 50
-        TRACE baseDiscount    # 122
-
-    finalDiscount ← MIN(baseDiscount, order.amount * 0.5)
-
-    result ← order.amount - finalDiscount
-    TRACE result    # 398
-    RETURN result
-```
-
-Two probes only: the accumulated discount after the last mutation, and the
-final result. The intermediate `# 52` / `# 72` values and the duplicate
-`finalDiscount` (= 122) are omitted; a later, more informative TRACE captures
-the meaningful result. No condition carries a comment or TRACE: branch
-membership is decided by values already in INPUT (`order.amount`,
-`user.coupons`). The same rule covers a returned object that references a
-computed value by name (`RETURN { status: "approved", rate: approvedRate }`):
-probe the variable where it is computed, never the RETURN line.
-
----
-
-## Example 2: Loop with dynamic state
+## Example 1: Loop with dynamic state
 
 ```
 INPUT: qty=100, warehouses=[WH1(stock=80), WH2(stock=50)]
@@ -77,7 +40,7 @@ first representative and the final iteration.
 
 ---
 
-## Example 3: Caller-object mutation (side effect)
+## Example 2: Caller-object mutation (side effect)
 
 ```
 INPUT: session.status="active", session.lastActive=14:05,
@@ -101,80 +64,7 @@ effect on the caller's object.
 
 ---
 
-## Example 4: Real async codebase function
-
-```
-INPUT: query="timeout", maxResults=undefined, since=undefined, until=undefined,
-       includeCurrentSession=undefined
-CONTEXT: currentSessionFile="~/.pi/.../live.jsonl" (the running session),
-         MAX_SESSION_FILE_BYTES=5242880 (module constant)
-
-FUNCTION searchSessions(options):
-    re ← compileQuery("timeout")
-    max ← validateMaxResults(undefined)
-    sessions ← SessionManager.list(cwd)
-    currentAbs ← resolve(currentSessionFile)
-
-    hits ← []
-    skippedFiles ← []
-    scanned ← 0
-
-    FOR session IN sessions:
-
-        # --- session[0]: live.jsonl ---
-        IF resolve(session.path) == currentAbs AND includeCurrentSession !== true:
-            CONTINUE
-
-        # --- session[1]: big-session.jsonl ---
-        stat ← fs.statSync(session.path)
-        TRACE stat.size    # 8388608
-
-        IF stat.size > MAX_SESSION_FILE_BYTES:
-            skippedFiles ← skippedFiles + [entry]
-            CONTINUE
-
-        # --- session[2]: old-session.jsonl ---
-        stat ← fs.statSync(session.path)
-
-        { header, entries } ← loadSessionEntries(session.path)
-        scanned ← scanned + 1
-
-        contextEntries ← buildContextEntries(entries)
-
-        FOR entry IN contextEntries:
-            FOR msg IN sessionEntryToContextMessages(entry):
-                haystack ← haystackFor(msg, includeToolCalls)
-                match ← haystack.match(re)
-                TRACE match.index    # 18
-
-                hits ← hits + [{
-                    sessionPath: "old-session.jsonl", sessionId: "sess-old-01",
-                    entryId: "entry-004", timestamp: "2026-09-10T08:12:00Z",
-                    role: "assistant", snippet: buildSnippet(haystack, 18)
-                }]
-
-    hits.sort(...)
-
-    RETURN { hits, truncated, skippedFiles, scanned }
-```
-
-The trace answers two questions: why `big-session.jsonl` was skipped, and why
-`old-session.jsonl` produced the hit. `TRACE stat.size    # 8388608` is
-decision-relevant (against `MAX_SESSION_FILE_BYTES=5242880` in CONTEXT it
-explains the skip); `TRACE match.index    # 18` shows where the match was
-found. Everything removed is bookkeeping or progress telemetry (`max`,
-`sessions.length`, `entries.length`, `scanned`, `contextEntries.length`,
-`hits.length`, the old session's `stat.size`): omitting any of them makes no
-later step harder to follow. The constructed hit and the returned object are
-readable directly from the pseudocode.
-
-Omission choices:
-- `entries[0..2]` (no match) are omitted from the trace instead of per-entry `match=null → CONTINUE`.
-- The undefined-option copies (`sinceMs ← undefined`, …) are folded as trivial bookkeeping.
-
----
-
-## Example 5: Multi-function call chain with side effects
+## Example 3: Multi-function call chain with side effects
 
 ```
 INPUT: params={prompt: "find buildEnvelope in lib/subagent.ts", description: "explain buildEnvelope"},
@@ -254,24 +144,11 @@ FUNCTION run(cwd, prompt, signal, onUpdate, makeDetails):
 ```
 
 Key choices:
-- Meaningful side effects stay visible: `mkdir`, `spawn`, the conceptual
-  temporary-prompt write/removal, and the three `emitUpdate` callback
-  invocations. `emitUpdate` is never folded: the callback invocation itself is
-  a side effect, even though `currentResult` was already traced.
-- Temporary-directory creation (`mkdtemp`), the prompt-file `writeFile`,
-  `unlinkSync`, and `rmdirSync` are compacted into the conceptual operations
-  `writeTemporaryPrompt` / `removeTemporaryPrompt`: their individual ordering
-  and results are irrelevant to understanding the traced call. The effects
-  never disappear semantically; only the resolution is lowered.
-- `TRACE result.exitCode    # 0` is the single decision-relevant probe: the
-  subagent run's outcome flows into the caller's returned task block.
-- The event-4 `usage` literal is directly readable from its own assignment, so
-  it carries no TRACE.
-- No probe proves that failure guards did not fire (`error`, `wasAborted`):
-  the normal path does not need to demonstrate absent failure conditions.
-
-Omission choices:
-- `loadInlineConfig()` internals are folded: every guard inside it passes on this input.
-- The event-2 intermediate `usage` update is folded into the event-4 final aggregation, which is the state the RETURN actually carries.
-- `getPiInvocation` is folded into the spawn line (`/usr/bin/node` = process.execPath, `cli.js` = the running pi bundle), and `resolveSessionFile` into the envelope's session path. The child's stderr buffer and the stdout line-buffering locals stay folded.
-- Temporary-directory creation, prompt-file write, unlink, and directory cleanup are grouped into the conceptual temporary-prompt operations, as listed under Key choices.
+- `mkdir`, `spawn`, temporary-prompt operations, and `emitUpdate` remain visible
+  because they are meaningful side effects.
+- Low-level temporary-file operations are folded into
+  `writeTemporaryPrompt` / `removeTemporaryPrompt`.
+- `TRACE result.exitCode    # 0` is retained because the value affects the
+  caller's returned result.
+- Unmatched guards, intermediate usage updates, stderr buffering, and other
+  bookkeeping are omitted.
