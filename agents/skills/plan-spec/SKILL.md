@@ -1,22 +1,21 @@
 ---
 name: plan-spec
-description: Use when the user wants to discuss a topic, draft it into a structured plan, or finalize the plan for cross-session continuity. Triggered by /discuss, /draft, /finalize or natural language equivalents. These are planning-only steps; do not implement or modify source code until the user explicitly asks to implement.
+description: Use when the user wants to discuss a topic or draft it into a structured plan. Triggered by /discuss, /draft or natural language equivalents. These are planning-only steps; do not implement or modify source code until the user explicitly asks to implement.
 ---
 
 # Plan Spec
 
-The task comes from the message (for discuss) or from the prior discussion (for draft/finalize).
+The task comes from the message (for discuss) or from the prior discussion (for draft).
 
 ## Workflow Progression
 
-`/discuss`, `/draft`, and `/finalize` are progressive planning steps.
+`/discuss` and `/draft` are progressive planning steps.
 
 1. `/discuss`: clarify the topic and explore the approach. Do not modify files.
 2. `/draft`: convert the discussion into `spec/[slug]/plan.md`. Only write or update the plan file.
-3. `/finalize` (optional): append a **Session Continuity** section to the existing plan. Do not rewrite the rest of the plan. Only needed for cross-session continuity or handoff to a new session; skip it if implementing in the same session.
-4. Implementation begins only when the user explicitly asks to implement, code, modify source files, or make the planned changes.
+3. Implementation begins only when the user explicitly asks to implement, code, modify source files, or make the planned changes.
 
-Do not edit source code, tests, configuration, or project files during `/discuss`, `/draft`, or `/finalize`, except for the allowed plan file changes described above.
+Do not edit source code, tests, configuration, or project files during `/discuss` or `/draft`, except for the allowed plan file changes described above.
 
 ## discuss
 
@@ -35,14 +34,3 @@ Do not infer implementation permission from approval of the plan.
 After writing the plan file, use this exact phrasing:
 
 > Draft saved — run `code <plan-path> &` to review.
-
-## finalize
-
-Update the plan to instruct yourself which files to read in full so you get up to speed in a new session immediately.
-
-Automatically infer relevant files from the discussion (source files, entry points, types, tests, docs) ordered by importance. Append a **Session Continuity** section -- do not rewrite the rest of the plan. Inside it, use two subsections:
-
-- **Design docs** -- if design.md and/or pseudocode.md exist in the plan directory, list them here first as required reading.
-- **Files to read** -- the inferred relevant files, ordered by importance.
-
-If no plan file exists yet, notify the user to run draft first.
