@@ -28,7 +28,9 @@ JSONL；`find-session.ts`：search_sessions 工具 + /search-sessions 命令，�
 也都是本目录的顶层扩展。
 扩展间共享的非扩展模块放在 `lib/` 子目录（`lib/rush.ts`：从 modes.json 解析 rush 模式的 provider/
 model/thinkingLevel，供 `answer` 与 `handoff` 发起一次性 LLM 请求时使用；`lib/subagent.ts`：Subagent
-机制库；`lib/session-common.ts`：session JSONL 解析管线，供 `read-session` 与 `find-session` 共用）。
+机制库；`lib/session-common.ts`：session JSONL 解析管线，供 `read-session` 与 `find-session` 共用；
+`lib/session-preview.ts`：会话预览 overlay + read_session 风格转录格式化，供 `pick-session`（ctrl+o 预览快捷键）
+与 `background-task`（preview 动作）共用）。
 pi 只把 `extensions/*.ts` 顶层文件与含 `index.ts` 的子目录
 识别为扩展，`lib/` 子目录不会被自动加载。
 
@@ -48,7 +50,8 @@ agent 全局设置（不再使用 `packages` 声明第三方扩展包）；子�
 
 **API Boundary:** `models.json` 是 provider/模型清单的唯一来源，扩展不直接读取；`modes.json` 由 `prompt-editor` 扩展
 提供 TUI 编辑入口，运行时与扩展共享读写。子代理运行时与 session 查看工具均为本地 `extensions/`
-顶层扩展与 `lib/` 共享模块（`lib/subagent.ts`、`lib/session-common.ts`、`lib/rush.ts`），不与本地其他扩展源码混写。
+顶层扩展与 `lib/` 共享模块（`lib/subagent.ts`、`lib/session-common.ts`、`lib/session-preview.ts`、`lib/rush.ts`），
+不与本地其他扩展源码混写。
 
 ### `agents/skills/`
 
