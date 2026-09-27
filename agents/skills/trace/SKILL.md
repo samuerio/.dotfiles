@@ -17,7 +17,7 @@ Render the minimum sequence of execution events needed to understand what
 happened. Preserve behaviorally relevant calls, runtime values, mutations,
 side effects, and returns while omitting implementation noise.
 
-Persist the trace to a file (see Output); keep the chat reply minimal.
+Persist the trace to a file (see Output).
 
 ### Core rules
 
