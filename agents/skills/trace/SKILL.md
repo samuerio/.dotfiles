@@ -4,8 +4,8 @@ description: >
   Trace the actual runtime execution path of a function or method for concrete
   inputs and render it as a concise sequence of observed calls, values,
   mutations, side effects, and returns. Use for requests such as "trace this
-  call", "walk me through input X", "show the state changes", or "simulate a
-  breakpoint". Requires concrete inputs and a runnable execution path.
+  call", "walk me through input X", or "show the state changes". Requires
+  concrete inputs and a runnable execution path.
 ---
 
 # Trace
