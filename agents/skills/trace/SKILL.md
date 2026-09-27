@@ -1,39 +1,38 @@
 ---
 name: trace
 description: >
-  Trace the actual runtime execution path of a function or method for concrete
-  inputs and render it as a concise sequence of observed calls, values,
-  mutations, side effects, and returns. Use for requests such as "trace this
-  call", "walk me through input X", or "show the state changes". Requires
-  concrete inputs and a runnable execution path.
+  Reason through the execution path of a function or method for concrete inputs
+  from source code and available context, and render it as a concise sequence
+  of calls, values, mutations, side effects, and returns. Use for requests such
+  as "trace this call", "walk me through input X", or "show the state changes".
+  Performs a static, source-grounded trace without executing the target.
 ---
 
 # Trace
 
-Run the target with the concrete input and reconstruct the executed path from
-runtime evidence, rendered as the minimum sequence of events needed to
-understand what happened (see Core rules for observation requirements, Output
-for where to save it).
+Reason through the target with the concrete input and reconstruct the execution
+path from source code and supplied context, without executing it. Render the
+minimum sequence of events needed to understand the reasoned path (see Core
+rules for derivation requirements, Output for where to save it).
 
 ### Core rules
 
-- Execute the target with the concrete input. Never claim that a call, value,
-  mutation, side effect, or return occurred unless it was observed during that
-  execution.
-- Never substitute static inference for missing runtime evidence. If the target
-  cannot be executed or the requested path cannot be reproduced, report the
-  blocking condition instead of fabricating a trace. Perform a static trace
-  only when the user explicitly asks for one.
-- Prefer the least invasive source of sufficient runtime evidence:
-  1. existing tests or reproduction commands,
-  2. debugger or breakpoint inspection,
-  3. existing structured logs,
-  4. temporary instrumentation in editable files.
-- Do not modify source merely to make tracing easier when existing runtime
-  evidence is sufficient.
-- Remove temporary instrumentation after collecting the trace.
-- Never modify a file that is read-only or unavailable for editing. If tracing
-  requires instrumenting such a file, ask for it to be made editable first.
+- Do not execute the target. Derive the path by reasoning from source code,
+  concrete input, and supplied context.
+- Never invent information that cannot be determined from the available source
+  and context. If a value, dispatch target, external result, or condition is
+  unresolved, mark it as unknown and stop or qualify the affected portion of
+  the trace.
+- Distinguish deterministic reasoning from assumptions. Never choose a concrete
+  outcome for filesystem state, network responses, process results, current
+  time, randomness, environment variables, or other external state unless that
+  outcome is supplied in `CONTEXT` or is otherwise fixed by the source.
+- Follow only branches whose conditions can be determined from the concrete
+  input and available context.
+- Treat source code as authoritative for control flow and state transitions.
+  Treat supplied configuration, fixture state, environment values, and external
+  responses as authoritative only when explicitly provided.
+- Do not modify or instrument source files for tracing.
 
 Use only these execution event types:
 
@@ -48,33 +47,35 @@ RETURN
 Their meanings are:
 
 - `CALL` — a behaviorally relevant function or method call.
-- `VALUE` — an observed runtime value needed to understand later behavior.
+- `VALUE` — a value derived from the concrete input, source code, and context
+  that is needed to understand later behavior.
 - `MUTATE` — a meaningful state change.
 - `SIDE EFFECT` — externally observable behavior such as file/database I/O,
   process or IPC operations, network calls, callbacks, events, timers,
   subscriptions, resource operations, or real logging.
 - `RETURN` — a function or method return.
 
-`VALUE` is observational. `CALL`, `MUTATE`, `SIDE EFFECT`, and `RETURN`
-represent executed behavior.
+All events describe the execution path derived from the source and concrete
+input. They do not imply that the target was actually executed.
 
 Do not emit an event for every statement. Omit pure computation, direct copies,
 bookkeeping, trivial temporaries, and intermediate values unless they are
 needed to understand a later event.
 
-Do not emit `BRANCH` events. The trace already contains only the executed path.
-When a runtime value materially explains why execution proceeded as observed,
-retain that value with `VALUE`.
+Do not emit `BRANCH` events. The trace already contains only the reasoned path.
+When a derived value materially explains why the reasoned path proceeds as
+shown, retain that value with `VALUE`.
 
 Do not expose values already visible in `INPUT` or `CONTEXT` unless they later
 change meaningfully.
 
 Prefer a later, more informative `VALUE` over multiple intermediate values.
 
-For loops, derive every iteration from observed execution, but render only the
-first representative iteration, meaningful state transitions, and the final
-relevant iteration. Compress mechanically similar observed middle iterations;
-never infer omitted iterations.
+For loops, reason through every iteration needed to establish the result, but
+render only the first representative iteration, meaningful state transitions,
+and the final relevant iteration. Compress mechanically similar middle
+iterations only when their behavior follows deterministically from the source
+and concrete state.
 
 For recursion, tag calls with `depth=N` only when needed to distinguish
 meaningful recursive steps.
@@ -88,7 +89,7 @@ otherwise make the trace materially harder to understand.
 
 ### Format
 
-Each function gets a `## <function>` block containing its observed
+Each function gets a `## <function>` block containing its derived
 `CALL`/`VALUE`/`MUTATE`/`SIDE EFFECT`/`RETURN` events — see
 `references/examples.md` (Example 2) for a full rendering. Keep the
 representation sparse; a trace is not a statement-by-statement log.
@@ -105,25 +106,27 @@ to understanding the requested trace.
 
 ### Output
 
-Put the concrete arguments used for the observed execution in `INPUT:`.
+Put the concrete arguments being traced in `INPUT:`.
 
-Put runtime conditions needed to reproduce or understand that execution in
+Put conditions needed to determine or understand the execution path in
 `CONTEXT:`, including configuration, environment values, fixture state,
 working directory, relevant file contents, or external-service stubs.
 
-Prefer observed runtime values over values inferred from source.
+Prefer concrete values supplied in `INPUT` or `CONTEXT`; otherwise derive values
+from source only when the derivation is deterministic.
 
-If execution cannot be reproduced, do not write a misleading trace file.
-Report the concrete blocker instead and stop.
+If the requested path depends on information that cannot be determined from the
+available source and context, identify the unresolved dependency. Do not guess
+past it.
 
 Before saving, verify that:
 
-- every reported event is backed by runtime observation;
-- no unexecuted behavior is presented as executed;
+- every reported event is supported by the available source, INPUT, and CONTEXT;
+- no unresolved dynamic behavior is presented as known;
 - every retained `VALUE` materially helps explain later behavior;
 - meaningful mutations and side effects remain visible;
-- compressed loop or recursive sections summarize only behavior that was
-  actually observed;
+- compressed loop or recursive sections summarize only behavior that follows
+  deterministically from the reasoned execution;
 - the trace contains no unnecessary source locations or statement-level noise.
 
 Save the trace as:

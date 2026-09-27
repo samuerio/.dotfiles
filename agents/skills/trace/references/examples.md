@@ -63,6 +63,7 @@ INPUT: params={prompt: "find buildEnvelope in lib/subagent.ts", description: "ex
        onUpdate=<harness streaming callback>
 CONTEXT: ~/.pi/agent/subagent.json = { model: "opencode-go/deepseek-v4.1-flash", thinking: "medium",
                                        tools: ["write","edit","read","bash","finder"], skills: [] }
+        child process result: sessionId="sess-a7f3d2e1", exitCode=0
 
 ## task.ts execute
 
@@ -114,7 +115,7 @@ Key choices:
   as `SIDE EFFECT` events.
 - Low-level temporary-file operations are folded into conceptual side effects
   because their individual implementation details do not matter.
-- `result.exitCode = 0` is retained as `VALUE` because it materially explains
-  the caller's result.
+- `result.exitCode = 0` is retained as `VALUE` because it is supplied by
+  `CONTEXT` and materially explains the caller's result.
 - Parser events, unmatched guards, intermediate usage updates, stderr
   buffering, and other bookkeeping are omitted.
