@@ -17,22 +17,12 @@ rules for derivation requirements, Output for where to save it).
 
 ### Core rules
 
-- Do not execute the target. Derive the path by reasoning from source code,
-  concrete input, and supplied context.
-- Never invent information that cannot be determined from the available source
-  and context. If a value, dispatch target, external result, or condition is
-  unresolved, mark it as unknown and stop or qualify the affected portion of
-  the trace.
-- Distinguish deterministic reasoning from assumptions. Never choose a concrete
-  outcome for filesystem state, network responses, process results, current
-  time, randomness, environment variables, or other external state unless that
-  outcome is supplied in `CONTEXT` or is otherwise fixed by the source.
-- Follow only branches whose conditions can be determined from the concrete
-  input and available context.
-- Treat source code as authoritative for control flow and state transitions.
-  Treat supplied configuration, fixture state, environment values, and external
-  responses as authoritative only when explicitly provided.
-- Do not modify or instrument source files for tracing.
+- Derive the path statically from source code, concrete `INPUT`, and supplied
+  `CONTEXT`; never execute, modify, or instrument the target.
+- Do not guess unresolved values, dispatch targets, conditions, or external
+  state. Mark them unknown and stop or qualify the affected trace.
+- Follow only determinable branches. Source code is authoritative for control
+  flow; external state is authoritative only when explicitly supplied.
 
 Use only these execution event types:
 
@@ -46,39 +36,25 @@ RETURN
 
 Their meanings are:
 
-- `CALL` — a behaviorally relevant function or method call.
-- `VALUE` — a value derived from the concrete input, source code, and context
-  that is needed to understand later behavior.
-- `MUTATE` — a meaningful state change.
-- `SIDE EFFECT` — externally observable behavior such as file/database I/O,
-  process or IPC operations, network calls, callbacks, events, timers,
-  subscriptions, resource operations, or real logging.
-- `RETURN` — a function or method return.
+- `CALL` — behaviorally relevant call.
+- `VALUE` — derived value needed to explain later behavior.
+- `MUTATE` — meaningful state change.
+- `SIDE EFFECT` — externally observable behavior such as I/O, processes,
+  callbacks, events, timers, subscriptions, or logging.
+- `RETURN` — function or method return.
 
-All events describe the execution path derived from the source and concrete
-input. They do not imply that the target was actually executed.
+Keep the trace sparse: omit statement-level computation, copies, bookkeeping,
+trivial temporaries, and values already visible in `INPUT` or `CONTEXT`.
+Retain only values needed to explain later behavior, preferring the most
+informative derived value.
 
-Do not emit an event for every statement. Omit pure computation, direct copies,
-bookkeeping, trivial temporaries, and intermediate values unless they are
-needed to understand a later event.
+Do not emit `BRANCH`; the trace shows only the derived path.
 
-Do not emit `BRANCH` events. The trace already contains only the reasoned path.
-When a derived value materially explains why the reasoned path proceeds as
-shown, retain that value with `VALUE`.
+For loops, reason through all necessary iterations but render only
+representative, transitional, and final iterations; compress deterministic
+repetition.
 
-Do not expose values already visible in `INPUT` or `CONTEXT` unless they later
-change meaningfully.
-
-Prefer a later, more informative `VALUE` over multiple intermediate values.
-
-For loops, reason through every iteration needed to establish the result, but
-render only the first representative iteration, meaningful state transitions,
-and the final relevant iteration. Compress mechanically similar middle
-iterations only when their behavior follows deterministically from the source
-and concrete state.
-
-For recursion, tag calls with `depth=N` only when needed to distinguish
-meaningful recursive steps.
+For recursion, use `depth=N` only when needed to distinguish meaningful steps.
 
 Real output such as `console.log`, `logger.info`, `stderr.write`, or emitted
 events is a `SIDE EFFECT`, not a `VALUE`.
@@ -89,16 +65,8 @@ otherwise make the trace materially harder to understand.
 
 ### Format
 
-Each function gets a `## <function>` block containing its derived
-`CALL`/`VALUE`/`MUTATE`/`SIDE EFFECT`/`RETURN` events — see
-`references/examples.md` (Example 2) for a full rendering. Keep the
-representation sparse; a trace is not a statement-by-statement log.
-
-For multi-function traces, use one block per function:
-
-```text
-## <function>
-```
+Use one `## <function>` block per expanded function. See
+`references/examples.md` for worked examples.
 
 Represent behaviorally relevant calls in the caller with `CALL`; expand the
 callee in its own block only when its internal execution materially contributes
@@ -106,28 +74,15 @@ to understanding the requested trace.
 
 ### Output
 
-Put the concrete arguments being traced in `INPUT:`.
+Put concrete arguments in `INPUT:` and any supplied state needed to determine
+the path in `CONTEXT:` (for example configuration, environment, fixtures,
+working directory, file contents, or external stubs).
 
-Put conditions needed to determine or understand the execution path in
-`CONTEXT:`, including configuration, environment values, fixture state,
-working directory, relevant file contents, or external-service stubs.
+Derive other values only when deterministic. If a dependency remains
+unresolved, identify it and do not trace past it as though known.
 
-Prefer concrete values supplied in `INPUT` or `CONTEXT`; otherwise derive values
-from source only when the derivation is deterministic.
-
-If the requested path depends on information that cannot be determined from the
-available source and context, identify the unresolved dependency. Do not guess
-past it.
-
-Before saving, verify that:
-
-- every reported event is supported by the available source, INPUT, and CONTEXT;
-- no unresolved dynamic behavior is presented as known;
-- every retained `VALUE` materially helps explain later behavior;
-- meaningful mutations and side effects remain visible;
-- compressed loop or recursive sections summarize only behavior that follows
-  deterministically from the reasoned execution;
-- the trace contains no unnecessary source locations or statement-level noise.
+Before saving, ensure every event is source-supported and the trace contains no
+guessed behavior or unnecessary noise.
 
 Save the trace as:
 
@@ -138,15 +93,9 @@ Save the trace as:
 Use the timestamp when the skill runs and a kebab-case slug derived from the
 traced function or method.
 
-The document contains only:
-
-- `# [Function] Trace`
-- INPUT
-- optional CONTEXT
-- trace blocks
-- optional omission notes
-
-Keep the top-level RETURN inside its function block.
+The document contains only `# [Function] Trace`, `INPUT`, optional `CONTEXT`,
+trace blocks, and optional omission notes. Keep the top-level `RETURN` inside
+its function block.
 
 After writing the file, reply exactly:
 

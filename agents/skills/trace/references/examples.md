@@ -22,12 +22,6 @@ VALUE remaining = 0
 RETURN "success"
 ```
 
-The initial `remaining` value is omitted because it is already visible in
-`INPUT`. The temporary `deduct` value is omitted because its effects are more
-clearly represented by the resulting stock mutation and remaining quantity.
-With many mechanically similar observed iterations, retain the first
-representative iteration, meaningful transitions, and the final relevant
-iteration.
 
 ---
 
@@ -48,10 +42,6 @@ MUTATE session.status: "active" → "expired"
 RETURN "expired - re-login required"
 ```
 
-`idleMinutes = 25` is retained because it explains the subsequent observed
-behavior. No `BRANCH` event is necessary: the trace already contains only the
-path that actually executed. The session mutation remains visible because it
-changes caller-owned state.
 
 ---
 
@@ -111,11 +101,7 @@ RETURN currentResult
 ```
 
 Key choices:
-- `mkdir`, `spawn`, temporary-prompt operations, and `emitUpdate` remain visible
-  as `SIDE EFFECT` events.
-- Low-level temporary-file operations are folded into conceptual side effects
-  because their individual implementation details do not matter.
-- `result.exitCode = 0` is retained as `VALUE` because it is supplied by
-  `CONTEXT` and materially explains the caller's result.
-- Parser events, unmatched guards, intermediate usage updates, stderr
-  buffering, and other bookkeeping are omitted.
+- External operations and callbacks remain visible as `SIDE EFFECT`.
+- `result.exitCode = 0` remains because supplied context makes it known and it
+  explains the caller's result.
+- Parser/bookkeeping details are omitted.
