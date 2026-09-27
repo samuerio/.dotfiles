@@ -11,13 +11,9 @@ description: >
 # Trace
 
 Run the target with the concrete input and reconstruct the executed path from
-runtime evidence. Report only behavior that was actually observed.
-
-Render the minimum sequence of execution events needed to understand what
-happened. Preserve behaviorally relevant calls, runtime values, mutations,
-side effects, and returns while omitting implementation noise.
-
-Persist the trace to a file (see Output).
+runtime evidence, rendered as the minimum sequence of events needed to
+understand what happened (see Core rules for observation requirements, Output
+for where to save it).
 
 ### Core rules
 
@@ -92,22 +88,10 @@ otherwise make the trace materially harder to understand.
 
 ### Format
 
-```text
-INPUT: session.status="active", session.lastActive=14:05,
-       session.timeoutThreshold=20min, now=14:30
-
-## checkSession
-
-CALL checkSession(session, now)
-
-VALUE idleMinutes = 25
-
-MUTATE session.status: "active" → "expired"
-
-RETURN "expired - re-login required"
-```
-
-Keep the representation sparse. A trace is not a statement-by-statement log.
+Each function gets a `## <function>` block containing its observed
+`CALL`/`VALUE`/`MUTATE`/`SIDE EFFECT`/`RETURN` events — see
+`references/examples.md` (Example 2) for a full rendering. Keep the
+representation sparse; a trace is not a statement-by-statement log.
 
 For multi-function traces, use one block per function:
 
