@@ -65,12 +65,17 @@ otherwise make the trace materially harder to understand.
 
 ### Format
 
-Use one `## <function>` block per expanded function. See
-`references/examples.md` for worked examples.
+Render the trace as one indented execution tree. Start with `CALL <target>(...)`
+representing the traced function itself, and indent its events one level under
+that `CALL`. Expand a callee the same way: its `CALL` line sits at the caller's
+level, its internal events indent one level further. Use 2 spaces per level.
+See `references/examples.md` for worked examples.
 
-Represent behaviorally relevant calls in the caller with `CALL`; expand the
-callee in its own block only when its internal execution materially contributes
-to understanding the requested trace.
+Expand a callee's internal events only when they materially contribute to
+understanding the requested trace; otherwise the bare `CALL` line suffices.
+
+Expand the same callee fully only once, at its first occurrence; later `CALL`s
+to the same callee stay unexpanded.
 
 ### Output
 
@@ -94,8 +99,10 @@ Use the timestamp when the skill runs and a kebab-case slug derived from the
 traced function or method.
 
 The document contains only `# [Function] Trace`, `INPUT`, optional `CONTEXT`,
-trace blocks, and optional omission notes. Keep the top-level `RETURN` inside
-its function block.
+and the indented trace tree. The root `RETURN` sits indented under the root
+`CALL`, completing the tree. Do not add any prose commentary; the tree alone
+must convey everything worth knowing, including why other branches were not
+reached.
 
 After writing the file, reply exactly:
 
