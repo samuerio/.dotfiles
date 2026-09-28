@@ -71,6 +71,12 @@ that `CALL`. Expand a callee the same way: its `CALL` line sits at the caller's
 level, its internal events indent one level further. Use 2 spaces per level.
 See `references/examples.md` for worked examples.
 
+Keep every call within the traced source as a `CALL` line. A call is an edge
+of the execution tree; never absorb it into the caller's events, even for
+single-expression wrappers. Calls to external APIs and runtime libraries are
+not `CALL` lines; render them as `SIDE EFFECT` or `VALUE` at the caller's
+level.
+
 Expand a callee's internal events only when they materially contribute to
 understanding the requested trace; otherwise the bare `CALL` line suffices.
 
