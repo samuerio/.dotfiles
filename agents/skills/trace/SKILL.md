@@ -19,10 +19,12 @@ rules for derivation requirements, Output for where to save it).
 
 - Derive the path statically from source code, concrete `INPUT`, and supplied
   `CONTEXT`; never execute, modify, or instrument the target.
-- Do not guess unresolved values, dispatch targets, conditions, or external
-  state. Mark them unknown and stop or qualify the affected trace.
-- Follow only determinable branches. Source code is authoritative for control
-  flow; external state is authoritative only when explicitly supplied.
+- When source code and supplied `CONTEXT` cannot determine a value, dispatch
+  target, condition, or external state, infer it and mark each inference as
+  a `# inferred: ...` comment in the tree.
+- Follow only branches determined by source code, supplied external state, or
+  a marked inference. Source code is authoritative for control flow; external
+  state is authoritative only when explicitly supplied.
 
 Use only these execution event types:
 
@@ -43,10 +45,10 @@ Their meanings are:
   callbacks, events, timers, subscriptions, or logging.
 - `RETURN` — function or method return.
 
-Keep the trace sparse: omit statement-level computation, copies, bookkeeping,
-trivial temporaries, and values already visible in `INPUT` or `CONTEXT`.
-Retain only values needed to explain later behavior, preferring the most
-informative derived value.
+Keep the trace sparse except for `CALL` lines: omit statement-level
+computation, copies, bookkeeping, trivial temporaries, and values already
+visible in `INPUT` or `CONTEXT`. Retain only values needed to explain later
+behavior, preferring the most informative derived value.
 
 Do not emit `BRANCH`; the trace shows only the derived path.
 
@@ -71,17 +73,17 @@ that `CALL`. Expand a callee the same way: its `CALL` line sits at the caller's
 level, its internal events indent one level further. Use 2 spaces per level.
 See `references/examples.md` for worked examples.
 
-Keep every call within the traced source as a `CALL` line. A call is an edge
-of the execution tree; never absorb it into the caller's events, even for
-single-expression wrappers. Calls to external APIs and runtime libraries are
-not `CALL` lines; render them as `SIDE EFFECT` or `VALUE` at the caller's
-level.
+`#` comments inside the tree may label iterations and mark inferred values;
+they are the only annotations beyond the event types.
+
+Keep every call within the traced source as a `CALL` line, never absorbed
+into the caller's events, even for single-expression wrappers. The traced
+source is the code of the current repository. Calls to external APIs,
+standard or runtime libraries, and third-party packages are not `CALL`
+lines; render them as `SIDE EFFECT` or `VALUE` at the caller's level.
 
 Expand a callee's internal events only when they materially contribute to
 understanding the requested trace; otherwise the bare `CALL` line suffices.
-
-Expand the same callee fully only once, at its first occurrence; later `CALL`s
-to the same callee stay unexpanded.
 
 ### Output
 
@@ -89,11 +91,8 @@ Put concrete arguments in `INPUT:` and any supplied state needed to determine
 the path in `CONTEXT:` (for example configuration, environment, fixtures,
 working directory, file contents, or external stubs).
 
-Derive other values only when deterministic. If a dependency remains
-unresolved, identify it and do not trace past it as though known.
-
-Before saving, ensure every event is source-supported and the trace contains no
-guessed behavior or unnecessary noise.
+Before saving, ensure every event is source-supported or marked as inferred,
+and the trace contains no unnecessary noise.
 
 Save the trace as:
 
@@ -106,9 +105,9 @@ traced function or method.
 
 The document contains only `# [Function] Trace`, `INPUT`, optional `CONTEXT`,
 and the indented trace tree. The root `RETURN` sits indented under the root
-`CALL`, completing the tree. Do not add any prose commentary; the tree alone
-must convey everything worth knowing, including why other branches were not
-reached.
+`CALL`, completing the tree. No prose outside the tree; the tree and its `#`
+comments alone must convey everything worth knowing, including why other
+branches were not reached.
 
 After writing the file, reply exactly:
 

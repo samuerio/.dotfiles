@@ -41,7 +41,6 @@ INPUT: params={prompt: "find buildEnvelope in lib/subagent.ts", description: "ex
        onUpdate=<harness streaming callback>
 CONTEXT: ~/.pi/agent/subagent.json = { model: "opencode-go/deepseek-v4.1-flash", thinking: "medium",
                                        tools: ["write","edit","read","bash","finder"], skills: [] }
-        child process result: sessionId="sess-a7f3d2e1", exitCode=0
 
 CALL task.execute(params, ctx, onUpdate)
   CALL loadInlineConfig()
@@ -52,7 +51,7 @@ CALL task.execute(params, ctx, onUpdate)
       SIDE EFFECT mkdir(sessionDir)
       SIDE EFFECT write temporary system prompt
       SIDE EFFECT spawn("/usr/bin/node", ...)
-      VALUE sessionId = "sess-a7f3d2e1"
+      # inferred: sessionId = "sess-a7f3d2e1" (runtime result)
       SIDE EFFECT emitUpdate(currentResult)
       SIDE EFFECT emitUpdate(currentResult)
       SIDE EFFECT emitUpdate(currentResult)
@@ -62,7 +61,7 @@ CALL task.execute(params, ctx, onUpdate)
       RETURN currentResult
     RETURN result
   CALL this.buildTaskBlock(result)
-    VALUE result.exitCode = 0
+    # inferred: result.exitCode = 0 (runtime result)
     RETURN { content, details }
   RETURN result
 ```
