@@ -10,60 +10,35 @@ description: >
 
 # Trace
 
-Reason through the target with the concrete input and reconstruct the execution
-path from source code and supplied context, without executing it. Render the
-minimum sequence of events needed to understand the reasoned path (see Core
-rules for derivation requirements, Output for where to save it).
+Statically reconstruct the execution path for concrete `INPUT` and supplied
+`CONTEXT`. Never execute, modify, or instrument the target.
 
-### Core rules
+- Follow only paths determined by source code, supplied `CONTEXT`, or an explicit
+  inference.
+- Mark every undetermined value, dispatch target, condition, or external state
+  with `# inferred: ...`.
+- Treat source code as authoritative for control flow and supplied `CONTEXT`
+  as authoritative for explicitly provided external state.
 
-- Derive the path statically from source code, concrete `INPUT`, and supplied
-  `CONTEXT`; never execute, modify, or instrument the target.
-- When source code and supplied `CONTEXT` cannot determine a value, dispatch
-  target, condition, or external state, infer it and mark each inference as
-  a `# inferred: ...` comment in the tree.
-- Follow only branches determined by source code, supplied external state, or
-  a marked inference. Source code is authoritative for control flow; external
-  state is authoritative only when explicitly supplied.
-
-Use only these execution event types:
-
-```text
-CALL
-VALUE
-MUTATE
-SIDE EFFECT
-RETURN
-```
-
-Their meanings are:
+Use only these event types:
 
 - `CALL` — behaviorally relevant call.
-- `VALUE` — derived value needed to explain later behavior.
+- `VALUE` — derived value needed later.
 - `MUTATE` — meaningful state change.
-- `SIDE EFFECT` — externally observable behavior such as I/O, processes,
-  callbacks, events, timers, subscriptions, or logging.
+- `SIDE EFFECT` — externally observable I/O, processes, callbacks, events,
+  timers, subscriptions, or logging.
 - `RETURN` — function or method return.
 
-Keep the trace sparse except for `CALL` lines: omit statement-level
-computation, copies, bookkeeping, trivial temporaries, and values already
-visible in `INPUT` or `CONTEXT`. Retain only values needed to explain later
-behavior, preferring the most informative derived value.
+Keep the trace sparse except for `CALL` lines:
 
-Do not emit `BRANCH`; the trace shows only the derived path.
-
-For loops, reason through all necessary iterations but render only
-representative, transitional, and final iterations; compress deterministic
-repetition.
-
-For recursion, use `depth=N` only when needed to distinguish meaningful steps.
-
-Real output such as `console.log`, `logger.info`, `stderr.write`, or emitted
-events is a `SIDE EFFECT`, not a `VALUE`.
-
-Default to omitting source filenames and line numbers. Include source locations
-only when the user explicitly requests them or when source ambiguity would
-otherwise make the trace materially harder to understand.
+- Omit statement-level computation, copies, bookkeeping, trivial temporaries,
+  and values already visible in `INPUT` or `CONTEXT`.
+- Never emit `BRANCH`; show only the derived path.
+- Compress deterministic loops to representative, transitional, and final
+  iterations while reasoning through every necessary iteration.
+- Use `depth=N` for recursion only when needed to distinguish meaningful steps.
+- Render actual output or emitted events as `SIDE EFFECT`, never `VALUE`.
+- Omit source locations unless requested or needed to resolve ambiguity.
 
 ### Format
 
