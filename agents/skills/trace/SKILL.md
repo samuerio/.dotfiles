@@ -42,23 +42,17 @@ Keep the trace sparse except for `CALL` lines:
 
 ### Format
 
-Render the trace as one indented execution tree. Start with `CALL <target>(...)`
-representing the traced function itself, and indent its events one level under
-that `CALL`. Expand a callee the same way: its `CALL` line sits at the caller's
-level, its internal events indent one level further. Use 2 spaces per level.
-See `references/examples.md` for worked examples.
+Render one execution tree using 2-space indentation:
 
-`#` comments inside the tree may label iterations and mark inferred values;
-they are the only annotations beyond the event types.
-
-Keep every call within the traced source as a `CALL` line, never absorbed
-into the caller's events, even for single-expression wrappers. The traced
-source is the code of the current repository. Calls to external APIs,
-standard or runtime libraries, and third-party packages are not `CALL`
-lines; render them as `SIDE EFFECT` or `VALUE` at the caller's level.
-
-Expand a callee's internal events only when they materially contribute to
-understanding the requested trace; otherwise the bare `CALL` line suffices.
+- Start with `CALL <target>(...)`; all root events, including the final
+  `RETURN`, are children of that call.
+- Every call to code in the current repository gets its own `CALL` line at
+  the caller's level, its internal events one level deeper. Expand its
+  internals only when they materially explain the trace.
+- Do not render standard-library, runtime, third-party, or external API calls
+  as `CALL`; represent their relevant result as `VALUE` or observable behavior
+  as `SIDE EFFECT`.
+- `#` comments are allowed only for iteration labels and `# inferred: ...`.
 
 ### Output
 
