@@ -9,7 +9,7 @@
     },
     "rush": {
       "provider": "opencode-go",
-      "modelId": "omen-alpha",
+      "modelId": "deepseek-v4-flash",
       "thinkingLevel": "medium"
     },
     "smart": {

@@ -62,12 +62,8 @@ understanding the requested trace; otherwise the bare `CALL` line suffices.
 
 ### Output
 
-Put concrete arguments in `INPUT:` and any supplied state needed to determine
-the path in `CONTEXT:` (for example configuration, environment, fixtures,
-working directory, file contents, or external stubs).
-
-Before saving, ensure every event is source-supported or marked as inferred,
-and the trace contains no unnecessary noise.
+Put concrete arguments in `INPUT:` and supplied path-determining external state
+in `CONTEXT:`.
 
 Save the trace as:
 
@@ -78,11 +74,13 @@ Save the trace as:
 Use the timestamp when the skill runs and a kebab-case slug derived from the
 traced function or method.
 
-The document contains only `# [Function] Trace`, `INPUT`, optional `CONTEXT`,
-and the indented trace tree. The root `RETURN` sits indented under the root
-`CALL`, completing the tree. No prose outside the tree; the tree and its `#`
-comments alone must convey everything worth knowing, including why other
-branches were not reached.
+The document contains only:
+
+1. `INPUT`
+2. optional `CONTEXT`
+3. the trace tree
+
+Add no explanatory prose outside the tree.
 
 After writing the file, reply exactly:
 
