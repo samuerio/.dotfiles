@@ -952,13 +952,17 @@ function formatCloseText(result: CloseResult): string {
 
 // ─── Background Task Dispatch ─────────────────────────────────────
 
-/** Result of dispatchBackgroundTask; exposed to the agent tool as details. */
+/**
+ * Result of dispatchBackgroundTask; exposed to the agent tool as details.
+ * Only a successful dispatch returns; every failure throws. pi turns the
+ * thrown message into an `isError: true` tool result with `details: {}`,
+ * which renderResult renders via the content text (the context.isError
+ * branch).
+ */
 interface DispatchResult {
-	ok: boolean;
 	alias: string;
 	/** sha256(alias) truncated to 16 hex chars — worktree/run/session key. */
 	uuid?: string;
-	error?: string;
 	worktreePath?: string;
 	tmuxSession?: string;
 	attachCommand?: string;
@@ -971,8 +975,10 @@ interface DispatchResult {
 /**
  * Create a fresh worktree + tmux session for the task alias (fail fast on duplicates), start an
  * interactive child Pi inside its tmux session with the given prompt, and
- * return immediately. Completion is reported via result.json (child reporter)
- * and observed through /background-tasks.
+ * return immediately. Throws on any failure (pi reports the message to the
+ * LLM as an `isError: true` tool result); never returns a failed result.
+ * Completion is reported via result.json (child reporter) and observed
+ * through /background-tasks.
  */
 async function dispatchBackgroundTask(
 	pi: ExtensionAPI,
@@ -986,34 +992,30 @@ async function dispatchBackgroundTask(
 	if (existing.worktreePath !== undefined) existingParts.push("worktree");
 	if (existing.sessionExists) existingParts.push("tmux session");
 	if (existingParts.length > 0) {
-		return {
-			ok: false,
-			alias,
-			error: `Background task "${alias}" already exists (${existingParts.join(" + ")}). Choose a different alias.`,
-		};
+		throw new Error(`Background task "${alias}" already exists (${existingParts.join(" + ")}). Choose a different alias.`);
 	}
 
 	// 2. Create worktree + branch.
 	const wtResult = await pi.exec("bash", [WORKTREE_SH, "open", alias, "--json"]);
 	if (wtResult.code !== 0) {
-		return { ok: false, alias, error: wtResult.stderr.trim() || "worktree.sh open failed" };
+		throw new Error(wtResult.stderr.trim() || "worktree.sh open failed");
 	}
 	const output = parseOpenOutput(wtResult.stdout);
 	if (!output) {
-		return { ok: false, alias, error: "Failed to parse worktree output" };
+		throw new Error("Failed to parse worktree output");
 	}
 	const worktreePath = output.worktreePath;
 
 	// 3. Repo-local tasks env (per-repo socket + artifact dirs) + tmux session.
 	const env = await getTasksEnv(pi);
 	if (!env) {
-		return { ok: false, alias, worktreePath, error: "Failed to resolve repo root (worktree.sh root-path)" };
+		throw new Error("Failed to resolve repo root (worktree.sh root-path)");
 	}
 	const uuid = taskUuid(alias);
 	const session = taskSessionName(uuid);
 	const sessionOk = await ensureSession(pi, env.socketPath, session, worktreePath);
 	if (!sessionOk) {
-		return { ok: false, alias, worktreePath, error: `Failed to start tmux session "${session}".` };
+		throw new Error(`Failed to start tmux session "${session}".`);
 	}
 
 	// 4. Model inheritance.
@@ -1021,7 +1023,7 @@ async function dispatchBackgroundTask(
 	const model = ctx.model?.id;
 	const thinking = pi.getThinkingLevel();
 	if (!provider || !model) {
-		return { ok: false, alias, worktreePath, error: "No model is active. Cannot dispatch background task." };
+		throw new Error("No model is active. Cannot dispatch background task.");
 	}
 
 	// 5. Run artifacts: latest-wins on the run dir (fixed file names task.md /
@@ -1043,12 +1045,7 @@ async function dispatchBackgroundTask(
 			mode: 0o600,
 		});
 	} catch (error) {
-		return {
-			ok: false,
-			alias,
-			worktreePath,
-			error: `Failed to prepare run directory: ${error instanceof Error ? error.message : String(error)}`,
-		};
+		throw new Error(`Failed to prepare run directory: ${error instanceof Error ? error.message : String(error)}`);
 	}
 
 	// 6. Keep the pane visible after the child Pi exits (settled output view).
@@ -1056,7 +1053,7 @@ async function dispatchBackgroundTask(
 		"-S", env.socketPath, "set-window-option", "-t", `${session}:0`, "remain-on-exit", "on",
 	]);
 	if (remain.code !== 0) {
-		return { ok: false, alias, worktreePath, error: remain.stderr.trim() || "Failed to set remain-on-exit." };
+		throw new Error(remain.stderr.trim() || "Failed to set remain-on-exit.");
 	}
 
 	// 7. Child command: interactive Pi, --approve trusts project-local files for
@@ -1093,26 +1090,15 @@ async function dispatchBackgroundTask(
 	const cleanupHint = `worktree/session already created (clean up: user runs /background-tasks, select "${alias}", then Close)`;
 	const sent = await pi.exec("tmux", ["-S", env.socketPath, "send-keys", "-t", tmuxTarget, "-l", "--", childCommand]);
 	if (sent.code !== 0) {
-		return {
-			ok: false,
-			alias,
-			worktreePath,
-			error: `${sent.stderr.trim() || "Failed to start child Pi."} (${cleanupHint})`,
-		};
+		throw new Error(`${sent.stderr.trim() || "Failed to start child Pi."} (${cleanupHint})`);
 	}
 	const entered = await pi.exec("tmux", ["-S", env.socketPath, "send-keys", "-t", tmuxTarget, "Enter"]);
 	if (entered.code !== 0) {
-		return {
-			ok: false,
-			alias,
-			worktreePath,
-			error: `${entered.stderr.trim() || "Failed to submit child command."} (${cleanupHint})`,
-		};
+		throw new Error(`${entered.stderr.trim() || "Failed to submit child command."} (${cleanupHint})`);
 	}
 
 	// 9. Return immediately — completion is observed via /background-tasks.
 	return {
-		ok: true,
 		alias,
 		uuid,
 		worktreePath,
@@ -1126,9 +1112,6 @@ async function dispatchBackgroundTask(
 }
 
 function formatDispatchText(result: DispatchResult): string {
-	if (!result.ok) {
-		return result.error ?? `Failed to dispatch background task "${result.alias}".`;
-	}
 	return [
 		`Dispatched background task "${result.alias}".`,
 		`Worktree: ${result.worktreePath}`,
@@ -1368,11 +1351,7 @@ export default function (pi: ExtensionAPI): void {
 			const prompt = typeof params.prompt === "string" ? params.prompt.trim() : "";
 			const description = typeof params.description === "string" ? params.description.trim() : "";
 			if (!alias || !prompt || !description) {
-				const error = "background_task requires a non-empty alias, prompt and description.";
-				return {
-					content: [{ type: "text" as const, text: error }],
-					details: { ok: false, alias, error },
-				};
+				throw new Error("background_task requires a non-empty alias, prompt and description.");
 			}
 			const result = await dispatchBackgroundTask(pi, { alias, prompt, description, ctx });
 			return {
@@ -1385,9 +1364,13 @@ export default function (pi: ExtensionAPI): void {
 			const text = theme.fg("toolTitle", theme.bold("background_task ")) + theme.fg("dim", description);
 			return new Text(text, 0, 0);
 		},
-		renderResult(result, { expanded }, theme) {
+		renderResult(result, { expanded }, theme, context) {
 			const details = result.details as DispatchResult | undefined;
-			if (!details || !details.ok) {
+			// Thrown failures arrive as pi's error result (context.isError:
+			// true, details {}); the details.ok check also covers legacy
+			// results persisted before failures switched to throwing. Both
+			// render the content text verbatim.
+			if (context.isError || !details || (details as { ok?: boolean }).ok === false) {
 				const content = result.content.find((part) => part.type === "text");
 				return new Text(content?.type === "text" ? content.text : "(no output)", 0, 0);
 			}
