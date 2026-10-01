@@ -1350,8 +1350,14 @@ export default function (pi: ExtensionAPI): void {
 			const alias = typeof params.alias === "string" ? params.alias.trim() : "";
 			const prompt = typeof params.prompt === "string" ? params.prompt.trim() : "";
 			const description = typeof params.description === "string" ? params.description.trim() : "";
-			if (!alias || !prompt || !description) {
-				throw new Error("background_task requires a non-empty alias, prompt and description.");
+			if (!alias) {
+				throw new Error("background_task requires a non-empty alias.");
+			}
+			if (!prompt) {
+				throw new Error("background_task requires a non-empty prompt.");
+			}
+			if (!description) {
+				throw new Error("background_task requires a non-empty description.");
 			}
 			const result = await dispatchBackgroundTask(pi, { alias, prompt, description, ctx });
 			return {
