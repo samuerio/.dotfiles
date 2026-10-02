@@ -40,16 +40,12 @@ const WORKTREE_SH = path.join(SCRIPTS_DIR, "worktree.sh");
 const ATTACH_FLAG = "attach-background-task";
 /** Repo root for the attach target; bypasses `git rev-parse` when supplied. */
 const TASK_ROOT_FLAG = "task-root";
-/** Repo-local tasks dir (relative to repo root): `.pi/background-tasks/`. */
 const TASKS_DIR_PARTS = [".pi", "background-tasks"] as const;
 
 // ─── Background-task Child Mode ───────────────────────────────────
 
-/** Set on the dispatched child Pi: register only the result reporter. */
 const TASK_CHILD_ENV = "PI_BACKGROUND_TASK_CHILD";
-/** Result file path handed to the child Pi via env. */
 const TASK_RESULT_ENV = "PI_BACKGROUND_TASK_RESULT";
-/** Task alias handed to the child Pi via env (reporter writes result.json branch). */
 const TASK_ALIAS_ENV = "PI_BACKGROUND_TASK_ALIAS";
 const EXTENSION_PATH = fileURLToPath(import.meta.url);
 
@@ -136,17 +132,12 @@ function buildWidget(lines: WidgetLine[], footer?: string) {
 
 // ─── Repo-local Tasks Environment & Keys ──────────────────────────
 
-/** Repo-root-local background-task environment (artifacts + tmux socket). */
 interface TasksEnv {
-    /** Main worktree root (absolute), from `worktree.sh root-path`. */
     repoRoot: string;
-    /** `<repoRoot>/.pi/background-tasks`. */
     tasksDir: string;
-    /** Per-repo tmux socket inside tasksDir. */
     socketPath: string;
 }
 
-/** uuid = sha256(alias) truncated to 16 hex chars; unique per repo (branch names are unique). */
 function taskUuid(alias: string): string {
     return createHash("sha256")
         .update(alias, "utf8")
@@ -154,12 +145,10 @@ function taskUuid(alias: string): string {
         .slice(0, 16);
 }
 
-/** tmux session / window naming: `background-task-<uuid>` (window name is fixed "pi"). */
 function taskSessionName(uuid: string): string {
     return `background-task-${uuid}`;
 }
 
-/** Attach command: `pi --attach-background-task <alias> [--task-root <repoRoot>]` — quote only when needed. */
 function taskAttachCommand(alias: string, repoRoot?: string): string {
     const safe = /^[A-Za-z0-9._/-]+$/.test(alias);
     let cmd = `pi --${ATTACH_FLAG} ${safe ? alias : shellQuote(alias)}`;
@@ -362,16 +351,10 @@ function registerTaskChildReporter(pi: ExtensionAPI, resultPath: string): void {
 
 // ─── Run Artifacts (task.md / result.json / sessions) ─────────────
 
-/** Per-task run dir: `<tasksDir>/<uuid>/` (task.md + result.json, latest-wins). */
 function taskRunDir(tasksDir: string, alias: string): string {
     return path.join(tasksDir, taskUuid(alias));
 }
 
-/**
- * Flat session dir: `<tasksDir>/sessions/` (child --session-dir). Session
- * files are named `<timestamp>_<uuid>.jsonl` by pi, so no per-task subdir is
- * needed; the dir is append-only history (never wiped on re-dispatch).
- */
 function taskSessionsDir(tasksDir: string): string {
     return path.join(tasksDir, "sessions");
 }
@@ -1167,13 +1150,6 @@ function formatCloseText(result: CloseResult): string {
 
 // ─── Background Task Dispatch ─────────────────────────────────────
 
-/**
- * Result of dispatchBackgroundTask; exposed to the agent tool as details.
- * Only a successful dispatch returns; every failure throws. pi turns the
- * thrown message into an `isError: true` tool result with `details: {}`,
- * which renderResult renders via the content text (the context.isError
- * branch).
- */
 interface DispatchResult {
     alias: string;
     /** sha256(alias) truncated to 16 hex chars — worktree/run/session key. */
@@ -1187,14 +1163,6 @@ interface DispatchResult {
     prompt?: string;
 }
 
-/**
- * Create a fresh worktree + tmux session for the task alias (fail fast on duplicates), start an
- * interactive child Pi inside its tmux session with the given prompt, and
- * return immediately. Throws on any failure (pi reports the message to the
- * LLM as an `isError: true` tool result); never returns a failed result.
- * Completion is reported via result.json (child reporter) and observed
- * through /background-tasks.
- */
 async function dispatchBackgroundTask(
     pi: ExtensionAPI,
     opts: {
@@ -1206,7 +1174,6 @@ async function dispatchBackgroundTask(
 ): Promise<DispatchResult> {
     const { alias, prompt, description, ctx } = opts;
 
-    // 1. Fail fast on duplicate alias (existing worktree or tmux session).
     const existing = await resolveTaskFacts(pi, alias);
     const existingParts: string[] = [];
     if (existing.worktreePath !== undefined) existingParts.push("worktree");
@@ -1217,7 +1184,6 @@ async function dispatchBackgroundTask(
         );
     }
 
-    // 2. Create worktree + branch.
     const wtResult = await pi.exec("bash", [
         WORKTREE_SH,
         "open",
@@ -1233,7 +1199,6 @@ async function dispatchBackgroundTask(
     }
     const worktreePath = output.worktreePath;
 
-    // 3. Repo-local tasks env (per-repo socket + artifact dirs) + tmux session.
     const env = await getTasksEnv(pi);
     if (!env) {
         throw new Error("Failed to resolve repo root (worktree.sh root-path)");
@@ -1250,7 +1215,6 @@ async function dispatchBackgroundTask(
         throw new Error(`Failed to start tmux session "${session}".`);
     }
 
-    // 4. Model inheritance.
     const provider = ctx.model?.provider;
     const model = ctx.model?.id;
     const thinking = pi.getThinkingLevel();
@@ -1258,9 +1222,6 @@ async function dispatchBackgroundTask(
         throw new Error("No model is active. Cannot dispatch background task.");
     }
 
-    // 5. Run artifacts: latest-wins on the run dir (fixed file names task.md /
-    // result.json need wiping); the flat sessions dir is append-only — its
-    // `<timestamp>_<uuid>.jsonl` names never collide, old runs stay as history.
     const runDir = taskRunDir(env.tasksDir, alias);
     let resultPath: string;
     let promptPath: string;
@@ -1282,7 +1243,6 @@ async function dispatchBackgroundTask(
         );
     }
 
-    // 6. Keep the pane visible after the child Pi exits (settled output view).
     const remain = await pi.exec("tmux", [
         "-S",
         env.socketPath,
@@ -1298,13 +1258,6 @@ async function dispatchBackgroundTask(
         );
     }
 
-    // 7. Child command: interactive Pi, --approve trusts project-local files for
-    // the run (projectTrustOverride: loads project extensions/settings/packages
-    // without the trust prompt). It is not a tool auto-approval switch; pi has
-    // no per-tool confirmation dialog mechanism.
-    // Session id is unique per dispatch (<uuid>-<random>): pi resumes an
-    // existing session when the id matches, so a fixed uuid id would carry the
-    // previous run's context into the re-dispatched task.
     const tmuxTarget = `${session}:0.0`;
     const attachCommand = taskAttachCommand(alias, env.repoRoot);
     const piArgs = [
@@ -1334,8 +1287,6 @@ async function dispatchBackgroundTask(
         piArgs.map(shellQuote).join(" "),
     ].join(" ");
 
-    // 8. Fire and forget. Errors here leave a created worktree/session behind —
-    // point the caller at /background-tasks for cleanup (interactive only).
     const cleanupHint = `worktree/session already created (clean up: user runs /background-tasks, select "${alias}", then Close)`;
     const sent = await pi.exec("tmux", [
         "-S",
@@ -1366,7 +1317,6 @@ async function dispatchBackgroundTask(
         );
     }
 
-    // 9. Return immediately — completion is observed via /background-tasks.
     return {
         alias,
         uuid,
