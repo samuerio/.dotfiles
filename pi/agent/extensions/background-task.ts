@@ -687,13 +687,15 @@ async function runCloseAction(
         force = true;
     }
 
-    const result = await closeTask(pi, { name: facts.name, force });
-    if (!result.ok) {
-        ctx.ui.notify(result.error ?? "close failed", "error");
+    let result: CloseResult;
+    try {
+        result = await closeTask(pi, { name: facts.name, force });
+    } catch (error) {
+        ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
         return;
     }
-    if (result.error) {
-        ctx.ui.notify(result.error, "warning");
+    if (result.warning) {
+        ctx.ui.notify(result.warning, "warning");
     }
     ctx.ui.notify(formatCloseText(result), "info");
 }
@@ -762,9 +764,8 @@ type SessionAction = "preview" | "resume" | "addToPrompt";
 function addSessionToPrompt(
     ctx: ExtensionCommandContext,
     sessionFile: string,
-    mention?: string,
+    mention = `read session @${sessionFile}`,
 ): void {
-    mention ??= `read session @${sessionFile}`;
     const current = ctx.ui.getEditorText();
     const separator = current && !current.endsWith(" ") ? " " : "";
     ctx.ui.setEditorText(`${current}${separator}${mention}`);
@@ -1022,11 +1023,10 @@ async function ensureSession(
 // ─── Task Close (worktree + session) ──────────────────────────────
 
 interface CloseResult {
-    ok: boolean;
     name: string;
-    error?: string;
-    needsForce?: "dirty";
-    leftoverCount?: number;
+    leftoverCount: number;
+    /** One of at most one: session kill or run-dir removal partially failed. */
+    warning?: string;
 }
 
 /**
@@ -1036,6 +1036,8 @@ interface CloseResult {
  * task list is sourced from worktrees, so leftover artifacts would be
  * orphaned. The sessions dir (child session history) is append-only and
  * never touched here.
+ *
+ * Failures throw a user-facing Error; only a successful close returns.
  */
 async function closeTask(
     pi: ExtensionAPI,
@@ -1045,20 +1047,13 @@ async function closeTask(
     const facts = await resolveTaskFacts(pi, name);
 
     if (facts.worktree === undefined) {
-        return {
-            ok: false,
-            name,
-            error: `Background task "${name}" does not exist (no worktree).`,
-        };
+        throw new Error(`Background task "${name}" does not exist (no worktree).`);
     }
 
     if (facts.worktree.dirty && !force) {
-        return {
-            ok: false,
-            name,
-            needsForce: "dirty",
-            error: `Background task "${name}" has uncommitted changes. Ask the user, then call again with force: true to close anyway.`,
-        };
+        throw new Error(
+            `The worktree of "${name}" gained uncommitted changes since the task list was shown. Select close again to confirm closing with them.`,
+        );
     }
 
     const cleanArgs = [WORKTREE_SH, "clean", name];
@@ -1066,11 +1061,7 @@ async function closeTask(
     cleanArgs.push("--json");
     const cleanResult = await pi.exec("bash", cleanArgs);
     if (cleanResult.code !== 0) {
-        return {
-            ok: false,
-            name,
-            error: cleanResult.stderr.trim() || "Failed to remove worktree.",
-        };
+        throw new Error(cleanResult.stderr.trim() || "Failed to remove worktree.");
     }
     const cleanOutput = parseCleanOutput(cleanResult.stdout);
 
@@ -1108,31 +1099,16 @@ async function closeTask(
     }
 
     return {
-        ok: true,
         name,
         leftoverCount: cleanOutput?.leftoverCount ?? 0,
-        error: sessionWarn ?? runDirWarn,
+        warning: sessionWarn ?? runDirWarn,
     };
 }
 
 function formatCloseText(result: CloseResult): string {
-    if (result.needsForce) {
-        return (
-            result.error ??
-            `Close of "${result.name}" requires force: true (${result.needsForce}).`
-        );
-    }
-    if (!result.ok) {
-        return (
-            result.error ?? `Failed to close background task "${result.name}".`
-        );
-    }
     let msg = `Background task "${result.name}" closed.`;
-    if (result.leftoverCount && result.leftoverCount > 0) {
+    if (result.leftoverCount > 0) {
         msg += ` Warning: ${result.leftoverCount} leftover file(s).`;
-    }
-    if (result.error) {
-        msg += ` ${result.error}`;
     }
     return msg;
 }
