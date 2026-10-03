@@ -92,15 +92,11 @@ export interface SingleResult {
 	sessionId?: string;
 }
 
-export interface SubagentDetails {
-	results: SingleResult[];
-}
-
 type RunOpts = Record<string, never>;
 
 type DisplayItem = { type: "text"; text: string } | { type: "toolCall"; name: string; args: Record<string, any> };
 
-type OnUpdateCallback = (partial: AgentToolResult<SubagentDetails>) => void;
+type OnUpdateCallback = (partial: AgentToolResult<SingleResult>) => void;
 
 const NON_SUCCESS_STOP_REASONS = new Set(["error", "aborted"]);
 
@@ -355,7 +351,6 @@ export class Subagent {
 		prompt: string,
 		signal: AbortSignal | undefined,
 		onUpdate: OnUpdateCallback | undefined,
-		makeDetails: (results: SingleResult[]) => SubagentDetails,
 		opts?: RunOpts,
 	): Promise<SingleResult> {
 		const { spec } = this;
@@ -408,7 +403,7 @@ export class Subagent {
 			if (onUpdate) {
 				onUpdate({
 					content: [{ type: "text", text: getFinalOutput(currentResult.messages) || "(running...)" }],
-					details: makeDetails([currentResult]),
+					details: currentResult,
 				});
 			}
 		};
@@ -560,9 +555,8 @@ export class Subagent {
 		signal: AbortSignal | undefined,
 		onUpdate: OnUpdateCallback | undefined,
 		ctx: { cwd: string },
-	): Promise<AgentToolResult<SubagentDetails>> {
-		const makeDetails = (results: SingleResult[]): SubagentDetails => ({ results });
-		const result = await this.run(ctx.cwd, params.prompt, signal, onUpdate, makeDetails);
+	): Promise<AgentToolResult<SingleResult>> {
+		const result = await this.run(ctx.cwd, params.prompt, signal, onUpdate);
 		// Signal failure the way pi expects (docs/extensions.md: "Signaling errors"):
 		// throw from execute. The harness catches it, sets isError=true on the result,
 		// and reports it to the LLM. details are wiped by createErrorToolResult, so the
@@ -577,7 +571,7 @@ export class Subagent {
 		}
 		return {
 			content: [{ type: "text", text: this.buildTaskBlock(result) }],
-			details: makeDetails([result]),
+			details: result,
 		};
 	}
 
@@ -596,10 +590,9 @@ export class Subagent {
 		context?: { isError?: boolean },
 	): Text | Container {
 		// On the throw path, createErrorToolResult wipes details to {}. Guard for
-		// that: details.results may be undefined. Render from content alone.
-		const details = result.details as SubagentDetails | undefined;
-		const results = details?.results;
-		if (!results || results.length === 0) {
+		// that: details may lack the SingleResult fields. Render from content alone.
+		const r = result.details as SingleResult | undefined;
+		if (!r?.messages) {
 			const text = result.content[0]?.type === "text" ? result.content[0].text : "(no output)";
 			// On the throw path the harness already renders the tool-name header;
 			// mirror unified-edit and just dye the content (envelope + child
@@ -614,7 +607,6 @@ export class Subagent {
 		// throw and are rendered via the empty-details branch above. Mirror
 		// unified-edit: render just the body, no icon/tool-name header (the
 		// harness renders the call header).
-		const r = details.results[0];
 		const displayItems = getDisplayItems(r.messages);
 		const finalOutput = getFinalOutput(r.messages);
 
