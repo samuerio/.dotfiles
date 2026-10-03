@@ -38,8 +38,8 @@ The Oracle acts as your senior engineering advisor and can help with:
 2. Provide relevant context about what you're trying to achieve. If you know that 3 files are involved, list them and they will be attached.`;
 
 export const ORACLE_SPEC: SubagentSpec = {
-	name: "oracle",
-	systemPrompt: `You are the Oracle - an expert AI advisor with advanced reasoning capabilities.
+    name: "oracle",
+    systemPrompt: `You are the Oracle - an expert AI advisor with advanced reasoning capabilities.
 
 Your role is to provide high-quality technical guidance, code reviews, architectural advice, and strategic planning for software engineering tasks.
 
@@ -88,21 +88,23 @@ Guidelines:
 - Be thorough but concise - focus on the highest-leverage insights.
 
 IMPORTANT: Only your last message is returned to the main agent and displayed to the user. Your last message should be comprehensive yet focused, with a clear, simple recommendation that helps the user act immediately.`,
-	model: "opencode-go/glm-5.2",
-	thinking: "max",
-	tools: ["read", "bash"],
-	skills: [],
+    model: "opencode-go/glm-5.2",
+    thinking: "medium",
+    tools: ["read", "bash"],
+    skills: [],
 };
 
 export default function (pi: ExtensionAPI) {
-	const oracle = new Subagent(ORACLE_SPEC);
-	pi.registerTool({
-		name: "oracle",
-		label: "Oracle",
-		description: ORACLE_DESCRIPTION,
-		parameters: SubagentParams,
-		execute: (id, params, signal, onUpdate, ctx) => oracle.execute(id, params, signal, onUpdate, ctx),
-		renderCall: (args, theme, _context) => oracle.renderCall(args, theme),
-		renderResult: (result, opts, theme, context) => oracle.renderResult(result, opts, theme, context),
-	});
+    const oracle = new Subagent(ORACLE_SPEC);
+    pi.registerTool({
+        name: "oracle",
+        label: "Oracle",
+        description: ORACLE_DESCRIPTION,
+        parameters: SubagentParams,
+        execute: (id, params, signal, onUpdate, ctx) =>
+            oracle.execute(id, params, signal, onUpdate, ctx),
+        renderCall: (args, theme, _context) => oracle.renderCall(args, theme),
+        renderResult: (result, opts, theme, context) =>
+            oracle.renderResult(result, opts, theme, context),
+    });
 }
