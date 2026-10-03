@@ -444,16 +444,21 @@ type TaskStatus = "completed" | "failed";
 
 /**
  * Independent facts about one background-task alias. Worktree existence is
- * expressed by worktreePath being defined (no separate boolean).
+ * expressed by the optional worktree entity (path + dirty always together:
+ * both come from the same worktree.sh list entry).
  */
 interface TaskFacts {
     name: string;
-    worktreePath?: string;
-    dirty?: boolean;
+    worktree?: WorktreeRef;
     sessionExists: boolean;
     taskStatus?: TaskStatus;
     /** Latest run's child session file (result.json sessionFile); absent while running. */
     sessionFile?: string;
+}
+
+interface WorktreeRef {
+    path: string;
+    dirty: boolean;
 }
 
 async function resolveTaskFacts(
@@ -486,8 +491,9 @@ async function resolveTaskFacts(
 
     return {
         name,
-        worktreePath: worktree?.path,
-        dirty: worktree?.dirty,
+        worktree: worktree
+            ? { path: worktree.path, dirty: worktree.dirty }
+            : undefined,
         sessionExists,
         taskStatus: childResult?.status,
         sessionFile: childResult?.sessionFile,
@@ -501,7 +507,9 @@ async function resolveTaskFacts(
  * and session existence. Source is the worktree list only — session-only
  * leftovers are not listed.
  */
-async function listTaskWorktrees(pi: ExtensionAPI): Promise<TaskFacts[]> {
+async function listTaskWorktrees(
+    pi: ExtensionAPI,
+): Promise<WorktreeTaskFacts[]> {
     const wtResult = await pi.exec("bash", [WORKTREE_SH, "list", "--json"]);
     const worktrees =
         wtResult.code === 0 ? parseWorktreeOutput(wtResult.stdout) : [];
@@ -509,7 +517,7 @@ async function listTaskWorktrees(pi: ExtensionAPI): Promise<TaskFacts[]> {
 
     const env = await getTasksEnv(pi);
     const sessions = env ? await listSessionNames(pi, env.socketPath) : [];
-    const result: TaskFacts[] = [];
+    const result: WorktreeTaskFacts[] = [];
     for (const wt of [...worktrees].sort((a, b) =>
         a.branch.localeCompare(b.branch),
     )) {
@@ -520,8 +528,7 @@ async function listTaskWorktrees(pi: ExtensionAPI): Promise<TaskFacts[]> {
             : null;
         result.push({
             name: wt.branch,
-            worktreePath: wt.path,
-            dirty: wt.dirty,
+            worktree: { path: wt.path, dirty: wt.dirty },
             sessionExists: sessions.includes(
                 taskSessionName(taskUuid(wt.branch)),
             ),
@@ -536,7 +543,7 @@ async function selectTask(
     pi: ExtensionAPI,
     ctx: ExtensionCommandContext,
     title: string,
-): Promise<TaskFacts | null> {
+): Promise<WorktreeTaskFacts | null> {
     const worktrees = await listTaskWorktrees(pi);
     if (worktrees.length === 0) {
         ctx.ui.notify("No background tasks available.", "info");
@@ -546,12 +553,12 @@ async function selectTask(
     // Display row: "<alias> (<taskStatus>|running, <dirty>) (no session)" —
     // each mark omitted per facts; running = live session, no result yet.
     // Map display strings back to facts to avoid parsing.
-    const displayToFacts = new Map<string, TaskFacts>();
+    const displayToFacts = new Map<string, WorktreeTaskFacts>();
     for (const bw of worktrees) {
         const marks: string[] = [];
         if (bw.taskStatus) marks.push(bw.taskStatus);
         else if (bw.sessionExists) marks.push("running");
-        if (bw.dirty) marks.push("dirty");
+        if (bw.worktree.dirty) marks.push("dirty");
         const mark = marks.length > 0 ? ` (${marks.join(", ")})` : "";
         const noSession = bw.sessionExists ? "" : " (no session)";
         displayToFacts.set(`${bw.name}${mark}${noSession}`, bw);
@@ -573,10 +580,18 @@ type TaskAction =
     | "vscode"
     | "close";
 
+// taskActionItems' menu invariants as types: worktree-gated actions (status,
+// vscode, close) imply a worktree; session-gated actions (addToPrompt,
+// preview) imply sessionFile. listTaskWorktrees always yields worktrees, so
+// its facts are worktree-gated by construction; only the session-gated
+// cases assert at the menu boundary.
+type WorktreeTaskFacts = TaskFacts & { worktree: WorktreeRef };
+type SettledTaskFacts = TaskFacts & { sessionFile: string };
+
 /** Action labels for the selector, filtered by facts (worktree → status/vscode/close; settled → result; session file → addToPrompt/preview). */
 function taskActionItems(facts: TaskFacts): SelectItem[] {
     const items: SelectItem[] = [];
-    if (facts.worktreePath !== undefined) {
+    if (facts.worktree !== undefined) {
         items.push({ value: "status", label: "Status (state / attach)" });
     }
     if (facts.taskStatus) {
@@ -586,7 +601,7 @@ function taskActionItems(facts: TaskFacts): SelectItem[] {
         items.push({ value: "addToPrompt", label: "Add session to prompt" });
         items.push({ value: "preview", label: "Preview session" });
     }
-    if (facts.worktreePath !== undefined) {
+    if (facts.worktree !== undefined) {
         items.push({ value: "vscode", label: "Open in VS Code" });
         items.push({
             value: "close",
@@ -656,20 +671,11 @@ async function selectTaskAction(
 async function runCloseAction(
     pi: ExtensionAPI,
     ctx: ExtensionCommandContext,
-    facts: TaskFacts,
+    facts: WorktreeTaskFacts,
 ): Promise<void> {
-    // Worktree existence is a prerequisite for close.
-    if (facts.worktreePath === undefined) {
-        ctx.ui.notify(
-            `Background task "${facts.name}" does not exist (no worktree).`,
-            "error",
-        );
-        return;
-    }
-
     // Interactive confirm maps to force:true; never close a dirty worktree without it.
     let force = false;
-    if (facts.dirty) {
+    if (facts.worktree.dirty) {
         const proceed = await ctx.ui.confirm(
             "Dirty Worktree",
             `Background task "${facts.name}" has uncommitted changes. Close anyway?`,
@@ -695,18 +701,9 @@ async function runCloseAction(
 async function runStatusAction(
     pi: ExtensionAPI,
     ctx: ExtensionCommandContext,
-    facts: TaskFacts,
+    facts: WorktreeTaskFacts,
 ): Promise<void> {
     const { name: taskName } = facts;
-
-    // Status observes the current task: a missing worktree fails fast.
-    if (facts.worktreePath === undefined) {
-        ctx.ui.notify(
-            `Background task "${taskName}" does not exist (no worktree).`,
-            "error",
-        );
-        return;
-    }
 
     const env = await getTasksEnv(pi);
     if (!env) {
@@ -734,7 +731,7 @@ async function runStatusAction(
 
     const lines = formatLogWidgetLines(
         taskName,
-        facts.worktreePath,
+        facts.worktree.path,
         attachCommand,
         attachCopied,
         result,
@@ -748,19 +745,11 @@ async function runStatusAction(
 async function runVscodeAction(
     pi: ExtensionAPI,
     ctx: ExtensionCommandContext,
-    facts: TaskFacts,
+    facts: WorktreeTaskFacts,
 ): Promise<void> {
-    if (facts.worktreePath === undefined) {
-        ctx.ui.notify(
-            `Background task "${facts.name}" does not exist (no worktree).`,
-            "error",
-        );
-        return;
-    }
-
-    await pi.exec("code", [facts.worktreePath]);
+    await pi.exec("code", [facts.worktree.path]);
     ctx.ui.notify(
-        `Opened VS Code for "${facts.name}" at ${facts.worktreePath}`,
+        `Opened VS Code for "${facts.name}" at ${facts.worktree.path}`,
         "info",
     );
 }
@@ -1055,7 +1044,7 @@ async function closeTask(
     const { name, force = false } = opts;
     const facts = await resolveTaskFacts(pi, name);
 
-    if (facts.worktreePath === undefined) {
+    if (facts.worktree === undefined) {
         return {
             ok: false,
             name,
@@ -1063,7 +1052,7 @@ async function closeTask(
         };
     }
 
-    if (facts.dirty && !force) {
+    if (facts.worktree.dirty && !force) {
         return {
             ok: false,
             name,
@@ -1073,7 +1062,7 @@ async function closeTask(
     }
 
     const cleanArgs = [WORKTREE_SH, "clean", name];
-    if (facts.dirty) cleanArgs.push("--force");
+    if (facts.worktree.dirty) cleanArgs.push("--force");
     cleanArgs.push("--json");
     const cleanResult = await pi.exec("bash", cleanArgs);
     if (cleanResult.code !== 0) {
@@ -1176,7 +1165,7 @@ async function dispatchBackgroundTask(
 
     const existing = await resolveTaskFacts(pi, alias);
     const existingParts: string[] = [];
-    if (existing.worktreePath !== undefined) existingParts.push("worktree");
+    if (existing.worktree !== undefined) existingParts.push("worktree");
     if (existing.sessionExists) existingParts.push("tmux session");
     if (existingParts.length > 0) {
         throw new Error(
@@ -1535,43 +1524,30 @@ export default function (pi: ExtensionAPI): void {
                     case "status":
                         await runStatusAction(pi, ctx, selected);
                         break;
-                    case "addToPrompt":
-                        if (!selected.sessionFile) {
-                            ctx.ui.notify(
-                                `Background task "${selected.name}" has no settled session file.`,
-                                "error",
-                            );
-                            break;
-                        }
+                    case "addToPrompt": {
+                        const { sessionFile } = selected as SettledTaskFacts;
                         // Alias (= branch) names the task up front: the session
                         // file name only carries a uuid.
                         addSessionToPrompt(
                             ctx,
-                            selected.sessionFile,
-                            `read background task ${selected.name} session @${selected.sessionFile}`,
+                            sessionFile,
+                            `read background task ${selected.name} session @${sessionFile}`,
                         );
                         // Session added to the editor: the task's purpose is served;
                         // returning to the list has no next step. Exit the flow.
                         return;
+                    }
                     case "result":
                         await runAddResultAction(pi, ctx, selected);
                         // Result added to the editor: same as addToPrompt,
                         // no next step in the list. Exit the flow.
                         return;
-                    case "preview":
-                        if (!selected.sessionFile) {
-                            ctx.ui.notify(
-                                `Background task "${selected.name}" has no settled session file.`,
-                                "error",
-                            );
-                            break;
-                        }
-                        await previewSessionFile(
-                            ctx,
-                            selected.name,
-                            selected.sessionFile,
-                        );
+                    case "preview": {
+                        const { name, sessionFile } =
+                            selected as SettledTaskFacts;
+                        await previewSessionFile(ctx, name, sessionFile);
                         break;
+                    }
                     case "vscode":
                         await runVscodeAction(pi, ctx, selected);
                         // Attention moved to the external editor; no reason to loop
