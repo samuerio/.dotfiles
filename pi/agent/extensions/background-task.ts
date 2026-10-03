@@ -503,11 +503,11 @@ async function resolveTaskFacts(
 // ─── UI Select Helpers ────────────────────────────────────────────
 
 /**
- * Task worktree list: worktree.sh output joined with result.json task status
- * and session existence. Source is the worktree list only — session-only
- * leftovers are not listed.
+ * Background task list: worktree.sh output (worktree facts) joined with
+ * result.json task status and session existence. Source is the worktree
+ * list only — session-only leftovers are not listed.
  */
-async function listTaskWorktrees(
+async function listTasks(
     pi: ExtensionAPI,
 ): Promise<WorktreeTaskFacts[]> {
     const wtResult = await pi.exec("bash", [WORKTREE_SH, "list", "--json"]);
@@ -518,19 +518,19 @@ async function listTaskWorktrees(
     const env = await getTasksEnv(pi);
     const sessions = env ? await listSessionNames(pi, env.socketPath) : [];
     const result: WorktreeTaskFacts[] = [];
-    for (const wt of [...worktrees].sort((a, b) =>
+    for (const worktree of [...worktrees].sort((a, b) =>
         a.branch.localeCompare(b.branch),
     )) {
         // Task status: verbatim result.json status; undefined while running or
         // when the worktree was not created by background_task.
         const childResult = env
-            ? await readTaskResult(env.tasksDir, wt.branch)
+            ? await readTaskResult(env.tasksDir, worktree.branch)
             : null;
         result.push({
-            name: wt.branch,
-            worktree: { path: wt.path, dirty: wt.dirty },
+            name: worktree.branch,
+            worktree: { path: worktree.path, dirty: worktree.dirty },
             sessionExists: sessions.includes(
-                taskSessionName(taskUuid(wt.branch)),
+                taskSessionName(taskUuid(worktree.branch)),
             ),
             taskStatus: childResult?.status,
             sessionFile: childResult?.sessionFile,
@@ -544,8 +544,8 @@ async function selectTask(
     ctx: ExtensionCommandContext,
     title: string,
 ): Promise<WorktreeTaskFacts | null> {
-    const worktrees = await listTaskWorktrees(pi);
-    if (worktrees.length === 0) {
+    const tasks = await listTasks(pi);
+    if (tasks.length === 0) {
         ctx.ui.notify("No background tasks available.", "info");
         return null;
     }
@@ -554,14 +554,14 @@ async function selectTask(
     // each mark omitted per facts; running = live session, no result yet.
     // Map display strings back to facts to avoid parsing.
     const displayToFacts = new Map<string, WorktreeTaskFacts>();
-    for (const bw of worktrees) {
+    for (const task of tasks) {
         const marks: string[] = [];
-        if (bw.taskStatus) marks.push(bw.taskStatus);
-        else if (bw.sessionExists) marks.push("running");
-        if (bw.worktree.dirty) marks.push("dirty");
+        if (task.taskStatus) marks.push(task.taskStatus);
+        else if (task.sessionExists) marks.push("running");
+        if (task.worktree.dirty) marks.push("dirty");
         const mark = marks.length > 0 ? ` (${marks.join(", ")})` : "";
-        const noSession = bw.sessionExists ? "" : " (no session)";
-        displayToFacts.set(`${bw.name}${mark}${noSession}`, bw);
+        const noSession = task.sessionExists ? "" : " (no session)";
+        displayToFacts.set(`${task.name}${mark}${noSession}`, task);
     }
 
     const choice = await ctx.ui.select(
@@ -569,7 +569,7 @@ async function selectTask(
         Array.from(displayToFacts.keys()),
     );
     if (!choice) return null;
-    return displayToFacts.get(choice) ?? null;
+    return displayToFacts.get(choice)!;
 }
 
 type TaskAction =
@@ -582,7 +582,7 @@ type TaskAction =
 
 // taskActionItems' menu invariants as types: worktree-gated actions (status,
 // vscode, close) imply a worktree; session-gated actions (addToPrompt,
-// preview) imply sessionFile. listTaskWorktrees always yields worktrees, so
+// preview) imply sessionFile. listTasks always yields worktrees, so
 // its facts are worktree-gated by construction; only the session-gated
 // cases assert at the menu boundary.
 type WorktreeTaskFacts = TaskFacts & { worktree: WorktreeRef };
@@ -1364,12 +1364,6 @@ function taskRootFlagValue(argv: string[]): string | undefined {
     return undefined;
 }
 
-/**
- * `pi --attach-background-task <alias> [--task-root <repoRoot>]`: attach to a
- * dispatched task's tmux session and exit (never starts the normal TUI). When
- * `--task-root` is supplied the socket is resolved from that dir; otherwise
- * from cwd's `git rev-parse --show-toplevel`.
- */
 function attachToBackgroundTaskAndExit(
     rawAlias: string,
     rawRoot?: string,
@@ -1466,8 +1460,7 @@ export default function (pi: ExtensionAPI): void {
         type: "string",
     });
     pi.registerFlag(TASK_ROOT_FLAG, {
-        description:
-            "Repo root for --attach-background-task (bypasses git rev-parse)",
+        description: "Repo root for --attach-background-task",
         type: "string",
     });
     const attachTarget = attachFlagValue(process.argv);
