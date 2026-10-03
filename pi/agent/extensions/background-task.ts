@@ -1153,14 +1153,14 @@ function formatCloseText(result: CloseResult): string {
 interface DispatchResult {
     alias: string;
     /** sha256(alias) truncated to 16 hex chars — worktree/run/session key. */
-    uuid?: string;
-    worktreePath?: string;
-    tmuxSession?: string;
-    attachCommand?: string;
-    provider?: string;
-    model?: string;
-    thinking?: string;
-    prompt?: string;
+    uuid: string;
+    worktreePath: string;
+    tmuxSession: string;
+    attachCommand: string;
+    provider: string;
+    model: string;
+    thinking: string;
+    prompt: string;
 }
 
 async function dispatchBackgroundTask(
@@ -1660,16 +1660,8 @@ export default function (pi: ExtensionAPI): void {
             return new Text(text, 0, 0);
         },
         renderResult(result, { expanded }, theme, context) {
-            const details = result.details as DispatchResult | undefined;
-            // Thrown failures arrive as pi's error result (context.isError:
-            // true, details {}); the details.ok check also covers legacy
-            // results persisted before failures switched to throwing. Both
-            // render the content text verbatim.
-            if (
-                context.isError ||
-                !details ||
-                (details as { ok?: boolean }).ok === false
-            ) {
+            const details = result.details as DispatchResult;
+            if (context.isError) {
                 const content = result.content.find(
                     (part) => part.type === "text",
                 );
@@ -1679,7 +1671,7 @@ export default function (pi: ExtensionAPI): void {
                     0,
                 );
             }
-            if (expanded && details.prompt) {
+            if (expanded) {
                 const container = new Container();
                 container.addChild(
                     new Text(
@@ -1689,17 +1681,13 @@ export default function (pi: ExtensionAPI): void {
                     ),
                 );
                 container.addChild(
-                    new Text(
-                        theme.fg("accent", details.attachCommand ?? ""),
-                        0,
-                        0,
-                    ),
+                    new Text(theme.fg("accent", details.attachCommand), 0, 0),
                 );
                 container.addChild(
                     new Text(
                         theme.fg(
                             "dim",
-                            `${details.provider ?? ""}/${details.model ?? ""} (${details.thinking ?? ""})`,
+                            `${details.provider}/${details.model} (${details.thinking})`,
                         ),
                         0,
                         0,
@@ -1716,8 +1704,8 @@ export default function (pi: ExtensionAPI): void {
             }
             let text = `${theme.fg("warning", "●")} ${theme.fg("toolTitle", theme.bold(details.alias))}`;
             text += theme.fg("muted", " · dispatched");
-            text += `\n  ${theme.fg("accent", details.attachCommand ?? "")}`;
-            text += `\n  ${theme.fg("dim", `${details.provider ?? ""}/${details.model ?? ""} (${details.thinking ?? ""})`)}`;
+            text += `\n  ${theme.fg("accent", details.attachCommand)}`;
+            text += `\n  ${theme.fg("dim", `${details.provider}/${details.model} (${details.thinking})`)}`;
             return new Text(text, 0, 0);
         },
     });
