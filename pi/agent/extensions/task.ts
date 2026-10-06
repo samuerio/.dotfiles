@@ -5,13 +5,16 @@
  *   - `task` : inline, general-purpose subagent. Config (model, thinking,
  *              tools, skills) is loaded once at registration time from
  *              `~/.pi/agent/subagent.json`; edits take effect on extension
- *              reload, not per call. A broken config aborts the extension
- *              load (pi reports it and continues without the tool) instead
- *              of surfacing the error only when the model calls the tool.
+ *              reload, not per call. Tools and skills are explicit opt-in:
+ *              omitted or empty = the child runs with no tools / no skills
+ *              (fail-closed, no silent inheritance of the child's defaults).
+ *              A missing or broken config aborts the extension load (pi
+ *              reports it and continues without the tool) instead of
+ *              surfacing the error only when the model calls the tool.
  *              Because the specialized subagents (finder.ts, oracle.ts,
  *              librarian.ts) are also tools, an inline subagent can whitelist
- *              them and call them from inside its child context (grandchild
- *              pi process).
+ *              them in `tools` and call them from inside its child context
+ *              (grandchild pi process).
  *
  * The spawn/parse/envelope/render machinery + the standard tool wiring live
  * in `lib/subagent.ts`; this file holds the inline persona, the
@@ -41,83 +44,101 @@ If AGENTS.md exists, treat it as ground truth for commands, style, structure. If
 For any coding task that involves thoroughly searching or understanding the codebase, use the finder tool to intelligently locate relevant code, functions, or patterns. This helps in understanding existing implementations, locating dependencies, and finding similar code before making changes.`;
 
 /**
- * Default configuration for inline subagent runs, read once at registration
- * time from `~/.pi/agent/subagent.json`. `skills` is required (the explicit
- * skill allowlist); other fields are optional and fall back to the child pi
- * process's own defaults.
+ * Inline defaults from `~/.pi/agent/subagent.json`, read once at registration
+ * time. All fields optional; omitted or empty `tools`/`skills` mean the child
+ * runs without them (the spec turns that into `--no-tools`/`--no-skills`).
  */
 interface InlineConfig {
 	model?: string;
 	thinking?: string;
 	tools?: string[];
-	skills: string[];
+	skills?: string[];
 }
 
 /**
- * Load inline defaults from `~/.pi/agent/subagent.json`. Returns an empty config
- * (all defaults) when the file is missing or unreadable. JSON parse errors are
- * surfaced to the caller.
+ * Load inline defaults from `~/.pi/agent/subagent.json`. The file is required:
+ * a missing file is an error rather than a silent all-defaults fallback, so
+ * new machines fail the extension load instead of quietly registering a
+ * no-tool/no-skill subagent. Unknown keys are rejected (typo guard). Returns
+ * the parsed config plus an error message on failure.
  */
 function loadInlineConfig(): { config: InlineConfig; error?: string } {
 	const configPath = path.join(getAgentDir(), "subagent.json");
-	if (!fs.existsSync(configPath)) return { config: { skills: [] } };
+	if (!fs.existsSync(configPath)) {
+		return { config: {}, error: `Inline config file not found: ${configPath}` };
+	}
 
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(fs.readFileSync(configPath, "utf-8"));
 	} catch (error) {
 		return {
-			config: { skills: [] },
+			config: {},
 			error: `Invalid JSON in inline config: ${configPath} (${error instanceof Error ? error.message : String(error)})`,
 		};
 	}
 
 	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-		return { config: { skills: [] }, error: `Inline config must be a JSON object: ${configPath}` };
+		return { config: {}, error: `Inline config must be a JSON object: ${configPath}` };
 	}
 
 	const raw = parsed as Record<string, unknown>;
-	const config: InlineConfig = { skills: [] };
+	for (const key of Object.keys(raw)) {
+		if (key !== "model" && key !== "thinking" && key !== "tools" && key !== "skills") {
+			return {
+				config: {},
+				error: `${configPath}: unknown key "${key}" (valid keys: model, thinking, tools, skills)`,
+			};
+		}
+	}
+
+	const config: InlineConfig = {};
 
 	if (typeof raw.model === "string" && raw.model.trim()) config.model = raw.model.trim();
 	if (typeof raw.thinking === "string" && raw.thinking.trim()) config.thinking = raw.thinking.trim();
-	if (Array.isArray(raw.tools)) {
-		const tools = raw.tools.filter((t): t is string => typeof t === "string" && t.trim().length > 0).map((t) => t.trim());
+	if (raw.tools !== undefined) {
+		if (!Array.isArray(raw.tools)) {
+			return { config: {}, error: `${configPath}: "tools" must be an array of tool names` };
+		}
+		const tools = raw.tools
+			.filter((t): t is string => typeof t === "string" && t.trim().length > 0)
+			.map((t) => t.trim());
 		if (tools.length > 0) config.tools = tools;
 	}
-	// `skills` is the single user-facing knob for the child's skills: the
-	// explicit allowlist handed to the child as `--skill <path>` entries.
-	// Missing or malformed key is a config error so the extension fails to
-	// load instead of silently changing which skills the child sees.
-	if (!Array.isArray(raw.skills)) {
-		return {
-			config: { skills: [] },
-			error: `${configPath}: missing required field "skills" — set [] to disable all skills, or list skill file/dir paths to enable`,
-		};
+	if (raw.skills !== undefined) {
+		if (!Array.isArray(raw.skills)) {
+			return {
+				config: {},
+				error: `${configPath}: "skills" must be an array of skill file/dir paths`,
+			};
+		}
+		// Keep non-empty string entries; expand a leading `~` to the home dir
+		// (spawn uses `shell: false`, so no shell expands `~` for us). Paths
+		// are passed through as-is (no existence check).
+		const home = os.homedir();
+		const skills = raw.skills
+			.filter((s): s is string => typeof s === "string" && s.trim().length > 0)
+			.map((s) => {
+				const trimmed = s.trim();
+				return trimmed === "~" || trimmed.startsWith("~/") ? path.join(home, trimmed.slice(1)) : trimmed;
+			});
+		if (skills.length > 0) config.skills = skills;
 	}
-	// Keep non-empty string entries; expand a leading `~` to the home dir —
-	// spawn uses `shell: false`, so no shell expands `~` for us. Paths are
-	// passed through as-is (no existence check).
-	const home = os.homedir();
-	config.skills = raw.skills
-		.filter((s): s is string => typeof s === "string" && s.trim().length > 0)
-		.map((s) => {
-			const trimmed = s.trim();
-			return trimmed === "~" || trimmed.startsWith("~/") ? path.join(home, trimmed.slice(1)) : trimmed;
-		});
 
 	return { config };
 }
 
 export default function (pi: ExtensionAPI) {
-	// Registration-time load: the spec and the tool description are resolved
-	// once here, so subagent.json edits require an extension reload.
 	const { config: inlineConfig, error: configError } = loadInlineConfig();
 	if (configError) throw new Error(configError);
 
-	const description = `Perform a task (a sub-task of the user's overall task) using a sub-agent that has access to the following tools: ${
-		inlineConfig.tools && inlineConfig.tools.length > 0 ? inlineConfig.tools.join(", ") : ""
-	}`;
+	// Declare the child's tool surface to the parent model: the explicit
+	// allowlist, or an honest "none" instead of a misleading empty tail.
+	const toolsDesc =
+		inlineConfig.tools && inlineConfig.tools.length > 0
+			? inlineConfig.tools.join(", ")
+			: "none (it can only reason from the prompt)";
+	const description = `Perform a task (a sub-task of the user's overall task) using a sub-agent that has access to the following tools: ${toolsDesc}`;
 
 	const inlineSpec: SubagentSpec = {
 		name: "task",

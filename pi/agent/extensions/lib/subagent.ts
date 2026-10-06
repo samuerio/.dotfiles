@@ -21,13 +21,16 @@ export interface SubagentSpec {
 	systemPrompt: string;
 	model?: string;
 	thinking?: string;
+	/**
+	 * Tool allowlist for the child process: `--tools <list>`. Omitted or
+	 * empty = the child runs with no tools (`--no-tools`).
+	 */
 	tools?: string[];
 	/**
 	 * Explicit skill allowlist for the child process: file/dir paths passed
-	 * via `--skill <path>`. Required — every spec must declare it (use `[]`
-	 * to run with no skills).
+	 * via `--skill <path>`. Omitted or empty = the child runs with no skills.
 	 */
-	skills: string[];
+	skills?: string[];
 }
 
 /** Model-facing parameters: `prompt` (the child's task) and `description` (short label). */
@@ -365,11 +368,11 @@ export class Subagent {
 		if (spec.model) args.push("--model", spec.model);
 		if (spec.thinking) args.push("--thinking", spec.thinking);
 		if (spec.tools && spec.tools.length > 0) args.push("--tools", spec.tools.join(","));
-		// Always disable skill discovery; skills load only from the explicit
-		// `--skill <path>` allowlist declared in the spec (`--no-skills` does
-		// not suppress explicitly passed `--skill` entries).
+		else args.push("--no-tools");
+		// Discovery off; `--no-skills` does not suppress explicitly passed
+		// `--skill` entries, so the two flags compose into an exact allowlist.
 		args.push("--no-skills");
-		for (const skillPath of spec.skills) args.push("--skill", skillPath);
+		for (const skillPath of spec.skills ?? []) args.push("--skill", skillPath);
 
 		let tmpPromptDir: string | null = null;
 		let tmpPromptPath: string | null = null;
