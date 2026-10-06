@@ -1218,7 +1218,10 @@ function formatCloseText(result: CloseResult): string {
 
 // ─── Background Task Dispatch ─────────────────────────────────────
 
-interface DispatchResult {
+/** Thrown by dispatchBackgroundTask when the alias is already taken (live tmux session or existing run dir). Callers can use instanceof to retry with a different alias. */
+export class TaskAliasConflictError extends Error {}
+
+export interface DispatchResult {
     alias: string;
     /** sha256(alias) truncated to 16 hex chars — worktree/run/session key. */
     uuid: string;
@@ -1232,7 +1235,7 @@ interface DispatchResult {
     prompt: string;
 }
 
-async function dispatchBackgroundTask(
+export async function dispatchBackgroundTask(
     pi: ExtensionAPI,
     opts: {
         alias: string;
@@ -1265,7 +1268,7 @@ async function dispatchBackgroundTask(
     // duplicate dispatch cannot slip through.
     const sessions = await listSessionNames(pi, env.socketPath);
     if (sessions.includes(session)) {
-        throw new Error(
+        throw new TaskAliasConflictError(
             `Background task "${alias}" already exists (tmux session). Choose a different alias.`,
         );
     }
@@ -1279,7 +1282,7 @@ async function dispatchBackgroundTask(
         await mkdir(runDir, { mode: 0o700 });
     } catch (error) {
         if ((error as NodeJS.ErrnoException)?.code === "EEXIST") {
-            throw new Error(
+            throw new TaskAliasConflictError(
                 `Background task "${alias}" already exists (run dir). Choose a different alias.`,
             );
         }

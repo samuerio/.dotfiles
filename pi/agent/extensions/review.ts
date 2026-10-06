@@ -7,6 +7,10 @@
  * - Review against a base branch (PR style)
  * - Review uncommitted changes
  * - Review a specific commit
+ * - Review as a background task (dispatches the prompt to an unattended child
+ *   Pi in the main repo via the background-task extension; fire-and-forget,
+ *   results observed via /background-tasks). The child reviews the working
+ *   tree as it exists when it runs, so uncommitted reviews may see later edits.
  * - Shared custom review instructions (applied to all review modes when configured)
  *
  * Usage:
@@ -44,6 +48,12 @@ import {
 } from "@earendil-works/pi-tui";
 import path from "node:path";
 import { promises as fs } from "node:fs";
+
+import {
+    dispatchBackgroundTask,
+    TaskAliasConflictError,
+    type DispatchResult,
+} from "./background-task.ts";
 
 // State to track fresh session review (where we branched from).
 // Module-level state means only one review can be active at a time.
@@ -401,6 +411,8 @@ type ReviewTarget =
           prNumber: number;
           baseBranch: string;
           title: string;
+          /** Branch that was checked out before the PR checkout (for the background review switch-back hint). */
+          originalBranch?: string | null;
       }
     | { type: "folder"; paths: string[] };
 
@@ -737,7 +749,13 @@ async function getPrInfo(
 async function checkoutPr(
     pi: ExtensionAPI,
     prNumber: number,
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{
+    success: boolean;
+    error?: string;
+    originalBranch?: string | null;
+}> {
+    // Capture the pre-checkout branch before gh pr checkout switches it.
+    const originalBranch = await getCurrentBranch(pi);
     const { stdout, stderr, code } = await pi.exec("gh", [
         "pr",
         "checkout",
@@ -751,7 +769,7 @@ async function checkoutPr(
         };
     }
 
-    return { success: true };
+    return { success: true, originalBranch };
 }
 
 /**
@@ -886,6 +904,61 @@ function getUserFacingHint(target: ReviewTarget): string {
                 : `folders: ${joined}`;
         }
     }
+}
+
+/** Short target token used in auto-generated background review aliases. */
+function reviewTargetToken(target: ReviewTarget): string {
+    switch (target.type) {
+        case "baseBranch":
+            return "branch";
+        case "pullRequest":
+            return "pr";
+        default:
+            return target.type;
+    }
+}
+
+/** Local-time HHmmss stamp for auto-generated aliases. */
+function hhmmssStamp(): string {
+    const now = new Date();
+    const pad = (value: number) => String(value).padStart(2, "0");
+    return `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+}
+
+/**
+ * Assemble the full review prompt (rubric + target focus + shared custom
+ * instructions + extra instruction + project guidelines). Shared by the
+ * interactive review path (executeReview) and background dispatch.
+ */
+async function buildFullReviewPrompt(
+    pi: ExtensionAPI,
+    cwd: string,
+    target: ReviewTarget,
+    options?: { includeLocalChanges?: boolean; extraInstruction?: string },
+): Promise<string> {
+    const [prompt, projectGuidelines] = await Promise.all([
+        buildReviewPrompt(pi, target, {
+            includeLocalChanges: options?.includeLocalChanges === true,
+        }),
+        loadProjectReviewGuidelines(cwd),
+    ]);
+
+    // Combine the review rubric with the specific prompt
+    let fullPrompt = `${REVIEW_RUBRIC}\n\n---\n\nPlease perform a code review with the following focus:\n\n${prompt}`;
+
+    if (reviewCustomInstructions) {
+        fullPrompt += `\n\nShared custom review instructions (applies to all reviews):\n\n${reviewCustomInstructions}`;
+    }
+
+    if (options?.extraInstruction?.trim()) {
+        fullPrompt += `\n\nAdditional user-provided review instruction:\n\n${options.extraInstruction.trim()}`;
+    }
+
+    if (projectGuidelines) {
+        fullPrompt += `\n\nThis project has additional instructions for code reviews:\n\n${projectGuidelines}`;
+    }
+
+    return fullPrompt;
 }
 
 type AssistantSnapshot = {
@@ -1631,6 +1704,7 @@ export default function reviewExtension(pi: ExtensionAPI) {
             prNumber,
             baseBranch: prInfo.baseBranch,
             title: prInfo.title,
+            originalBranch: checkoutResult.originalBranch,
         };
     }
 
@@ -1718,26 +1792,11 @@ export default function reviewExtension(pi: ExtensionAPI) {
             });
         }
 
-        const prompt = await buildReviewPrompt(pi, target, {
-            includeLocalChanges: options?.includeLocalChanges === true,
+        const fullPrompt = await buildFullReviewPrompt(pi, ctx.cwd, target, {
+            includeLocalChanges: options?.includeLocalChanges,
+            extraInstruction: options?.extraInstruction,
         });
         const hint = getUserFacingHint(target);
-        const projectGuidelines = await loadProjectReviewGuidelines(ctx.cwd);
-
-        // Combine the review rubric with the specific prompt
-        let fullPrompt = `${REVIEW_RUBRIC}\n\n---\n\nPlease perform a code review with the following focus:\n\n${prompt}`;
-
-        if (reviewCustomInstructions) {
-            fullPrompt += `\n\nShared custom review instructions (applies to all reviews):\n\n${reviewCustomInstructions}`;
-        }
-
-        if (options?.extraInstruction?.trim()) {
-            fullPrompt += `\n\nAdditional user-provided review instruction:\n\n${options.extraInstruction.trim()}`;
-        }
-
-        if (projectGuidelines) {
-            fullPrompt += `\n\nThis project has additional instructions for code reviews:\n\n${projectGuidelines}`;
-        }
 
         const modeHint = useFreshSession ? " (fresh session)" : "";
         ctx.ui.notify(`Starting review: ${hint}${modeHint}`, "info");
@@ -1745,6 +1804,75 @@ export default function reviewExtension(pi: ExtensionAPI) {
         // Send as a user message that triggers a turn
         pi.sendUserMessage(fullPrompt);
         return true;
+    }
+
+    /**
+     * Dispatch the review as a background task (no worktree: the child runs
+     * directly in the main repo). Fire-and-forget: results are observed via
+     * /background-tasks (Status to watch, "Add result to prompt" to act on
+     * findings). Never touches review state (reviewOriginId / /end-review).
+     */
+    async function executeBackgroundReview(
+        ctx: ExtensionCommandContext,
+        target: ReviewTarget,
+        extraInstruction?: string,
+    ): Promise<void> {
+        const fullPrompt = await buildFullReviewPrompt(pi, ctx.cwd, target, {
+            extraInstruction,
+        });
+        const alias = `review-${reviewTargetToken(target)}-${hhmmssStamp()}`;
+        const description = `code review: ${getUserFacingHint(target)}`;
+
+        let result: DispatchResult;
+        try {
+            result = await dispatchBackgroundTask(pi, {
+                alias,
+                prompt: fullPrompt,
+                description,
+                worktree: false,
+                ctx,
+            });
+        } catch (error) {
+            // Alias collision (two dispatches within the same second): retry
+            // once with a "-2" suffix. Other dispatch failures leave a task
+            // that is listed and closable via /background-tasks; report and stop.
+            if (!(error instanceof TaskAliasConflictError)) {
+                ctx.ui.notify(
+                    error instanceof Error ? error.message : String(error),
+                    "error",
+                );
+                return;
+            }
+            try {
+                result = await dispatchBackgroundTask(pi, {
+                    alias: `${alias}-2`,
+                    prompt: fullPrompt,
+                    description,
+                    worktree: false,
+                    ctx,
+                });
+            } catch (retryError) {
+                ctx.ui.notify(
+                    retryError instanceof Error
+                        ? retryError.message
+                        : String(retryError),
+                    "error",
+                );
+                return;
+            }
+        }
+
+        const lines = [
+            `Background review dispatched: ${result.alias}`,
+            `  ${result.attachCommand}`,
+            `  Results via /background-tasks → select "${result.alias}" → Add result to prompt`,
+        ];
+        if (target.type === "pullRequest" && target.originalBranch) {
+            lines.push(
+                `  Original branch: ${target.originalBranch} (switch back: git checkout ${target.originalBranch})`,
+            );
+        }
+        ctx.ui.notify(lines.join("\n"), "info");
     }
 
     /**
@@ -1935,6 +2063,7 @@ export default function reviewExtension(pi: ExtensionAPI) {
             prNumber,
             baseBranch: prInfo.baseBranch,
             title: prInfo.title,
+            originalBranch: checkoutResult.originalBranch,
         };
     }
 
@@ -2156,7 +2285,6 @@ export default function reviewExtension(pi: ExtensionAPI) {
                 ctx.ui.notify("Not a git repository", "error");
                 return;
             }
-
             // Try to parse direct arguments
             let target: ReviewTarget | null = null;
             let fromSelector = false;
@@ -2218,36 +2346,35 @@ export default function reviewExtension(pi: ExtensionAPI) {
                     return;
                 }
 
-                // Determine if we should use fresh session mode
-                // Check if this is a new session (no messages yet)
-                const entries = ctx.sessionManager.getEntries();
-                const messageCount = entries.filter(
-                    (e) => e.type === "message",
-                ).length;
+                // Always ask which mode to run the review in: background
+                // dispatch is independent of session content, and even an
+                // empty session differs between fresh (returnable via
+                // /end-review) and current semantics.
+                const choice = await ctx.ui.select("Start review in:", [
+                    "Empty branch",
+                    "Current session",
+                    "Background task",
+                ]);
 
-                // In an empty session, default to fresh review mode so /end-review works consistently.
-                let useFreshSession = messageCount === 0;
-
-                if (messageCount > 0) {
-                    // Existing session - ask user which mode they want
-                    const choice = await ctx.ui.select("Start review in:", [
-                        "Empty branch",
-                        "Current session",
-                    ]);
-
-                    if (choice === undefined) {
-                        if (fromSelector) {
-                            target = null;
-                            continue;
-                        }
-                        ctx.ui.notify("Review cancelled", "info");
-                        return;
+                if (choice === undefined) {
+                    if (fromSelector) {
+                        target = null;
+                        continue;
                     }
-
-                    useFreshSession = choice === "Empty branch";
+                    ctx.ui.notify("Review cancelled", "info");
+                    return;
                 }
 
-                await executeReview(ctx, target, useFreshSession, {
+                if (choice === "Background task") {
+                    // Loop fixing is mutually exclusive with every mode
+                    // choice: when reviewLoopFixingEnabled is true the
+                    // handler returns at runLoopFixingReview above, before
+                    // this selector is ever shown.
+                    await executeBackgroundReview(ctx, target, extraInstruction);
+                    return;
+                }
+
+                await executeReview(ctx, target, choice === "Empty branch", {
                     extraInstruction,
                 });
                 return;
