@@ -17,7 +17,8 @@ IDE 级编辑能力，集成 `telescope`/`fzf` 搜索与 `opencode.nvim` AI 工�
 
 pi coding agent 的自定义 TypeScript 扩展集，仓库中除 `nvim/` 外最活跃的子系统。按职责分组：
 会话编排与交接（`continue`、`pick-session`、`handoff`、`session-breakdown`、`background-task`（后台任务派发：
-git worktree + tmux 子会话 + 结果回报）、`tmux-split-fork`）、TUI 工具与编辑（`preview`、`view-image`、`files`、
+可选 git worktree + tmux 子会话 + `.pi/background-tasks/tasks/` 任务注册表 + 结果回报）、`tmux-split-fork`）、
+TUI 工具与编辑（`preview`、`view-image`、`files`、
 `context`、`unified-edit`、`review`、`answer`、`btw`（在主会话旁开启独立旁路线程））、
 模式与提示词编辑（`prompt-editor`）、监控与装饰（`cache-hit-monitor`、`notify`、`whimsical`、`inline`）。
 依赖 pi 运行时库 `@earendil-works/pi-coding-agent`、

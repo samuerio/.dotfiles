@@ -1,7 +1,15 @@
 import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import {
+    mkdir,
+    readdir,
+    readFile,
+    rename,
+    rm,
+    stat,
+    writeFile,
+} from "node:fs/promises";
 import * as path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
@@ -143,6 +151,22 @@ function taskUuid(alias: string): string {
         .update(alias, "utf8")
         .digest("hex")
         .slice(0, 16);
+}
+
+/**
+ * Flat alias charset: no slashes (run dir = tasks/<alias>, so readdir finds one
+ * entry per task), no leading "-" (the alias is spliced into the attach
+ * command line), no path traversal ("." / ".." are rejected by the required
+ * leading alphanumeric).
+ */
+const ALIAS_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+function validateAlias(alias: string): void {
+    if (!ALIAS_PATTERN.test(alias)) {
+        throw new Error(
+            `Invalid task alias "${alias}": 1-64 chars, must start with a letter or digit, may contain letters, digits, ".", "_" and "-" (slashes are not allowed).`,
+        );
+    }
 }
 
 function taskSessionName(uuid: string): string {
@@ -351,28 +375,65 @@ function registerTaskChildReporter(pi: ExtensionAPI, resultPath: string): void {
 
 // ─── Run Artifacts (task.md / result.json / sessions) ─────────────
 
+/** Registry root: one subdirectory per task; the source of truth for task existence. */
+function tasksRoot(tasksDir: string): string {
+    return path.join(tasksDir, "tasks");
+}
+
 function taskRunDir(tasksDir: string, alias: string): string {
-    return path.join(tasksDir, taskUuid(alias));
+    return path.join(tasksRoot(tasksDir), alias);
 }
 
 function taskSessionsDir(tasksDir: string): string {
     return path.join(tasksDir, "sessions");
 }
 
+/** Parse one JSON file from a run dir; null when missing or unreadable. */
+async function readRunJson(
+    tasksDir: string,
+    alias: string,
+    file: string,
+): Promise<unknown> {
+    try {
+        return JSON.parse(
+            await readFile(path.join(taskRunDir(tasksDir, alias), file), "utf8"),
+        );
+    } catch {
+        return null;
+    }
+}
+
 async function readTaskResult(
     tasksDir: string,
     alias: string,
 ): Promise<BackgroundTaskResult | null> {
-    try {
-        return JSON.parse(
-            await readFile(
-                path.join(taskRunDir(tasksDir, alias), "result.json"),
-                "utf8",
-            ),
-        ) as BackgroundTaskResult;
-    } catch {
-        return null;
+    return (await readRunJson(
+        tasksDir,
+        alias,
+        "result.json",
+    )) as BackgroundTaskResult | null;
+}
+
+/** Dispatch-time registry record; worktree is intent, reality is probed via existsSync. */
+interface TaskMeta {
+    version: 1;
+    worktree: boolean;
+}
+
+async function readTaskMeta(
+    tasksDir: string,
+    alias: string,
+): Promise<TaskMeta | null> {
+    const value = await readRunJson(tasksDir, alias, "meta.json");
+    if (
+        value &&
+        typeof value === "object" &&
+        (value as TaskMeta).version === 1 &&
+        typeof (value as TaskMeta).worktree === "boolean"
+    ) {
+        return value as TaskMeta;
     }
+    return null;
 }
 
 /** Dispatch timestamp = task.md mtime (written right before the child starts). */
@@ -392,12 +453,6 @@ async function readTaskStartedAt(
 
 // ─── Script Output Types ──────────────────────────────────────────
 
-interface WorktreeEntry {
-    branch: string;
-    path: string;
-    dirty: boolean;
-}
-
 interface OpenOutput {
     branch: string;
     worktreePath: string;
@@ -412,14 +467,6 @@ interface CleanOutput {
 }
 
 // ─── Script Output Parsers ────────────────────────────────────────
-
-function parseWorktreeOutput(stdout: string): WorktreeEntry[] {
-    try {
-        return JSON.parse(stdout);
-    } catch {
-        return [];
-    }
-}
 
 function parseOpenOutput(stdout: string): OpenOutput | null {
     try {
@@ -443,9 +490,10 @@ function parseCleanOutput(stdout: string): CleanOutput | null {
 type TaskStatus = "completed" | "failed";
 
 /**
- * Independent facts about one background-task alias. Worktree existence is
- * expressed by the optional worktree entity (path + dirty always together:
- * both come from the same worktree.sh list entry).
+ * Independent facts about one background-task alias. The run dir
+ * (tasks/<alias>) is the source of truth; the worktree is optional and
+ * expressed by the optional worktree entity (meta.json intent × existsSync
+ * reality).
  */
 interface TaskFacts {
     name: string;
@@ -458,7 +506,48 @@ interface TaskFacts {
 
 interface WorktreeRef {
     path: string;
-    dirty: boolean;
+}
+
+/**
+ * Worktree path is a pure function of the alias; presence is probed on
+ * demand. Mirrors worktree.sh's `"$repo_main/.worktree/$(sha256[:16])"`
+ * layout — keep the two in sync.
+ */
+function taskWorktreePath(repoRoot: string, alias: string): string {
+    return path.join(repoRoot, ".worktree", taskUuid(alias));
+}
+
+/**
+ * Per-name fact core shared by the task list and single-task resolution:
+ * meta.json worktree intent × existsSync worktree reality (a missing
+ * worktree path, e.g. manually removed, reads as already cleaned) joined
+ * with result.json status and tmux session existence. The caller supplies
+ * env and session names so listing resolves them once for all tasks.
+ */
+async function taskFactsFor(
+    env: TasksEnv,
+    sessions: string[],
+    name: string,
+): Promise<TaskFacts> {
+    // Worktree: meta.json intent, written at the atomic claim before any
+    // worktree side effect, so a missing meta only means a broken run dir.
+    const meta = await readTaskMeta(env.tasksDir, name);
+    const worktreePath = taskWorktreePath(env.repoRoot, name);
+    const worktree =
+        meta?.worktree && existsSync(worktreePath)
+            ? { path: worktreePath }
+            : undefined;
+
+    // Task status: verbatim result.json status; undefined while running.
+    const childResult = await readTaskResult(env.tasksDir, name);
+
+    return {
+        name,
+        worktree,
+        sessionExists: sessions.includes(taskSessionName(taskUuid(name))),
+        taskStatus: childResult?.status,
+        sessionFile: childResult?.sessionFile,
+    };
 }
 
 async function resolveTaskFacts(
@@ -466,102 +555,75 @@ async function resolveTaskFacts(
     name: string,
 ): Promise<TaskFacts> {
     const env = await getTasksEnv(pi);
-
-    // Worktree
-    const wtResult = await pi.exec("bash", [
-        WORKTREE_SH,
-        "list",
-        "--json",
-        "-q",
-        name,
-    ]);
-    const worktrees =
-        wtResult.code === 0 ? parseWorktreeOutput(wtResult.stdout) : [];
-    const worktree = worktrees.find((w) => w.branch === name);
-
-    // tmux session (per-repo socket, session named background-task-<uuid>)
-    let sessionExists = false;
-    if (env) {
-        const sessions = await listSessionNames(pi, env.socketPath);
-        sessionExists = sessions.includes(taskSessionName(taskUuid(name)));
+    if (!env) {
+        throw new Error(
+            "Failed to resolve repo root for background-task artifacts.",
+        );
     }
-
-    // Task status from run artifacts
-    const childResult = env ? await readTaskResult(env.tasksDir, name) : null;
-
-    return {
-        name,
-        worktree: worktree
-            ? { path: worktree.path, dirty: worktree.dirty }
-            : undefined,
-        sessionExists,
-        taskStatus: childResult?.status,
-        sessionFile: childResult?.sessionFile,
-    };
+    // tmux session (per-repo socket, session named background-task-<uuid>)
+    const sessions = await listSessionNames(pi, env.socketPath);
+    return taskFactsFor(env, sessions, name);
 }
 
 // ─── UI Select Helpers ────────────────────────────────────────────
 
 /**
- * Background task list: worktree.sh output (worktree facts) joined with
- * result.json task status and session existence. Source is the worktree
- * list only — session-only leftovers are not listed.
+ * Background task list: readdir of tasks/ (the source of truth — one
+ * subdirectory per task) joined with meta.json worktree intent, existsSync
+ * worktree reality, result.json task status, and tmux session existence.
+ * Dirty state is not listed; it is computed at close time for the selected
+ * task only.
  */
-async function listTasks(
-    pi: ExtensionAPI,
-): Promise<WorktreeTaskFacts[]> {
-    const wtResult = await pi.exec("bash", [WORKTREE_SH, "list", "--json"]);
-    const worktrees =
-        wtResult.code === 0 ? parseWorktreeOutput(wtResult.stdout) : [];
-    if (worktrees.length === 0) return [];
-
+async function listTasks(pi: ExtensionAPI): Promise<TaskFacts[]> {
     const env = await getTasksEnv(pi);
-    const sessions = env ? await listSessionNames(pi, env.socketPath) : [];
-    const result: WorktreeTaskFacts[] = [];
-    for (const worktree of [...worktrees].sort((a, b) =>
-        a.branch.localeCompare(b.branch),
-    )) {
-        // Task status: verbatim result.json status; undefined while running or
-        // when the worktree was not created by background_task.
-        const childResult = env
-            ? await readTaskResult(env.tasksDir, worktree.branch)
-            : null;
-        result.push({
-            name: worktree.branch,
-            worktree: { path: worktree.path, dirty: worktree.dirty },
-            sessionExists: sessions.includes(
-                taskSessionName(taskUuid(worktree.branch)),
-            ),
-            taskStatus: childResult?.status,
-            sessionFile: childResult?.sessionFile,
+    if (!env) return [];
+
+    let entries;
+    try {
+        entries = await readdir(tasksRoot(env.tasksDir), {
+            withFileTypes: true,
         });
+    } catch {
+        return [];
     }
-    return result;
+    const sessions = await listSessionNames(pi, env.socketPath);
+
+    // Per-entry reads are independent; resolve them in parallel.
+    const names = entries
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name);
+    const tasks = await Promise.all(
+        names.map((name) => taskFactsFor(env, sessions, name)),
+    );
+    return tasks.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 async function selectTask(
     pi: ExtensionAPI,
     ctx: ExtensionCommandContext,
     title: string,
-): Promise<WorktreeTaskFacts | null> {
+): Promise<TaskFacts | null> {
     const tasks = await listTasks(pi);
     if (tasks.length === 0) {
         ctx.ui.notify("No background tasks available.", "info");
         return null;
     }
 
-    // Display row: "<alias> (<taskStatus>|running, <dirty>) (no session)" —
-    // each mark omitted per facts; running = live session, no result yet.
+    // Display row: "<alias> (<taskStatus>|running) (no worktree) (no session)"
+    // — each mark omitted per facts; running = live session, no result yet.
     // Map display strings back to facts to avoid parsing.
-    const displayToFacts = new Map<string, WorktreeTaskFacts>();
+    const displayToFacts = new Map<string, TaskFacts>();
     for (const task of tasks) {
         const marks: string[] = [];
         if (task.taskStatus) marks.push(task.taskStatus);
         else if (task.sessionExists) marks.push("running");
-        if (task.worktree.dirty) marks.push("dirty");
         const mark = marks.length > 0 ? ` (${marks.join(", ")})` : "";
+        const noWorktree = task.worktree ? "" : " (no worktree)";
         const noSession = task.sessionExists ? "" : " (no session)";
-        displayToFacts.set(`${task.name}${mark}${noSession}`, task);
+        displayToFacts.set(
+            `${task.name}${mark}${noWorktree}${noSession}`,
+            task,
+        );
     }
 
     const choice = await ctx.ui.select(
@@ -580,20 +642,17 @@ type TaskAction =
     | "vscode"
     | "close";
 
-// taskActionItems' menu invariants as types: worktree-gated actions (status,
-// vscode, close) imply a worktree; session-gated actions (addToPrompt,
-// preview) imply sessionFile. listTasks always yields worktrees, so
-// its facts are worktree-gated by construction; only the session-gated
-// cases assert at the menu boundary.
+// taskActionItems' menu invariants as types: the worktree-gated action (vscode)
+// implies a worktree; session-gated actions (addToPrompt, preview) imply
+// sessionFile. Facts come from the tasks dir, so both gated cases assert at
+// the menu boundary (taskActionItems only offers them when the fact exists).
 type WorktreeTaskFacts = TaskFacts & { worktree: WorktreeRef };
 type SettledTaskFacts = TaskFacts & { sessionFile: string };
 
-/** Action labels for the selector, filtered by facts (worktree → status/vscode/close; settled → result; session file → addToPrompt/preview). */
+/** Action labels for the selector, filtered by facts (worktree → vscode; settled → result; session file → addToPrompt/preview; status/close always offered). */
 function taskActionItems(facts: TaskFacts): SelectItem[] {
     const items: SelectItem[] = [];
-    if (facts.worktree !== undefined) {
-        items.push({ value: "status", label: "Status (state / attach)" });
-    }
+    items.push({ value: "status", label: "Status (state / attach)" });
     if (facts.taskStatus) {
         items.push({ value: "result", label: "Add result to prompt" });
     }
@@ -603,11 +662,13 @@ function taskActionItems(facts: TaskFacts): SelectItem[] {
     }
     if (facts.worktree !== undefined) {
         items.push({ value: "vscode", label: "Open in VS Code" });
-        items.push({
-            value: "close",
-            label: "Close (remove worktree + kill session)",
-        });
     }
+    items.push({
+        value: "close",
+        label: facts.worktree
+            ? "Close (remove worktree + kill session)"
+            : "Close (kill session + remove artifacts)",
+    });
     return items;
 }
 
@@ -671,11 +732,23 @@ async function selectTaskAction(
 async function runCloseAction(
     pi: ExtensionAPI,
     ctx: ExtensionCommandContext,
-    facts: WorktreeTaskFacts,
+    facts: TaskFacts,
 ): Promise<void> {
-    // Interactive confirm maps to force:true; never close a dirty worktree without it.
-    let force = false;
-    if (facts.worktree.dirty) {
+    let outcome: CloseOutcome;
+    try {
+        outcome = await closeTask(pi, { name: facts.name });
+    } catch (error) {
+        ctx.ui.notify(
+            error instanceof Error ? error.message : String(error),
+            "error",
+        );
+        return;
+    }
+
+    // Dirty worktree: interactive confirm maps to a forced retry; never
+    // close one without it (dirty is computed inside closeTask, once per
+    // attempt — the task list does not track it anymore).
+    if (outcome.status === "dirty") {
         const proceed = await ctx.ui.confirm(
             "Dirty Worktree",
             `Background task "${facts.name}" has uncommitted changes. Close anyway?`,
@@ -684,16 +757,20 @@ async function runCloseAction(
             ctx.ui.notify("Cancelled.", "info");
             return;
         }
-        force = true;
+        try {
+            outcome = await closeTask(pi, { name: facts.name, force: true });
+        } catch (error) {
+            ctx.ui.notify(
+                error instanceof Error ? error.message : String(error),
+                "error",
+            );
+            return;
+        }
     }
 
-    let result: CloseResult;
-    try {
-        result = await closeTask(pi, { name: facts.name, force });
-    } catch (error) {
-        ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
-        return;
-    }
+    // Unreachable in practice: force closes a dirty worktree unconditionally.
+    if (outcome.status !== "closed") return;
+    const result = outcome.result;
     if (result.warning) {
         ctx.ui.notify(result.warning, "warning");
     }
@@ -703,7 +780,7 @@ async function runCloseAction(
 async function runStatusAction(
     pi: ExtensionAPI,
     ctx: ExtensionCommandContext,
-    facts: WorktreeTaskFacts,
+    facts: TaskFacts,
 ): Promise<void> {
     const { name: taskName } = facts;
 
@@ -733,7 +810,7 @@ async function runStatusAction(
 
     const lines = formatLogWidgetLines(
         taskName,
-        facts.worktree.path,
+        facts.worktree?.path,
         attachCommand,
         attachCopied,
         result,
@@ -919,12 +996,12 @@ function formatDuration(
  * under the status line on failed; attach line only while the tmux session
  * still exists (attachCommand undefined otherwise), with " (copied)" appended
  * when the command was copied to the clipboard; provider/model line once
- * settled; worktree line always renders (runStatusAction requires the
- * worktree to exist).
+ * settled; worktree line only in worktree mode (no line at all when the
+ * child runs in the main repo).
  */
 function formatLogWidgetLines(
     alias: string,
-    worktreePath: string,
+    worktreePath: string | undefined,
     attachCommand: string | undefined,
     attachCopied: boolean,
     result: BackgroundTaskResult | null,
@@ -973,7 +1050,9 @@ function formatLogWidgetLines(
             },
         ]);
     }
-    lines.push([{ text: `  worktree: ${worktreePath}`, color: "dim" }]);
+    if (worktreePath !== undefined) {
+        lines.push([{ text: `  worktree: ${worktreePath}`, color: "dim" }]);
+    }
     lines.push("");
     return lines;
 }
@@ -984,7 +1063,7 @@ async function ensureSession(
     pi: ExtensionAPI,
     socket: string,
     session: string,
-    worktreePath: string,
+    cwd: string,
 ): Promise<boolean> {
     const hasSession = await pi.exec("tmux", [
         "-S",
@@ -1005,7 +1084,7 @@ async function ensureSession(
             "-s",
             session,
             "-c",
-            worktreePath,
+            cwd,
         ]);
     let result = await create();
     if (result.code !== 0 && existsSync(socket)) {
@@ -1029,41 +1108,62 @@ interface CloseResult {
     warning?: string;
 }
 
+/** One git status per close: dirty is not tracked in the task list anymore. */
+async function isWorktreeDirty(
+    pi: ExtensionAPI,
+    worktreePath: string,
+): Promise<boolean> {
+    const result = await pi.exec("git", [
+        "-C",
+        worktreePath,
+        "status",
+        "--porcelain",
+    ]);
+    return result.code === 0 && result.stdout.trim().length > 0;
+}
+
+/** closeTask outcome: "dirty" asks the caller to confirm a forced retry; "closed" finished the cleanup. */
+type CloseOutcome =
+    | { status: "dirty" }
+    | { status: "closed"; result: CloseResult };
+
 /**
- * Close a background task: worktree existence is a prerequisite. Removes the
- * worktree (dirty requires force), kills the tmux session when present, and
- * deletes the run dir (task.md + result.json) once cleanup succeeded — the
- * task list is sourced from worktrees, so leftover artifacts would be
+ * Close a background task. Worktree mode: removes the worktree (a dirty
+ * one returns the "dirty" outcome unless force; a missing worktree path
+ * counts as already cleaned, so close stays idempotent). No-worktree mode
+ * skips worktree cleanup entirely. Both modes kill the tmux session when
+ * present and delete the run dir (task.md / result.json / meta.json) — the
+ * task list is sourced from tasks/, so leftover artifacts would be
  * orphaned. The sessions dir (child session history) is append-only and
  * never touched here.
  *
- * Failures throw a user-facing Error; only a successful close returns.
+ * Failures throw a user-facing Error; a successful close returns "closed".
  */
 async function closeTask(
     pi: ExtensionAPI,
     opts: { name: string; force?: boolean },
-): Promise<CloseResult> {
+): Promise<CloseOutcome> {
     const { name, force = false } = opts;
     const facts = await resolveTaskFacts(pi, name);
 
-    if (facts.worktree === undefined) {
-        throw new Error(`Background task "${name}" does not exist (no worktree).`);
-    }
+    let cleanOutput: CleanOutput | null = null;
+    if (facts.worktree !== undefined) {
+        const dirty = await isWorktreeDirty(pi, facts.worktree.path);
+        if (dirty && !force) {
+            return { status: "dirty" };
+        }
 
-    if (facts.worktree.dirty && !force) {
-        throw new Error(
-            `The worktree of "${name}" gained uncommitted changes since the task list was shown. Select close again to confirm closing with them.`,
-        );
+        const cleanArgs = [WORKTREE_SH, "clean", name];
+        if (dirty) cleanArgs.push("--force");
+        cleanArgs.push("--json");
+        const cleanResult = await pi.exec("bash", cleanArgs);
+        if (cleanResult.code !== 0) {
+            throw new Error(
+                cleanResult.stderr.trim() || "Failed to remove worktree.",
+            );
+        }
+        cleanOutput = parseCleanOutput(cleanResult.stdout);
     }
-
-    const cleanArgs = [WORKTREE_SH, "clean", name];
-    if (facts.worktree.dirty) cleanArgs.push("--force");
-    cleanArgs.push("--json");
-    const cleanResult = await pi.exec("bash", cleanArgs);
-    if (cleanResult.code !== 0) {
-        throw new Error(cleanResult.stderr.trim() || "Failed to remove worktree.");
-    }
-    const cleanOutput = parseCleanOutput(cleanResult.stdout);
 
     // Kill the session when present; failure is only a warning.
     const env = await getTasksEnv(pi);
@@ -1078,7 +1178,7 @@ async function closeTask(
                 taskSessionName(taskUuid(name)),
             ]);
             if (killResult.code !== 0) {
-                sessionWarn = `Worktree removed but tmux session "${name}" could not be killed.`;
+                sessionWarn = `Cleanup partially failed: tmux session "${name}" could not be killed.`;
             }
         }
     }
@@ -1099,9 +1199,12 @@ async function closeTask(
     }
 
     return {
-        name,
-        leftoverCount: cleanOutput?.leftoverCount ?? 0,
-        warning: sessionWarn ?? runDirWarn,
+        status: "closed",
+        result: {
+            name,
+            leftoverCount: cleanOutput?.leftoverCount ?? 0,
+            warning: sessionWarn ?? runDirWarn,
+        },
     };
 }
 
@@ -1119,7 +1222,8 @@ interface DispatchResult {
     alias: string;
     /** sha256(alias) truncated to 16 hex chars — worktree/run/session key. */
     uuid: string;
-    worktreePath: string;
+    /** Worktree path in worktree mode; undefined when the child runs in the main repo. */
+    worktreePath?: string;
     tmuxSession: string;
     attachCommand: string;
     provider: string;
@@ -1134,52 +1238,14 @@ async function dispatchBackgroundTask(
         alias: string;
         prompt: string;
         description: string;
+        worktree: boolean;
         ctx: ExtensionContext;
     },
 ): Promise<DispatchResult> {
-    const { alias, prompt, description, ctx } = opts;
+    const { alias, prompt, description, worktree, ctx } = opts;
+    validateAlias(alias);
 
-    const existing = await resolveTaskFacts(pi, alias);
-    const existingParts: string[] = [];
-    if (existing.worktree !== undefined) existingParts.push("worktree");
-    if (existing.sessionExists) existingParts.push("tmux session");
-    if (existingParts.length > 0) {
-        throw new Error(
-            `Background task "${alias}" already exists (${existingParts.join(" + ")}). Choose a different alias.`,
-        );
-    }
-
-    const wtResult = await pi.exec("bash", [
-        WORKTREE_SH,
-        "open",
-        alias,
-        "--json",
-    ]);
-    if (wtResult.code !== 0) {
-        throw new Error(wtResult.stderr.trim() || "worktree.sh open failed");
-    }
-    const output = parseOpenOutput(wtResult.stdout);
-    if (!output) {
-        throw new Error("Failed to parse worktree output");
-    }
-    const worktreePath = output.worktreePath;
-
-    const env = await getTasksEnv(pi);
-    if (!env) {
-        throw new Error("Failed to resolve repo root (worktree.sh root-path)");
-    }
-    const uuid = taskUuid(alias);
-    const session = taskSessionName(uuid);
-    const sessionOk = await ensureSession(
-        pi,
-        env.socketPath,
-        session,
-        worktreePath,
-    );
-    if (!sessionOk) {
-        throw new Error(`Failed to start tmux session "${session}".`);
-    }
-
+    // Model check first: no filesystem side effects before it can pass.
     const provider = ctx.model?.provider;
     const model = ctx.model?.id;
     const thinking = pi.getThinkingLevel();
@@ -1187,13 +1253,59 @@ async function dispatchBackgroundTask(
         throw new Error("No model is active. Cannot dispatch background task.");
     }
 
+    const env = await getTasksEnv(pi);
+    if (!env) {
+        throw new Error("Failed to resolve repo root (worktree.sh root-path)");
+    }
+    const uuid = taskUuid(alias);
+    const session = taskSessionName(uuid);
+
+    // Conflict detection: a live tmux session means the alias is taken. The
+    // run-dir mkdir below is the atomic claim (EEXIST), so a concurrent
+    // duplicate dispatch cannot slip through.
+    const sessions = await listSessionNames(pi, env.socketPath);
+    if (sessions.includes(session)) {
+        throw new Error(
+            `Background task "${alias}" already exists (tmux session). Choose a different alias.`,
+        );
+    }
+
+    // Atomic claim: non-recursive mkdir — EEXIST is the conflict, no
+    // check-then-create race. Every failure after this point leaves a task
+    // that is listed and closable via /background-tasks.
     const runDir = taskRunDir(env.tasksDir, alias);
+    try {
+        await mkdir(path.dirname(runDir), { recursive: true, mode: 0o700 });
+        await mkdir(runDir, { mode: 0o700 });
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException)?.code === "EEXIST") {
+            throw new Error(
+                `Background task "${alias}" already exists (run dir). Choose a different alias.`,
+            );
+        }
+        throw new Error(
+            `Failed to prepare run directory: ${error instanceof Error ? error.message : String(error)}`,
+        );
+    }
+
     let resultPath: string;
+    // meta.json records the worktree intent right after the atomic claim,
+    // before any worktree/session side effect, so "run dir exists ⇒ meta
+    // exists" holds and readers need no missing-meta fallback. Atomic write,
+    // so a crash cannot leave a half-written record.
+    try {
+        await writeJsonAtomic(path.join(runDir, "meta.json"), {
+            version: 1,
+            worktree,
+        });
+    } catch (error) {
+        throw new Error(
+            `Failed to write task meta: ${error instanceof Error ? error.message : String(error)}`,
+        );
+    }
     let promptPath: string;
     let sessionDir: string;
     try {
-        await rm(runDir, { recursive: true, force: true });
-        await mkdir(runDir, { recursive: true, mode: 0o700 });
         sessionDir = taskSessionsDir(env.tasksDir);
         await mkdir(sessionDir, { recursive: true, mode: 0o700 });
         promptPath = path.join(runDir, "task.md");
@@ -1206,6 +1318,34 @@ async function dispatchBackgroundTask(
         throw new Error(
             `Failed to prepare run directory: ${error instanceof Error ? error.message : String(error)}`,
         );
+    }
+
+    // Optional worktree; no-worktree mode runs the child in the main repo.
+    let worktreePath: string | undefined;
+    if (worktree) {
+        const wtResult = await pi.exec("bash", [
+            WORKTREE_SH,
+            "open",
+            alias,
+            "--json",
+        ]);
+        if (wtResult.code !== 0) {
+            throw new Error(wtResult.stderr.trim() || "worktree.sh open failed");
+        }
+        const output = parseOpenOutput(wtResult.stdout);
+        if (!output) {
+            throw new Error("Failed to parse worktree output");
+        }
+        worktreePath = output.worktreePath;
+    }
+    const sessionOk = await ensureSession(
+        pi,
+        env.socketPath,
+        session,
+        worktreePath ?? env.repoRoot,
+    );
+    if (!sessionOk) {
+        throw new Error(`Failed to start tmux session "${session}".`);
     }
 
     const remain = await pi.exec("tmux", [
@@ -1252,7 +1392,7 @@ async function dispatchBackgroundTask(
         piArgs.map(shellQuote).join(" "),
     ].join(" ");
 
-    const cleanupHint = `worktree/session already created (clean up: user runs /background-tasks, select "${alias}", then Close)`;
+    const cleanupHint = `run dir/session already created (clean up: user runs /background-tasks, select "${alias}", then Close)`;
     const sent = await pi.exec("tmux", [
         "-S",
         env.socketPath,
@@ -1296,11 +1436,14 @@ async function dispatchBackgroundTask(
 }
 
 function formatDispatchText(result: DispatchResult): string {
-    return [
-        `Dispatched background task "${result.alias}".`,
-        `Worktree: ${result.worktreePath}`,
+    const lines = [`Dispatched background task "${result.alias}".`];
+    if (result.worktreePath) {
+        lines.push(`Worktree: ${result.worktreePath}`);
+    }
+    lines.push(
         `Observe progress or clean up via /background-tasks (select "${result.alias}").`,
-    ].join("\n");
+    );
+    return lines.join("\n");
 }
 
 // ─── Attach Flag (pi --attach-background-task <alias>) ─────────────────────────
@@ -1518,7 +1661,13 @@ export default function (pi: ExtensionAPI): void {
                         break;
                     }
                     case "vscode":
-                        await runVscodeAction(pi, ctx, selected);
+                        // Menu boundary assertion: taskActionItems only
+                        // offers vscode when a worktree exists.
+                        await runVscodeAction(
+                            pi,
+                            ctx,
+                            selected as WorktreeTaskFacts,
+                        );
                         // Attention moved to the external editor; no reason to loop
                         // back into the list. Exit the flow.
                         return;
@@ -1531,30 +1680,36 @@ export default function (pi: ExtensionAPI): void {
     });
 
     // ── Tool: background_task ──
-    // One-shot background task: fresh worktree + interactive child Pi,
-    // dispatched and returned immediately (no waiting / polling).
+    // One-shot background task: optional fresh worktree + interactive child
+    // Pi, dispatched and returned immediately (no waiting / polling).
 
     pi.registerTool({
         name: "background_task",
         label: "Background task",
         description:
-            "Dispatch a one-shot background task: create a fresh git worktree + tmux session named by alias, then start an interactive Pi process inside it with the given prompt. Returns immediately without waiting for the task. Progress and completion are observed by the user via /background-tasks (live pane, settled output, task status). Fails fast if the alias already exists.",
+            "Dispatch a one-shot background task: create a tmux session keyed by the task alias (the child runs in a fresh git worktree by default, or directly in the main repo when worktree is false), then start an interactive Pi process with the given prompt. Returns immediately without waiting for the task. Progress and completion are observed by the user via /background-tasks. Fails fast if the alias already exists.",
         promptSnippet:
-            "Dispatch a one-shot background task to a fresh isolated worktree; returns immediately.",
+            "Dispatch a one-shot background task (isolated worktree by default); returns immediately.",
         promptGuidelines: [
             "background_task is fire-and-forget — returns immediately, the user observes via /background-tasks.",
-            "Keep background_task's prompt free of commit instructions; leave the work uncommitted in the worktree so the user can review before anything lands.",
-            "Write file paths in background_task's prompt relative to the worktree root (the child Pi's cwd is the fresh worktree, which contains all committed repo files, so relative paths also work for read-only references). Never put an absolute main-repo path in the prompt: the child follows literal paths and would edit the main repo, bypassing worktree isolation. If the child needs uncommitted main-repo content as context, paste the relevant snippet into the prompt instead of a path.",
+            "Keep background_task's prompt free of commit instructions; leave the work uncommitted so the user can review before anything lands. In no-worktree mode this matters more: a child commit would land on the user's live checked-out branch.",
+            "Worktree mode (default): write file paths in the prompt relative to the worktree root (the child Pi's cwd is the fresh worktree, which contains all committed repo files, so relative paths also work for read-only references). Never put an absolute main-repo path in the prompt: the child follows literal paths and would edit the main repo, bypassing worktree isolation. No-worktree mode: the child runs directly in the main repo, so main-repo paths are correct and its edits are immediately live. In both modes, if the child needs uncommitted main-repo content as context, paste the relevant snippet into the prompt instead of a path.",
             "Never clean up a background task yourself (worktree removal, session kill, run dir deletion); the user closes it via /background-tasks after reviewing.",
         ],
         parameters: Type.Object({
             alias: Type.String({
                 description:
-                    "Task alias, used as the branch name (e.g. feat/my-feature). Must not already exist.",
+                    "Task alias: 1-64 chars, must start with a letter or digit, then letters/digits/./_/- (flat names, no slashes; e.g. fix-socket-hang). Also used as the branch name in worktree mode. Must not already exist.",
             }),
+            worktree: Type.Optional(
+                Type.Boolean({
+                    description:
+                        "Create a fresh git worktree for the task (default true). When false, the child runs directly in the main repo: edits are immediately live and commits land on the user's checked-out branch.",
+                }),
+            ),
             prompt: Type.String({
                 description:
-                    "The task for the agent to perform. Be specific about what needs to be done and include any relevant context. Reference files by paths relative to the child Pi's worktree; never absolute paths into the main repo.",
+                    "The task for the agent to perform. Be specific about what needs to be done and include any relevant context. In worktree mode (default) reference files by paths relative to the worktree root; never absolute paths into the main repo.",
             }),
             description: Type.String({
                 description:
@@ -1581,10 +1736,13 @@ export default function (pi: ExtensionAPI): void {
                     "background_task requires a non-empty description.",
                 );
             }
+            const worktree =
+                typeof params.worktree === "boolean" ? params.worktree : true;
             const result = await dispatchBackgroundTask(pi, {
                 alias,
                 prompt,
                 description,
+                worktree,
                 ctx,
             });
             return {
@@ -1618,9 +1776,14 @@ export default function (pi: ExtensionAPI): void {
             }
             if (expanded) {
                 const container = new Container();
+                // Only mark the deviation from the default: no worktree
+                // means the child edits the main repo directly (live).
+                const modeMark = details.worktreePath
+                    ? ""
+                    : theme.fg("muted", " · no worktree");
                 container.addChild(
                     new Text(
-                        `${theme.fg("warning", "●")} ${theme.fg("toolTitle", theme.bold(details.alias))}${theme.fg("muted", " · dispatched")}`,
+                        `${theme.fg("warning", "●")} ${theme.fg("toolTitle", theme.bold(details.alias))}${theme.fg("muted", " · dispatched")}${modeMark}`,
                         0,
                         0,
                     ),
@@ -1647,8 +1810,13 @@ export default function (pi: ExtensionAPI): void {
                 );
                 return container;
             }
+            // Compact view: same single-line mode mark as the expanded view.
+            const modeMark = details.worktreePath
+                ? ""
+                : theme.fg("muted", " · no worktree");
             let text = `${theme.fg("warning", "●")} ${theme.fg("toolTitle", theme.bold(details.alias))}`;
             text += theme.fg("muted", " · dispatched");
+            text += modeMark;
             text += `\n  ${theme.fg("accent", details.attachCommand)}`;
             text += `\n  ${theme.fg("dim", `${details.provider}/${details.model} (${details.thinking})`)}`;
             return new Text(text, 0, 0);
