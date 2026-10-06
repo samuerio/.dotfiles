@@ -1,29 +1,3 @@
-/**
- * Subagent machinery (shared lib): the `Subagent` class binds a `SubagentSpec`
- * to the spawn/parse/envelope/render machinery for isolated child
- * `pi --mode json -p` processes.
- *
- * Consumers (each a sibling extension file registering its own tool):
- *   - `task.ts`     : inline general-purpose subagent; config read per-call
- *                     from `~/.pi/agent/subagent.json`.
- *   - `finder.ts`   : specialized code-search subagent (baked-in spec).
- *   - `oracle.ts`   : specialized reasoning-advisor subagent (baked-in spec).
- *   - `librarian.ts`: codebase-understanding subagent with its own skill dir.
- *
- * Because these are all native tools, an inline subagent can whitelist them
- * and call them from inside its child context (grandchild pi process).
- *
- * Architecture Invariant: the model-facing tool parameters are only `prompt`
- * and `description`; model/thinking/tools/skills are NOT per-call params; they
- * live in the spec (code constants for specialized, subagent.json for inline).
- *
- * Adding a specialized subagent = a sibling extension file with a SPEC
- * constant (`SubagentSpec`) + a DESCRIPTION constant + a default export that
- * registers the tool, mirroring `finder.ts` / `oracle.ts` / `librarian.ts`.
- * A specialized subagent may also ship a resource dir next to its file (see
- * librarian.ts for skill resolution via import.meta).
- */
-
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -34,6 +8,7 @@ import {
 	getAgentDir,
 	getMarkdownTheme,
 	withFileMutationQueue,
+	type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
@@ -56,7 +31,7 @@ export interface SubagentSpec {
 }
 
 /** Model-facing parameters: `prompt` (the child's task) and `description` (short label). */
-export const SubagentParams = Type.Object({
+const SubagentParams = Type.Object({
 	prompt: Type.String({
 		description: "The task for the agent to perform. Be specific about what needs to be done and include any relevant context.",
 	}),
@@ -334,11 +309,33 @@ function getPiInvocation(args: string[]): { command: string; args: string[] } {
 
 /**
  * A Subagent instance binds a `SubagentSpec` to the spawn/parse/envelope/render
- * machinery. Specialized subagents (finder, oracle, librarian) use a static
- * spec; the inline `task` tool constructs a transient instance per call.
+ * machinery. Every consumer (finder, oracle, librarian, task) resolves its
+ * spec at registration time and wires the tool via `registerTool`; execute and
+ * the renderers are private. `run` stays public as the direct execution entry
+ * point for callers that are not tool-shaped.
  */
 export class Subagent {
 	constructor(readonly spec: SubagentSpec) {}
+
+	/**
+	 * Register this subagent as a native pi tool under the spec's name, wiring
+	 * name/label/parameters and the execute/renderCall/renderResult delegates.
+	 * A consumer extension then reduces to SPEC + DESCRIPTION constants plus
+	 * `new Subagent(SPEC).registerTool(pi, DESCRIPTION)`.
+	 */
+	registerTool(pi: ExtensionAPI, description: string): void {
+		pi.registerTool({
+			name: this.spec.name,
+			label: this.spec.name.charAt(0).toUpperCase() + this.spec.name.slice(1),
+			description,
+			parameters: SubagentParams,
+			execute: (id, params, signal, onUpdate, ctx) =>
+				this.execute(id, params, signal, onUpdate, ctx),
+			renderCall: (args, theme, _context) => this.renderCall(args, theme),
+			renderResult: (result, opts, theme, context) =>
+				this.renderResult(result, opts, theme, context),
+		});
+	}
 
 	/**
 	 * Spawn an isolated child `pi --mode json -p` process for `prompt`, parse its
@@ -533,23 +530,19 @@ export class Subagent {
 		}
 	}
 
-	/** Build the model-facing envelope + verbatim child output. */
-	buildTaskBlock(result: SingleResult): string {
+	private buildTaskBlock(result: SingleResult): string {
 		return buildTaskBlock(result);
 	}
 
-	/** True if the result is a failure (non-zero exit or error/aborted stop). */
-	isFailed(result: SingleResult): boolean {
+	private isFailed(result: SingleResult): boolean {
 		return isFailedResult(result);
 	}
 
 	/**
 	 * Standard tool execute body shared by all subagent tools. Spawns the child
-	 * for `params.prompt`, returns the envelope + verbatim output. The inline
-	 * task tool also uses this after constructing a transient instance from
-	 * subagent.json.
+	 * for `params.prompt`, returns the envelope + verbatim output.
 	 */
-	async execute(
+	private async execute(
 		_toolCallId: string,
 		params: { prompt: string; description: string },
 		signal: AbortSignal | undefined,
@@ -575,7 +568,7 @@ export class Subagent {
 		};
 	}
 
-	renderCall(args: Record<string, unknown>, theme: any): Text {
+	private renderCall(args: Record<string, unknown>, theme: any): Text {
 		// Show the model-provided short description inline after the tool name. The
 		// full prompt is displayed in renderResult, not here.
 		const description = typeof args.description === "string" ? args.description : "...";
@@ -583,7 +576,7 @@ export class Subagent {
 		return new Text(text, 0, 0);
 	}
 
-	renderResult(
+	private renderResult(
 		result: { content: Array<{ type: string; text?: string }>; details?: unknown },
 		{ expanded }: { expanded: boolean },
 		theme: any,

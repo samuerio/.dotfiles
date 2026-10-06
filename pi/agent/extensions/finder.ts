@@ -8,9 +8,9 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Subagent, SubagentParams, type SubagentSpec } from "./lib/subagent.ts";
+import { Subagent, type SubagentSpec } from "./lib/subagent.ts";
 
-export const FINDER_DESCRIPTION = `Intelligently search your codebase: Use it for complex, multi-step search tasks where you need to find code based on functionality or concepts rather than exact matches. Anytime you want to chain multiple grep calls you should use this tool.
+const FINDER_DESCRIPTION = `Intelligently search your codebase: Use it for complex, multi-step search tasks where you need to find code based on functionality or concepts rather than exact matches. Anytime you want to chain multiple grep calls you should use this tool.
 
 **WHEN TO USE THIS TOOL:**
 
@@ -36,7 +36,7 @@ export const FINDER_DESCRIPTION = `Intelligently search your codebase: Use it fo
 4. State explicit success criteria so the agent knows when to stop (e.g., "Return file paths and line numbers for all JWT verification calls").
 5. Never issue vague or exploratory commands - be definitive and goal-oriented.`;
 
-export const FINDER_SPEC: SubagentSpec = {
+const FINDER_SPEC: SubagentSpec = {
 	name: "finder",
 	systemPrompt: `You are a fast, parallel code search agent.
 
@@ -76,14 +76,5 @@ Relevant files:
 };
 
 export default function (pi: ExtensionAPI) {
-	const finder = new Subagent(FINDER_SPEC);
-	pi.registerTool({
-		name: "finder",
-		label: "Finder",
-		description: FINDER_DESCRIPTION,
-		parameters: SubagentParams,
-		execute: (id, params, signal, onUpdate, ctx) => finder.execute(id, params, signal, onUpdate, ctx),
-		renderCall: (args, theme, _context) => finder.renderCall(args, theme),
-		renderResult: (result, opts, theme, context) => finder.renderResult(result, opts, theme, context),
-	});
+	new Subagent(FINDER_SPEC).registerTool(pi, FINDER_DESCRIPTION);
 }

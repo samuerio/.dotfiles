@@ -16,14 +16,14 @@
 import { fileURLToPath } from "node:url";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Subagent, SubagentParams, type SubagentSpec } from "./lib/subagent.ts";
+import { Subagent, type SubagentSpec } from "./lib/subagent.ts";
 
 // ─── Skill Resource Resolution ────────────────────────────────────
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const LIBRARIAN_SKILL_DIR = path.join(__dirname, "librarian", "skills", "librarian");
 
-export const LIBRARIAN_DESCRIPTION = `The Librarian is a codebase-understanding subagent for repositories outside the local workspace.
+const LIBRARIAN_DESCRIPTION = `The Librarian is a codebase-understanding subagent for repositories outside the local workspace.
 
 It can read git repositories in two ways: an existing local checkout or a remote repository (any git repository your git credentials can access: GitHub, GitLab, Bitbucket, or plain URLs).
 
@@ -55,7 +55,7 @@ Examples:
 - "What changed in commit abc123 in my private repository?"
 - "Read the README from the main API repo"`;
 
-export const LIBRARIAN_SPEC: SubagentSpec = {
+const LIBRARIAN_SPEC: SubagentSpec = {
 	name: "librarian",
 	systemPrompt: `You are the Librarian, a specialized codebase understanding agent that helps users answer questions about large, complex codebases across repositories.
 
@@ -137,14 +137,5 @@ file:///home/alice/.cache/checkouts/github.com/foo_org/bar_repo/src/test.py#L32-
 };
 
 export default function (pi: ExtensionAPI) {
-	const librarian = new Subagent(LIBRARIAN_SPEC);
-	pi.registerTool({
-		name: "librarian",
-		label: "Librarian",
-		description: LIBRARIAN_DESCRIPTION,
-		parameters: SubagentParams,
-		execute: (id, params, signal, onUpdate, ctx) => librarian.execute(id, params, signal, onUpdate, ctx),
-		renderCall: (args, theme, _context) => librarian.renderCall(args, theme),
-		renderResult: (result, opts, theme, context) => librarian.renderResult(result, opts, theme, context),
-	});
+	new Subagent(LIBRARIAN_SPEC).registerTool(pi, LIBRARIAN_DESCRIPTION);
 }

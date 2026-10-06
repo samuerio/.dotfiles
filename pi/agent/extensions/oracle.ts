@@ -9,9 +9,9 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Subagent, SubagentParams, type SubagentSpec } from "./lib/subagent.ts";
+import { Subagent, type SubagentSpec } from "./lib/subagent.ts";
 
-export const ORACLE_DESCRIPTION = `Consult the Oracle - an AI advisor powered by OpenAI's GPT-5 reasoning model that can plan, review, and provide expert guidance.
+const ORACLE_DESCRIPTION = `Consult the Oracle - an AI advisor powered by OpenAI's GPT-5 reasoning model that can plan, review, and provide expert guidance.
 
 The Oracle has access to the following tools: Read, Grep, glob, web_search, read_web_page, read_thread.
 
@@ -37,7 +37,7 @@ The Oracle acts as your senior engineering advisor and can help with:
 1. Be specific about what you want the Oracle to review, plan, or debug
 2. Provide relevant context about what you're trying to achieve. If you know that 3 files are involved, list them and they will be attached.`;
 
-export const ORACLE_SPEC: SubagentSpec = {
+const ORACLE_SPEC: SubagentSpec = {
     name: "oracle",
     systemPrompt: `You are the Oracle - an expert AI advisor with advanced reasoning capabilities.
 
@@ -95,16 +95,5 @@ IMPORTANT: Only your last message is returned to the main agent and displayed to
 };
 
 export default function (pi: ExtensionAPI) {
-    const oracle = new Subagent(ORACLE_SPEC);
-    pi.registerTool({
-        name: "oracle",
-        label: "Oracle",
-        description: ORACLE_DESCRIPTION,
-        parameters: SubagentParams,
-        execute: (id, params, signal, onUpdate, ctx) =>
-            oracle.execute(id, params, signal, onUpdate, ctx),
-        renderCall: (args, theme, _context) => oracle.renderCall(args, theme),
-        renderResult: (result, opts, theme, context) =>
-            oracle.renderResult(result, opts, theme, context),
-    });
+    new Subagent(ORACLE_SPEC).registerTool(pi, ORACLE_DESCRIPTION);
 }

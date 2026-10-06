@@ -2,24 +2,27 @@
  * Inline subagent extension (single file): the general-purpose `task` tool.
  *
  * Registers one native pi tool:
- *   - `task` : inline, general-purpose subagent; config read per-call
- *              from `~/.pi/agent/subagent.json`. Because the specialized
- *              subagents (finder.ts, oracle.ts, librarian.ts) are also
- *              tools, an inline subagent can whitelist them and call them
- *              from inside its child context (grandchild pi process).
+ *   - `task` : inline, general-purpose subagent. Config (model, thinking,
+ *              tools, skills) is loaded once at registration time from
+ *              `~/.pi/agent/subagent.json`; edits take effect on extension
+ *              reload, not per call. A broken config aborts the extension
+ *              load (pi reports it and continues without the tool) instead
+ *              of surfacing the error only when the model calls the tool.
+ *              Because the specialized subagents (finder.ts, oracle.ts,
+ *              librarian.ts) are also tools, an inline subagent can whitelist
+ *              them and call them from inside its child context (grandchild
+ *              pi process).
  *
- * The spawn/parse/envelope/render machinery + the standard execute body live
- * in `lib/subagent.ts` (see its header for the full consumer list and the
- * Architecture Invariant); this file holds the inline persona, the
- * subagent.json config loader, and the tool registration.
+ * The spawn/parse/envelope/render machinery + the standard tool wiring live
+ * in `lib/subagent.ts`; this file holds the inline persona, the
+ * subagent.json config loader, and the spec construction.
  */
 
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { type ExtensionAPI, getAgentDir } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
-import { Subagent, SubagentParams, type SubagentSpec } from "./lib/subagent.ts";
+import { Subagent, type SubagentSpec } from "./lib/subagent.ts";
 
 /**
  * Base system prompt for the inline `task` tool (no specialized persona).
@@ -35,12 +38,12 @@ If you've already used the Read tool to read an entire file, do NOT invoke Read 
 
 If AGENTS.md exists, treat it as ground truth for commands, style, structure. If you discover a recurring command that's missing, ask to append it there.
 
-For any coding task that involves thoroughly searching or understanding the codebase, use the finder tool to intelligently locate relevant code, functions, or patterns. This helps in understanding existing implementations, locating dependencies, or finding similar code before making changes.`;
+For any coding task that involves thoroughly searching or understanding the codebase, use the finder tool to intelligently locate relevant code, functions, or patterns. This helps in understanding existing implementations, locating dependencies, and finding similar code before making changes.`;
 
 /**
- * Default configuration for inline subagent runs, read from
- * `~/.pi/agent/subagent.json`. `skills` is required (the explicit skill
- * allowlist); other fields are optional and fall back to the child pi
+ * Default configuration for inline subagent runs, read once at registration
+ * time from `~/.pi/agent/subagent.json`. `skills` is required (the explicit
+ * skill allowlist); other fields are optional and fall back to the child pi
  * process's own defaults.
  */
 interface InlineConfig {
@@ -84,8 +87,8 @@ function loadInlineConfig(): { config: InlineConfig; error?: string } {
 	}
 	// `skills` is the single user-facing knob for the child's skills: the
 	// explicit allowlist handed to the child as `--skill <path>` entries.
-	// Missing or malformed key is a config error so execute throws instead of
-	// silently changing which skills the child sees.
+	// Missing or malformed key is a config error so the extension fails to
+	// load instead of silently changing which skills the child sees.
 	if (!Array.isArray(raw.skills)) {
 		return {
 			config: { skills: [] },
@@ -107,40 +110,22 @@ function loadInlineConfig(): { config: InlineConfig; error?: string } {
 }
 
 export default function (pi: ExtensionAPI) {
-	// Inline `task` tool: config is read per call from subagent.json, so a
-	// fresh Subagent is constructed each invocation with a runtime-resolved
-	// spec. Rendering depends only on result.details (not runtime config), so
-	// a shared default instance backs renderCall/renderResult.
-	const defaultTaskInstance = new Subagent({
-		name: "task",
-		systemPrompt: "",
-		skills: [],
-	});
-	const { config: taskInlineConfig } = loadInlineConfig();
-	pi.registerTool({
-		name: "task",
-		label: "Task",
-		description: `Perform a task (a sub-task of the user's overall task) using a sub-agent that has access to the following tools: ${taskInlineConfig.tools && taskInlineConfig.tools.length > 0 ? taskInlineConfig.tools.join(", ") : ""}`,
-		parameters: SubagentParams,
+	// Registration-time load: the spec and the tool description are resolved
+	// once here, so subagent.json edits require an extension reload.
+	const { config: inlineConfig, error: configError } = loadInlineConfig();
+	if (configError) throw new Error(configError);
 
-		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			const { config: inlineConfig, error: configError } = loadInlineConfig();
-			if (configError) {
-				throw new Error(configError);
-			}
-			const inlineSpec: SubagentSpec = {
-				name: "task",
-				systemPrompt: INLINE_BASE_SYSTEM_PROMPT,
-				model: inlineConfig.model,
-				thinking: inlineConfig.thinking,
-				tools: inlineConfig.tools,
-				skills: inlineConfig.skills,
-			};
-			const instance = new Subagent(inlineSpec);
-			return instance.execute(_toolCallId, params, signal, onUpdate, ctx);
-		},
+	const description = `Perform a task (a sub-task of the user's overall task) using a sub-agent that has access to the following tools: ${
+		inlineConfig.tools && inlineConfig.tools.length > 0 ? inlineConfig.tools.join(", ") : ""
+	}`;
 
-		renderCall: (args, theme) => defaultTaskInstance.renderCall(args, theme),
-		renderResult: (result, opts, theme, context) => defaultTaskInstance.renderResult(result, opts, theme, context),
-	});
+	const inlineSpec: SubagentSpec = {
+		name: "task",
+		systemPrompt: INLINE_BASE_SYSTEM_PROMPT,
+		model: inlineConfig.model,
+		thinking: inlineConfig.thinking,
+		tools: inlineConfig.tools,
+		skills: inlineConfig.skills,
+	};
+	new Subagent(inlineSpec).registerTool(pi, description);
 }
