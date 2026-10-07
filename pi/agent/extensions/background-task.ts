@@ -31,6 +31,7 @@ import {
     type SelectItem,
     type TUI,
 } from "@earendil-works/pi-tui";
+import { copyToClipboard } from "./lib/clipboard.ts";
 import { pickSession } from "./pick-session.ts";
 import {
     previewSessionFile,
@@ -56,23 +57,6 @@ const TASK_CHILD_ENV = "PI_BACKGROUND_TASK_CHILD";
 const TASK_RESULT_ENV = "PI_BACKGROUND_TASK_RESULT";
 const TASK_ALIAS_ENV = "PI_BACKGROUND_TASK_ALIAS";
 const EXTENSION_PATH = fileURLToPath(import.meta.url);
-
-async function copyToClipboard(
-    pi: ExtensionAPI,
-    text: string,
-): Promise<boolean> {
-    for (const cmd of ["xclip -selection clipboard", "pbcopy"]) {
-        const bin = cmd.split(" ")[0];
-        const check = await pi.exec("which", [bin]);
-        if (check.code !== 0) continue;
-        const result = await pi.exec("bash", [
-            "-c",
-            `${cmd} <<< ${JSON.stringify(text)}`,
-        ]);
-        if (result.code === 0) return true;
-    }
-    return false;
-}
 
 /**
  * Spacer for blank rows. pi-tui Text skips anything that is empty after trim()

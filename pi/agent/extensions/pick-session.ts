@@ -157,7 +157,12 @@ export async function pickSession(
 	});
 }
 
-/** Mention appended to the editor: "read session <session-id>". */
+/**
+ * Mention appended to the editor: "read session <session-id>". The id form is
+ * resolved by lib/session-common.ts's resolveSessionRef (pi CLI's
+ * `--session <path|id>` semantics) — the same resolver the read_session tool
+ * trio accepts, so the mention stays valid wherever it lands.
+ */
 function mention(id: string): string {
 	return `read session ${id}`;
 }
