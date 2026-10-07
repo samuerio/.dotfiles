@@ -19,7 +19,8 @@ pi coding agent 的自定义 TypeScript 扩展集，仓库中除 `nvim/` 外最�
 会话编排与交接（`continue`、`pick-session`、`handoff`、`session-breakdown`、`background-task`（后台任务派发：
 可选 git worktree + tmux 子会话 + `.pi/background-tasks/tasks/` 任务注册表 + 结果回报）、`tmux-split-fork`）、
 TUI 工具与编辑（`preview`、`view-image`、`files`、
-`context`、`unified-edit`、`review`、`answer`、`btw`（在主会话旁开启独立旁路线程））、
+`context`、`unified-edit`、`review`、`security-review`（安全审查：高置信漏洞识别 +
+并行子代理误报过滤，rubric 改编自 Claude Code 的 security-review）、`answer`、`btw`（在主会话旁开启独立旁路线程））、
 模式与提示词编辑（`prompt-editor`）、监控与装饰（`cache-hit-monitor`、`notify`、`whimsical`、`inline`）。
 依赖 pi 运行时库 `@earendil-works/pi-coding-agent`、
 `pi-tui`、`pi-ai`。子代理运行时（`lib/subagent.ts`：spawn 隔离子 pi 进程的 Subagent 机制库；
@@ -31,7 +32,9 @@ JSONL；`find-session.ts`：search_sessions 工具 + /search-sessions 命令，�
 model/thinkingLevel，供 `answer` 与 `handoff` 发起一次性 LLM 请求时使用；`lib/subagent.ts`：Subagent
 机制库；`lib/session-common.ts`：session JSONL 解析管线，供 `read-session` 与 `find-session` 共用；
 `lib/session-preview.ts`：会话预览 overlay + read_session 风格转录格式化，供 `pick-session`（ctrl+o 预览快捷键）
-与 `background-task`（preview 动作）共用）。
+与 `background-task`（preview 动作）共用；`lib/review-target.ts`：ReviewTarget 模型 + git 基础设施
+（merge base、分支/提交列表、PR checkout）+ preset 选择器（可选附加项）+ 直参解析 + 后台 prompt
+派发 helper，供 `review` 与 `security-review` 共用，两命令各自持有 rubric 与会话机制）。
 pi 只把 `extensions/*.ts` 顶层文件与含 `index.ts` 的子目录
 识别为扩展，`lib/` 子目录不会被自动加载。
 
@@ -51,7 +54,7 @@ agent 全局设置（不再使用 `packages` 声明第三方扩展包）；子�
 
 **API Boundary:** `models.json` 是 provider/模型清单的唯一来源，扩展不直接读取；`modes.json` 由 `prompt-editor` 扩展
 提供 TUI 编辑入口，运行时与扩展共享读写。子代理运行时与 session 查看工具均为本地 `extensions/`
-顶层扩展与 `lib/` 共享模块（`lib/subagent.ts`、`lib/session-common.ts`、`lib/session-preview.ts`、`lib/rush.ts`），
+顶层扩展与 `lib/` 共享模块（`lib/subagent.ts`、`lib/session-common.ts`、`lib/session-preview.ts`、`lib/rush.ts`、`lib/review-target.ts`），
 不与本地其他扩展源码混写。
 
 ### `agents/skills/`
