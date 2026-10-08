@@ -17,7 +17,8 @@ IDE 级编辑能力，集成 `telescope`/`fzf` 搜索与 `opencode.nvim` AI 工�
 
 pi coding agent 的自定义 TypeScript 扩展集，仓库中除 `nvim/` 外最活跃的子系统。按职责分组：
 会话编排与交接（`continue`、`pick-session`、`handoff`、`session-breakdown`、`background-task`（后台任务派发：
-可选 git worktree + tmux 子会话 + `.pi/background-tasks/tasks/` 任务注册表 + 结果回报）、`tmux-split-fork`）、
+可选 git worktree + tmux 子会话 + `.pi/background-tasks/tasks/` 任务注册表 + 结果回报）、`tmux-split-fork`、
+`goal`（目标驱动自动迭代：`/goal` 命令族 + agent_settled 续跑循环 + rush 模型无工具 verifier 判定完成））、
 TUI 工具与编辑（`preview`、`view-image`、`files`、
 `context`、`unified-edit`、`review`、`security-review`（安全审查：高置信漏洞识别 +
 并行子代理误报过滤，rubric 改编自 Claude Code 的 security-review）、`answer`、`btw`（在主会话旁开启独立旁路线程））、
@@ -29,7 +30,7 @@ TUI 工具与编辑（`preview`、`view-image`、`files`、
 JSONL；`find-session.ts`：search_sessions 工具 + /search-sessions 命令，基于活跃分支搜索当前项目的会话）
 也都是本目录的顶层扩展。
 扩展间共享的非扩展模块放在 `lib/` 子目录（`lib/rush.ts`：从 modes.json 解析 rush 模式的 provider/
-model/thinkingLevel，供 `answer` 与 `handoff` 发起一次性 LLM 请求时使用；`lib/subagent.ts`：Subagent
+model/thinkingLevel，供 `answer`、`handoff` 与 `goal` 的 verifier 发起一次性 LLM 请求时使用；`lib/subagent.ts`：Subagent
 机制库；`lib/session-common.ts`：session JSONL 解析管线，供 `read-session` 与 `find-session` 共用；
 `lib/session-preview.ts`：会话预览 overlay + read_session 风格转录格式化，供 `pick-session`（ctrl+o 预览快捷键）
 与 `background-task`（preview 动作）共用；`lib/review-target.ts`：ReviewTarget 模型 + git 基础设施
