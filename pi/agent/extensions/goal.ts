@@ -47,7 +47,6 @@
  *   session usage accounting, so the extension carries it explicitly.
  */
 
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { type UserMessage } from "@earendil-works/pi-ai/compat";
 import type {
 	ExtensionAPI,
@@ -57,15 +56,18 @@ import type {
 import {
 	convertToLlm,
 	serializeConversation,
+	sessionEntryToContextMessages,
 } from "@earendil-works/pi-coding-agent";
 import {
-	loadRushModeSpec,
-	RUSH_MODE,
+	extractJsonObject,
+	extractText,
+	resolveRushModel,
 	rushComplete,
 } from "./lib/rush.ts";
-import { Text } from "@earendil-works/pi-tui";
+import { Text, truncateToWidth } from "@earendil-works/pi-tui";
 
 const MAX_ITERATIONS = 25;
+const GOAL_SUBS = ["pause", "resume", "show", "clear"] as const;
 
 type GoalStatus = "active" | "paused" | "complete";
 
@@ -75,8 +77,12 @@ interface GoalData {
 	iteration: number;
 }
 
-/** Persisted shape of `goal` custom entries. */
-interface GoalEntryData extends GoalData {
+/** Persisted shape of `goal` custom entries. Status additionally covers the
+ * write-only "cleared" marker (never held as in-memory goal state). */
+interface GoalEntryData {
+	objective: string;
+	status: GoalStatus | "cleared";
+	iteration: number;
 	reason?: string;
 }
 
@@ -129,19 +135,24 @@ function accumulateVerifyUsage(usage: {
 	verifyTotals.cost += usage.cost?.total ?? 0;
 }
 
-function startVerifySpinner(ctx: ExtensionContext): void {
+function startVerifySpinner(
+	ctx: ExtensionContext,
+	iteration: number,
+	objective: string,
+): void {
 	if (!ctx.hasUI) return;
-	stopVerifySpinner();
+	// The suffix is fixed for the flight: precompute it so each tick only
+	// swaps the frame glyph (verifySummary/truncate would otherwise re-run
+	// their regex/formatting every 120ms). Capture ctx.ui alone, not the
+	// whole context object graph.
 	let frame = 0;
+	const suffix = ` goal verifying iter ${iteration + 1}${verifySummary()}: ${truncateText(objective, 32)}`;
 	verifySpinner = setInterval(() => {
 		frame = (frame + 1) % SPINNER_FRAMES.length;
 		// Render from live state: a mid-flight /goal pause must not be
-		// clobbered by the spinner.
+		// clobbered.
 		if (!goal || goal.status !== "active") return;
-		ctx.ui.setStatus(
-			"goal",
-			`${SPINNER_FRAMES[frame]} goal verifying iter ${goal.iteration + 1}${verifySummary()}: ${truncateText(goal.objective, 32)}`,
-		);
+		ctx.ui.setStatus("goal", `${SPINNER_FRAMES[frame]}${suffix}`);
 	}, 120);
 }
 
@@ -162,32 +173,12 @@ function resetState(): void {
 }
 
 function truncateText(text: string, max: number): string {
-	const t = text.replace(/\s+/g, " ").trim();
-	return t.length > max ? t.slice(0, max - 1) + "…" : t;
+	// Display-width truncation via pi-tui (CJK/emoji aware), not code units.
+	return truncateToWidth(text.replace(/\s+/g, " ").trim(), max, "…");
 }
 
-function extractText(response: {
-	content: { type: string; text?: string }[];
-}): string {
-	return response.content
-		.filter((c): c is { type: "text"; text: string } => c.type === "text")
-		.map((c) => c.text)
-		.join("\n");
-}
-
-/** Tolerant JSON extraction: bare object, string-wrapped, or fenced. */
-function extractJsonObject(text: string): unknown | null {
-	let candidate = text.trim();
-	const fence = candidate.match(/```(?:json)?\s*([\s\S]*?)```/);
-	if (fence) candidate = fence[1].trim();
-	const start = candidate.indexOf("{");
-	const end = candidate.lastIndexOf("}");
-	if (start < 0 || end <= start) return null;
-	try {
-		return JSON.parse(candidate.slice(start, end + 1));
-	} catch {
-		return null;
-	}
+function errorMessage(err: unknown): string {
+	return err instanceof Error ? err.message : String(err);
 }
 
 function parseJudgment(text: string): VerifierResult | null {
@@ -291,81 +282,53 @@ function updateFooter(ctx: ExtensionContext): void {
 	);
 }
 
-function pauseGoal(pi: ExtensionAPI, ctx: ExtensionContext, reason: string): void {
+/** Terminal status write: entry + footer + notify converge in one place. */
+function endGoal(
+	pi: ExtensionAPI,
+	ctx: ExtensionContext,
+	status: "paused" | "complete",
+	reason: string,
+): void {
 	if (!goal || goal.status !== "active") return;
-	goal.status = "paused";
+	goal.status = status;
 	appendGoalEntry(pi, reason);
 	updateFooter(ctx);
-	ctx.ui.notify(`Goal paused: ${reason}`, "warning");
+	ctx.ui.notify(
+		status === "complete"
+			? `Goal complete: ${truncateText(goal.objective, 60)}`
+			: `Goal paused: ${reason}`,
+		status === "complete" ? "info" : "warning",
+	);
+}
+
+/** The loop's core send: goal-continuation custom message + triggerTurn. */
+function sendContinuation(pi: ExtensionAPI, content: string): void {
+	// triggerTurn is mandatory - without it the message may only queue
+	// and the loop stalls silently.
+	pi.sendMessage(
+		{ customType: "goal-continuation", content, display: true },
+		{ triggerTurn: true },
+	);
 }
 
 // ---------------------------------------------------------------------------
 // Verifier (one-shot rush-model call, tools: none, fail-closed)
 // ---------------------------------------------------------------------------
 
-function entryToAgentMessage(entry: SessionEntry): AgentMessage | undefined {
-	if (entry.type === "message") {
-		return entry.message;
-	}
-	if (entry.type === "custom_message") {
-		// Goal continuation messages live here; without them the verifier
-		// would lose the objective and every nextAction.
-		return {
-			role: "custom",
-			customType: entry.customType,
-			content: entry.content,
-			display: entry.display,
-			timestamp: new Date(entry.timestamp).getTime(),
-		};
-	}
-	if (entry.type === "compaction") {
-		return {
-			role: "compactionSummary",
-			summary: entry.summary,
-			tokensBefore: entry.tokensBefore,
-			timestamp: new Date(entry.timestamp).getTime(),
-		};
-	}
-	if (entry.type === "branch_summary") {
-		return {
-			role: "branchSummary",
-			summary: entry.summary,
-			fromId: entry.fromId,
-			timestamp: new Date(entry.timestamp).getTime(),
-		};
-	}
-	return undefined;
-}
-
 async function runVerifier(
 	ctx: ExtensionContext,
 	objective: string,
 ): Promise<VerifierResult> {
-	const spec = loadRushModeSpec(ctx.cwd);
-	if (!spec?.provider || !spec.modelId) {
-		return { kind: "failed", error: `No '${RUSH_MODE}' mode in modes.json` };
-	}
-	const model = ctx.modelRegistry.find(spec.provider, spec.modelId);
-	if (!model) {
-		return {
-			kind: "failed",
-			error: `Mode '${RUSH_MODE}' references unknown model ${spec.provider}/${spec.modelId}`,
-		};
-	}
-	if (!ctx.modelRegistry.hasConfiguredAuth(model)) {
-		return {
-			kind: "failed",
-			error: `No auth configured for ${spec.provider}/${spec.modelId}`,
-		};
-	}
+	const resolved = resolveRushModel(ctx.cwd, ctx.modelRegistry);
+	if (!resolved.ok) return { kind: "failed", error: resolved.error };
+	const model = resolved.model;
 
 	// Transcript = active branch with compaction applied. Serialize the
 	// conversation to text so the tool-less rush call never has to carry
 	// tool_use/tool_result blocks (a tools:[] request cannot carry them).
 	const messages = ctx.sessionManager
 		.buildContextEntries()
-		.map(entryToAgentMessage)
-		.filter((m): m is AgentMessage => m !== undefined);
+		.flatMap(sessionEntryToContextMessages);
 	if (messages.length === 0) {
 		return { kind: "failed", error: "no conversation to verify" };
 	}
@@ -390,10 +353,10 @@ async function runVerifier(
 				ctx.modelRegistry,
 				ctx.sessionManager.getSessionId?.(),
 				{ systemPrompt: VERIFIER_SYSTEM_PROMPT, messages: [userMessage] },
-				{ reasoningEffort: spec.thinkingLevel },
+				{ reasoningEffort: resolved.spec.thinkingLevel },
 			);
 		} catch (err) {
-			lastError = `verifier threw: ${err instanceof Error ? err.message : String(err)}`;
+			lastError = `verifier threw: ${errorMessage(err)}`;
 			continue;
 		}
 		accumulateVerifyUsage(response.usage ?? {});
@@ -419,78 +382,60 @@ async function runVerifier(
 async function runSettleCycle(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
 	const g = goal;
 	if (!g) return;
-	startVerifySpinner(ctx);
+	startVerifySpinner(ctx, g.iteration, g.objective);
 	try {
-		await runSettleCycleInner(pi, ctx, g);
-	} finally {
-		stopVerifySpinner();
-	}
-}
+		const judgment = await runVerifier(ctx, g.objective);
 
-async function runSettleCycleInner(
-	pi: ExtensionAPI,
-	ctx: ExtensionContext,
-	g: GoalData,
-): Promise<void> {
-	const judgment = await runVerifier(ctx, g.objective);
+		// Pre-send recheck invariant: the verifier was in flight for seconds;
+		// pause/clear/replace/user input may have landed meanwhile. Identity
+		// check: a /goal replace creates a new goal object; a stale judgment
+		// must not drive the new goal's continuation.
+		if (!goal || goal !== g || goal.status !== "active") {
+			updateFooter(ctx);
+			return;
+		}
+		if (!ctx.isIdle() || ctx.hasPendingMessages()) {
+			updateFooter(ctx);
+			return;
+		}
 
-	// Pre-send recheck invariant: the verifier was in flight for seconds;
-	// pause/clear/replace/user input may have landed meanwhile. Identity
-	// check: a /goal replace creates a new goal object; a stale judgment
-	// must not drive the new goal's continuation.
-	if (!goal || goal !== g || goal.status !== "active") {
+		goal.iteration += 1;
+		if (judgment.kind === "failed") {
+			endGoal(pi, ctx, "paused", judgment.error);
+			return;
+		}
+
+		pi.appendEntry("goal-verification", {
+			objective: goal.objective,
+			passed: judgment.passed,
+			reason: judgment.reason,
+			nextAction: judgment.nextAction,
+			iteration: goal.iteration,
+		});
+
+		if (judgment.passed) {
+			endGoal(pi, ctx, "complete", "verified complete");
+			return;
+		}
+
+		if (!judgment.nextAction) {
+			endGoal(pi, ctx, "paused", "verifier returned no nextAction");
+			return;
+		}
+
 		updateFooter(ctx);
-		return;
-	}
-	if (!ctx.isIdle() || ctx.hasPendingMessages()) {
-		updateFooter(ctx);
-		return;
-	}
-
-	goal.iteration += 1;
-	if (judgment.kind === "failed") {
-		pauseGoal(pi, ctx, judgment.error);
-		return;
-	}
-
-	pi.appendEntry("goal-verification", {
-		objective: goal.objective,
-		passed: judgment.passed,
-		reason: judgment.reason,
-		nextAction: judgment.nextAction,
-		iteration: goal.iteration,
-	});
-
-	if (judgment.passed) {
-		goal.status = "complete";
-		appendGoalEntry(pi, "verified complete");
-		updateFooter(ctx);
-		ctx.ui.notify(
-			`Goal complete: ${truncateText(goal.objective, 60)}`,
-			"info",
-		);
-		return;
-	}
-
-	if (!judgment.nextAction) {
-		pauseGoal(pi, ctx, "verifier returned no nextAction");
-		return;
-	}
-
-	updateFooter(ctx);
-	pi.sendMessage(
-		{
-			customType: "goal-continuation",
-			content: continuationContent(
+		sendContinuation(
+			pi,
+			continuationContent(
 				goal.objective,
 				goal.iteration,
 				judgment.reason,
 				judgment.nextAction,
 			),
-			display: true,
-		},
-		{ triggerTurn: true },
-	);
+		);
+	} finally {
+		stopVerifySpinner();
+	}
 }
 
 /** Last assistant message on the active branch, for the error fuse. */
@@ -517,21 +462,22 @@ async function processSettled(pi: ExtensionAPI, ctx: ExtensionContext): Promise<
 	// on aborts too, so consume the latch here and convert it to a pause.
 	if (userAbortedSinceLastSettle) {
 		userAbortedSinceLastSettle = false;
-		pauseGoal(pi, ctx, "user aborted the run");
+		endGoal(pi, ctx, "paused", "user aborted the run");
 		return;
 	}
 	if (!goal || goal.status !== "active") return;
 	if (goal.iteration >= MAX_ITERATIONS) {
-		pauseGoal(pi, ctx, `max iterations (${MAX_ITERATIONS}) reached`);
+		endGoal(pi, ctx, "paused", `max iterations (${MAX_ITERATIONS}) reached`);
 		return;
 	}
 	// Error fuse: the run ended with stopReason "error" (model/auth broken,
 	// auto-retry exhausted). Continuing would burn iterations on failures.
 	const lastAssistant = findLastAssistant(ctx.sessionManager.getBranch());
 	if (lastAssistant?.stopReason === "error") {
-		pauseGoal(
+		endGoal(
 			pi,
 			ctx,
+			"paused",
 			`last run ended in error: ${truncateText(lastAssistant.errorMessage ?? "", 120)}`,
 		);
 		return;
@@ -568,8 +514,7 @@ export default function (pi: ExtensionAPI) {
 		// apply the completion, and /goal pause (the urgent control, often
 		// typed mid-run) needs a single Enter to land.
 		getArgumentCompletions: (prefix: string) => {
-			const subs = ["pause", "resume", "show", "clear"];
-			const items = subs
+			const items = GOAL_SUBS
 				.filter((s) => s.startsWith(prefix) && s !== prefix)
 				.map((s) => ({ value: s, label: s }));
 			return items.length > 0 ? items : null;
@@ -605,7 +550,7 @@ export default function (pi: ExtensionAPI) {
 					ctx.ui.notify("No active goal to pause", "warning");
 					return;
 				}
-				pauseGoal(pi, ctx, "paused by user");
+				endGoal(pi, ctx, "paused", "paused by user");
 				return;
 			}
 
@@ -626,14 +571,7 @@ export default function (pi: ExtensionAPI) {
 					`Goal resumed: ${truncateText(goal.objective, 60)}`,
 					"info",
 				);
-				pi.sendMessage(
-					{
-						customType: "goal-continuation",
-						content: kickoffContent(goal.objective),
-						display: true,
-					},
-					{ triggerTurn: true },
-				);
+				sendContinuation(pi, kickoffContent(goal.objective));
 				// Track the restarted loop to its end so waitForIdle callers
 				// (notably print mode) do not tear down mid-loop.
 				await ctx.waitForIdle();
@@ -679,14 +617,7 @@ export default function (pi: ExtensionAPI) {
 			// waitForIdle tracks the whole loop: pi.sendMessage is a
 			// fire-and-forget wrapper, so without it print mode disposes the
 			// session the moment this handler returns and kills the run.
-			pi.sendMessage(
-				{
-					customType: "goal-continuation",
-					content: kickoffContent(objective),
-					display: true,
-				},
-				{ triggerTurn: true },
-			);
+			sendContinuation(pi, kickoffContent(objective));
 			await ctx.waitForIdle();
 		},
 	});
@@ -709,7 +640,7 @@ export default function (pi: ExtensionAPI) {
 			await processSettled(pi, ctx);
 		} catch (err) {
 			ctx.ui.notify(
-				`goal settle error: ${err instanceof Error ? err.message : String(err)}`,
+				`goal settle error: ${errorMessage(err)}`,
 				"error",
 			);
 		}
@@ -720,17 +651,21 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => {
 		resetState();
 		let restored: GoalEntryData | null = null;
-		for (const entry of ctx.sessionManager.getBranch()) {
+		// Reverse scan: stop at the most recent goal entry.
+		const branch = ctx.sessionManager.getBranch();
+		for (let i = branch.length - 1; i >= 0; i--) {
+			const entry = branch[i];
 			if (entry.type === "custom" && entry.customType === "goal") {
 				const data = entry.data as GoalEntryData | undefined;
 				if (data && typeof data.objective === "string") {
 					restored = data;
+					break;
 				}
 			}
 		}
 		if (restored && restored.status !== "cleared") {
-			if (restored.status === "active") {
-				restored = { ...restored, status: "paused" };
+			const wasActive = restored.status === "active";
+			if (wasActive) {
 				ctx.ui.notify(
 					"Goal restored as paused after restart; /goal resume to continue",
 					"info",
@@ -738,7 +673,7 @@ export default function (pi: ExtensionAPI) {
 			}
 			goal = {
 				objective: restored.objective,
-				status: restored.status,
+				status: wasActive ? "paused" : restored.status,
 				iteration: restored.iteration ?? 0,
 			};
 		}

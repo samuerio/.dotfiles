@@ -47,7 +47,11 @@ function getGlobalModesPath(): string {
 	return join(getAgentDir(), "modes.json");
 }
 
-export function loadRushModeSpec(cwd: string): ModeSpec | null {
+/**
+ * Returns a resolved mode spec with provider/modelId guaranteed non-empty
+ * (the loader skips candidates lacking either), or null when no binding.
+ */
+export function loadRushModeSpec(cwd: string): ModeSpec & { provider: string; modelId: string } | null {
 	const candidates = [getProjectModesPath(cwd), getGlobalModesPath()];
 	for (const p of candidates) {
 		if (!existsSync(p)) continue;
@@ -144,4 +148,70 @@ export async function rushComplete(
 			...headers,
 		}),
 	});
+}
+
+// ---------------------------------------------------------------------------
+// Shared consumer helpers (rush-mode resolution + response text handling)
+// ---------------------------------------------------------------------------
+
+export type ResolvedRushModel =
+	| {
+			ok: true;
+			model: Model<Api>;
+			spec: ModeSpec & { provider: string; modelId: string };
+	  }
+	| { ok: false; error: string };
+
+/**
+ * One-stop rush-model resolution for one-shot callers: modes.json binding,
+ * registry lookup, and auth check. Callers keep their own error surface;
+ * the returned error strings are already user-ready.
+ */
+export function resolveRushModel(
+	cwd: string,
+	modelRegistry: ModelRegistry,
+): ResolvedRushModel {
+	const spec = loadRushModeSpec(cwd);
+	if (!spec) {
+		return { ok: false, error: `No '${RUSH_MODE}' mode in modes.json` };
+	}
+	const model = modelRegistry.find(spec.provider, spec.modelId);
+	if (!model) {
+		return {
+			ok: false,
+			error: `Mode '${RUSH_MODE}' references unknown model ${spec.provider}/${spec.modelId}`,
+		};
+	}
+	if (!modelRegistry.hasConfiguredAuth(model)) {
+		return {
+			ok: false,
+			error: `No auth configured for ${spec.provider}/${spec.modelId}`,
+		};
+	}
+	return { ok: true, model, spec };
+}
+
+/** Full text of a rush response: text blocks joined with newlines. */
+export function extractText(response: {
+	content: { type: string; text?: string }[];
+}): string {
+	return response.content
+		.filter((c): c is { type: "text"; text: string } => c.type === "text")
+		.map((c) => c.text)
+		.join("\n");
+}
+
+/** Tolerant JSON extraction: bare object, string-wrapped, or fenced. */
+export function extractJsonObject(text: string): unknown | null {
+	let candidate = text.trim();
+	const fence = candidate.match(/```(?:json)?\s*([\s\S]*?)```/);
+	if (fence) candidate = fence[1].trim();
+	const start = candidate.indexOf("{");
+	const end = candidate.lastIndexOf("}");
+	if (start < 0 || end <= start) return null;
+	try {
+		return JSON.parse(candidate.slice(start, end + 1));
+	} catch {
+		return null;
+	}
 }
