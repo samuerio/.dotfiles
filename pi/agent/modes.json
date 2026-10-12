@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "currentMode": "smart",
+  "currentMode": "rush",
   "modes": {
     "default": {
       "provider": "opencode-go",
@@ -13,8 +13,8 @@
       "thinkingLevel": "medium"
     },
     "smart": {
-      "provider": "opencode-go",
-      "modelId": "glm-5.2",
+      "provider": "engy",
+      "modelId": "glm-5.3-flash",
       "thinkingLevel": "medium"
     },
     "deep": {

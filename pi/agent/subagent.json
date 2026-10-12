@@ -1,5 +1,5 @@
 {
-    "model": "opencode-go/deepseek-v4.1-flash",
+    "model": "engy/qwen3.8-27b",
     "thinking": "medium",
     "tools": ["write", "edit", "read", "bash", "finder"],
     "skills": []
