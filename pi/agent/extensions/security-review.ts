@@ -47,6 +47,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 
 import {
+    applyUncommittedWorktree,
     buildTargetFocusPrompt,
     dispatchPromptTask,
     getUserFacingHint,
@@ -376,6 +377,22 @@ export default function securityReviewExtension(pi: ExtensionAPI) {
             while (true) {
                 if (!target && fromSelector) {
                     target = await showSecurityTargetSelector(ctx);
+                    // Targets picked from the re-opened selector need the
+                    // same worktree treatment as the initial resolution.
+                    if (target) {
+                        const applied = await applyUncommittedWorktree(
+                            pi,
+                            ctx,
+                            target,
+                        );
+                        if (applied.status === "ok") {
+                            target = applied.target;
+                        } else {
+                            // Cancelled: land back on the preset selector.
+                            target = null;
+                            continue;
+                        }
+                    }
                 }
 
                 if (!target) {

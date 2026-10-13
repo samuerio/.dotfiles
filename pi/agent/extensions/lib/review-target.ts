@@ -25,6 +25,8 @@ import {
     Spacer,
     Text,
 } from "@earendil-works/pi-tui";
+import { promises as fs } from "node:fs";
+import path from "node:path";
 
 import {
     dispatchBackgroundTask,
@@ -35,7 +37,7 @@ import {
 
 // Review target types (matching Codex's approach)
 export type ReviewTarget =
-    | { type: "uncommitted" }
+    | { type: "uncommitted"; worktreePath?: string }
     | { type: "baseBranch"; branch: string }
     | { type: "commit"; sha: string; title?: string }
     | {
@@ -156,6 +158,204 @@ async function hasPendingChanges(pi: ExtensionAPI): Promise<boolean> {
     return trackedChanges.length > 0;
 }
 
+type WorktreeEntry = {
+    path: string;
+    /** Checked-out branch without the refs/heads/ prefix; null for detached HEAD. */
+    branch: string | null;
+    bare: boolean;
+};
+
+/**
+ * List git worktrees via `git worktree list --porcelain`. Returns null when
+ * git itself fails (NOT when the repo simply has no worktrees): enumeration
+ * failure is surfaced as an error and handled like a picker cancel, since
+ * silently reviewing the current worktree while other worktrees may hold
+ * the changes would hide the failure.
+ *
+ * Entries are blank-line separated; known keys are recognized line-by-line
+ * and unknown keys (including `locked [reason]` and `prunable [reason]`)
+ * are ignored. Locked entries are NOT filtered here: locked only prevents
+ * removal, reviewing them is fine. Bare entries are kept but callers skip
+ * them (no working tree, no uncommitted changes).
+ */
+async function listWorktrees(pi: ExtensionAPI): Promise<WorktreeEntry[] | null> {
+    const { stdout, code } = await pi.exec("git", [
+        "worktree",
+        "list",
+        "--porcelain",
+    ]);
+    if (code !== 0) return null;
+
+    const entries: WorktreeEntry[] = [];
+    let pending: {
+        path?: string;
+        branch: string | null;
+        bare: boolean;
+    } | null = null;
+
+    const flush = () => {
+        if (pending?.path) {
+            entries.push({
+                path: pending.path,
+                branch: pending.branch,
+                bare: pending.bare,
+            });
+        }
+        pending = null;
+    };
+
+    for (const rawLine of stdout.split("\n")) {
+        const line = rawLine.trim();
+        if (!line) {
+            flush();
+            continue;
+        }
+        if (line.startsWith("worktree ")) {
+            flush();
+            pending = { path: line.slice("worktree ".length), branch: null, bare: false };
+        } else if (line.startsWith("branch ")) {
+            if (pending) {
+                pending.branch = line.slice("branch ".length).replace(/^refs\/heads\//, "");
+            }
+        } else if (line === "bare") {
+            if (pending) pending.bare = true;
+        } else if (line === "detached" || line.startsWith("HEAD ")) {
+            // detached HEAD: leave branch as null; raw HEAD sha is unused
+        }
+        // ignore locked / prunable / unknown keys
+    }
+    flush();
+    return entries;
+}
+
+/** Number of dirty files (tracked + untracked) in a worktree, or null if git fails. */
+async function getWorktreeDirtyCount(
+    pi: ExtensionAPI,
+    worktreePath: string,
+): Promise<number | null> {
+    const { stdout, code } = await pi.exec("git", [
+        "-C",
+        worktreePath,
+        "status",
+        "--porcelain",
+    ]);
+    if (code !== 0) return null;
+    const trimmed = stdout.trim();
+    return trimmed ? trimmed.split("\n").length : 0;
+}
+
+/** Shorten an absolute path's home prefix to `~` for display. */
+function prettyPath(value: string): string {
+    const home = process.env.HOME;
+    return home && value.startsWith(home)
+        ? `~${value.slice(home.length)}`
+        : value;
+}
+
+export type UncommittedWorktreeResult =
+    | { status: "ok"; target: ReviewTarget }
+    /** The user dismissed the worktree picker. */
+    | { status: "cancelled" }
+    /** git could not enumerate worktrees; callers treat this like cancel. */
+    | { status: "error" };
+
+/**
+ * For an uncommitted review target in a multi-worktree repo, let the user
+ * pick which worktree's uncommitted changes to review. The current worktree
+ * is listed first (pre-selected) so the usual case is Enter; picking it
+ * leaves `worktreePath` undefined so the prompt stays byte-identical to the
+ * single-worktree behavior.
+ */
+export async function applyUncommittedWorktree(
+    pi: ExtensionAPI,
+    ctx: ExtensionCommandContext,
+    target: ReviewTarget,
+): Promise<UncommittedWorktreeResult> {
+    if (target.type !== "uncommitted") {
+        return { status: "ok", target };
+    }
+
+    const worktrees = await listWorktrees(pi);
+    if (worktrees === null) {
+        ctx.ui.notify(
+            "Failed to list git worktrees; cannot offer a worktree choice.",
+            "error",
+        );
+        return { status: "error" };
+    }
+    const cwd = path.resolve(ctx.cwd);
+
+    // Skip bare entries and directories missing on disk (prunable/deleted).
+    const candidates: Array<{ entry: WorktreeEntry; current: boolean }> = [];
+    for (const entry of worktrees) {
+        if (entry.bare) continue;
+        const stat = await fs.stat(entry.path).catch(() => null);
+        if (!stat?.isDirectory()) continue;
+        candidates.push({ entry, current: path.resolve(entry.path) === cwd });
+    }
+
+    // No other valid worktree: nothing to disambiguate, behave as before.
+    const hasOtherWorktree = candidates.some((c) => !c.current);
+    if (!hasOtherWorktree) return { status: "ok", target };
+
+    // Current worktree first (pre-selected), then others sorted by path.
+    const currentEntries = candidates.filter((c) => c.current);
+    const otherEntries = candidates
+        .filter((c) => !c.current)
+        .sort((a, b) => a.entry.path.localeCompare(b.entry.path));
+    const ordered = [...currentEntries, ...otherEntries];
+
+    const lines: Array<{ label: string; entry: WorktreeEntry; current: boolean }> = [];
+    for (const { entry, current } of ordered) {
+        const dirty = await getWorktreeDirtyCount(pi, entry.path);
+        const counts =
+            dirty === null ? "? dirty" : `${dirty} dirty`;
+        const branchLabel = entry.branch ?? "detached HEAD";
+        lines.push({
+            entry,
+            current,
+            label: current
+                ? `${prettyPath(entry.path)} (${branchLabel}, ${counts}, current)`
+                : `${prettyPath(entry.path)} (${branchLabel}, ${counts})`,
+        });
+    }
+
+    const choice = await ctx.ui.select(
+        "Select worktree to review:",
+        lines.map((line) => line.label),
+    );
+    if (choice === undefined) {
+        return { status: "cancelled" };
+    }
+
+    const picked = lines.find((line) => line.label === choice);
+    if (!picked || picked.current) {
+        // Current worktree (or unknown selection): keep the default prompt.
+        return { status: "ok", target: { type: "uncommitted" } };
+    }
+    return {
+        status: "ok",
+        target: { type: "uncommitted", worktreePath: picked.entry.path },
+    };
+}
+
+/**
+ * Standard instruction block appended to an uncommitted review prompt when a
+ * worktree other than the current one was selected. Git commands and file
+ * reads must target that worktree explicitly: the child cwd for background
+ * tasks is the main repo, and in-session tools also run in the launching
+ * cwd, so without these instructions the review inspects the wrong tree.
+ */
+function worktreeInstructionsBlock(worktreePath: string): string {
+    return [
+        "",
+        "",
+        `Target worktree: ${worktreePath} (different from your current working directory).`,
+        `- Run every git command with \`git -C ${worktreePath}\` (e.g. \`git -C ${worktreePath} status --porcelain\`, \`git -C ${worktreePath} diff\`, \`git -C ${worktreePath} diff --staged\`, \`git -C ${worktreePath} ls-files --others --exclude-standard\`).`,
+        `- All file paths you mention in findings must be relative to the worktree root \`${worktreePath}\`.`,
+        `- Read files under \`${worktreePath}\` (not your current working directory) when inspecting them.`,
+    ].join("\n");
+}
 /**
  * Parse a PR reference (URL or number) and return the PR number
  */
@@ -276,7 +476,9 @@ async function getDefaultBranch(pi: ExtensionAPI): Promise<string> {
 export function getUserFacingHint(target: ReviewTarget): string {
     switch (target.type) {
         case "uncommitted":
-            return "current changes";
+            return target.worktreePath
+                ? `current changes in worktree ${target.worktreePath}`
+                : "current changes";
         case "baseBranch":
             return `changes against '${target.branch}'`;
         case "commit": {
@@ -348,7 +550,10 @@ export async function buildTargetFocusPrompt(
 ): Promise<string> {
     switch (target.type) {
         case "uncommitted":
-            return templates.uncommitted;
+            return target.worktreePath
+                ? templates.uncommitted +
+                      worktreeInstructionsBlock(target.worktreePath)
+                : templates.uncommitted;
 
         case "baseBranch": {
             const mergeBase = await getMergeBase(pi, target.branch);
@@ -1292,6 +1497,30 @@ export async function resolveReviewTarget(
     if (!target) {
         return { status: "cancelled" };
     }
+
+    // Uncommitted targets offer a worktree picker when the repo has other
+    // worktrees. Cancelling (or a worktree listing failure, surfaced as an
+    // error there) behaves like cancelling target selection: from the
+    // selector path it re-opens the selector (so the worktree picker
+    // re-appears if "uncommitted" is chosen again), from direct args it
+    // cancels the whole command.
+    while (true) {
+        if (target.type !== "uncommitted") break;
+        const applied = await applyUncommittedWorktree(pi, ctx, target);
+        if (applied.status === "ok") {
+            target = applied.target;
+            break;
+        }
+        if (!fromSelector) {
+            return { status: "cancelled" };
+        }
+        const next = await opts.selectTarget(ctx);
+        if (!next) {
+            return { status: "cancelled" };
+        }
+        target = next;
+    }
+
     return { status: "ok", target, extraInstruction, fromSelector };
 }
 export type PromptTaskOptions = {
