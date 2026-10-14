@@ -135,6 +135,10 @@ adds no relevant behavior.
 ---
 
 ## Example 3: Event-driven execution across multiple run cycles
+Blocks are ordered chronologically across top-level invocations. A slash-command
+frame is a top-level invocation too; `[command]` is a valid structural label for
+it. The `INPUT` state is as of just before `[run 3]`: the two run cycles between
+the command frame and `[run 3]` are elided.
 
 ```text
 INPUT:
@@ -172,6 +176,19 @@ CONTEXT:
   }
 
 TRACE:
+
+[command]
+
+CALL goal command handler(args = "make `pnpm test` pass", ctx)
+  │
+  ├─ MUTATE goal = {objective: "make `pnpm test` pass", status: "active", iteration: 0}
+  ├─ SIDE EFFECT pi.sendMessage({customType: "goal-continuation", content: "[goal kickoff] ..."}, {triggerTurn: true})
+  │
+  ▼
+RETURN
+
+# inferred: triggerTurn starts an agent run over the kickoff message; run
+#          cycles 1 and 2 repeat the [run 3] shape and are elided
 
 [run 3]
 
@@ -258,6 +275,16 @@ CALL endGoal(pi, ctx, "complete", "verified complete")
   └─ MUTATE verifierBusy: true → false
 
 DETAIL:
+
+[command]
+
+CALL goal command handler(args, ctx)
+├─ MUTATE goal = {objective: "make `pnpm test` pass", status: "active", iteration: 0}
+├─ MUTATE verifyTotals = {tokens: 0, cost: 0}
+└─ SIDE EFFECT sendContinuation → pi.sendMessage(
+     {customType: "goal-continuation", content: "[goal kickoff] ..."},
+     {triggerTurn: true}
+   )
 
 [run 3]
 
