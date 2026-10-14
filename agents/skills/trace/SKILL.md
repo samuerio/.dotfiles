@@ -18,204 +18,98 @@ Statically reconstruct the execution path for concrete `INPUT` and supplied
 
 Never execute, modify, instrument, or probe the target.
 
-## Grounding
+## Grounding and unknowns
 
 Treat source code as authoritative for control flow.
 
-Treat supplied `INPUT` and `CONTEXT` as authoritative for explicitly provided:
+Treat supplied `INPUT` and `CONTEXT` as authoritative for explicitly provided
+arguments, external state, runtime results, callbacks, events, configuration,
+and environment state.
 
-- arguments,
-- external state,
-- runtime results,
-- callbacks,
-- events,
-- configuration,
-- environment state.
+Follow only paths determined by source code, `INPUT`, `CONTEXT`, or an
+explicit `# inferred: ...` boundary.
 
-Follow only paths determined by:
+Every concrete scalar, string, count, timing, cost, token usage, or payload in
+`TRACE` or `DETAIL` must come from:
 
 - source code,
-- supplied `INPUT`,
-- supplied `CONTEXT`, or
-- an explicit `# inferred: ...` boundary.
+- `INPUT`,
+- `CONTEXT`, or
+- an `assumed:` entry in `CONTEXT`.
 
-Never invent a concrete scalar, string, identifier, count, timing, cost, token
-usage, process result, callback result, or payload and label it inferred.
+Never invent concrete values or label an invention as `# inferred:`.
 
-If a concrete value is unavailable:
+When a runtime value is unavailable:
 
-- omit it when it does not affect the traced path,
-- keep it symbolic when later logic needs it, or
-- stop the path when it is path-critical.
+- omit it if it does not affect the traced path,
+- keep it symbolic if later logic needs it,
+- stop when it is path-critical, or
+- assume values, each labeled, when doing so materially improves the trace.
 
-Example:
+Record assumptions once, in `CONTEXT`:
 
 ```text
-SIDE EFFECT spawn("pnpm", ["test"])
-  │
-  ▼
-# inferred: process exit state was not supplied; subsequent path is undetermined
+assumed: verifier result = { passed: true, reason: "", nextAction: "" }
 ```
 
-Do not invent the missing internals.
+If an assumption determines continuation or termination, name the omitted
+alternative:
 
-### Provenance
+```text
+# inferred: with passed=false the loop would continue into another cycle
+```
 
-A concrete value in TRACE or DETAIL is legitimate only when it is traceable
-to source code, INPUT, CONTEXT, or a labeled assumption. An unlabeled
-plausible-looking value is an invention, regardless of how likely it is.
+Chained assumptions are allowed when the extra values render the mechanism
+being traced. When two or more assumptions form a sequence, close the trace
+with one line naming them as illustrative:
 
-## Assumed values
+```text
+# inferred: both verifier judgments above are assumed to render the loop;
+# a real session may take more cycles or fail differently
+```
 
-When a path-critical runtime result was not supplied, you may assume one to
-keep the trace readable. Three conditions apply:
+`#` comments are allowed only as:
 
-1. List it once in `CONTEXT` with an `assumed:` prefix:
+```text
+# iteration: <label>
+# inferred: <externally caused or not directly established behavior>
+```
 
-     assumed: run 2 verifier result = { passed: true, reason: "", nextAction: "" }
+## Causal rendering
 
-2. When the assumption decides the trace's length or termination point, add
-   one line naming the branch you did not render:
+Optimize for causal readability, not statement coverage. Include only events
+that materially explain:
 
-     # inferred: if not passed, run 2 would send a goal-continuation
-     # message and the loop would enter another cycle
-
-3. Assume only single independent values. Do not compose a multi-step
-   narrative from several invented values (for example, a judgment that
-   "fails on run 1 and passes on run 2"): each added invention multiplies
-   the fabricated story.
-
-## Causal selection
-
-Optimize for causal readability, not statement coverage.
-
-The trace should let a reader answer:
-
-1. What caused this invocation to run?
-2. Which call or external result determined what happened next?
-3. What meaningful state changed?
-4. What observable side effect occurred?
-5. What caused execution to repeat, continue asynchronously, or stop?
-6. When needed, which call frame owns each event?
-
-If an event does not materially help answer one of those questions, omit it.
+1. what caused the invocation,
+2. what determined the next step,
+3. meaningful state changes,
+4. observable side effects,
+5. repetition, asynchronous continuation, or termination,
+6. call ownership when otherwise ambiguous.
 
 Prefer the shallowest representation that preserves causal understanding.
 
-## Event labels
+- `CALL` — enter repository code whose internals materially explain the path.
+- `VALUE` — derive a value later used by traced control flow, mutation, side
+  effect, or return; not merely computed, copied, logged, or passed through.
+- `MUTATE` — meaningful state transition.
+- `SIDE EFFECT` — observable I/O, process, callback, event, timer,
+  subscription, UI update, persistence, or logging.
+- `RETURN` — meaningful result, early return, or termination.
 
-Use these labels for traced behavior:
+Do not render standard-library, runtime, third-party, or external APIs as
+`CALL`; represent their observable behavior as `SIDE EFFECT`, and their
+returned data as `VALUE` only when later traced logic needs it.
 
-- `CALL` — enter repository code whose internal behavior materially explains
-  control flow, later state, or multiple relevant events.
-- `VALUE` — a derived value later used to determine a traced path, meaningful
-  mutation, observable side effect, or final result.
-- `MUTATE` — a meaningful state change.
-- `SIDE EFFECT` — externally observable I/O, processes, callbacks, events,
-  timers, subscriptions, UI updates, persistence, or logging.
-- `RETURN` — a meaningful returned value, early return, or termination point.
-
-Do not emit `VALUE` merely because something is computed, serialized, copied,
-logged, or passed through unchanged.
+Do not mechanically render repository helpers. Inline a helper's relevant
+value, mutation, or side effect unless entering the helper materially explains
+control flow, nested events, or result derivation.
 
 Render actual emitted output or events as `SIDE EFFECT`, never `VALUE`.
 
-Do not render standard-library, runtime, third-party, or external API calls as
-`CALL`.
+## Output structure
 
-Represent their observable behavior as `SIDE EFFECT`.
-
-Represent returned external data as `VALUE` only when later traced logic needs
-that value.
-
-## Repository helpers
-
-Do not mechanically render every repository function as `CALL`.
-
-Render a helper as `CALL` only when entering it materially explains:
-
-- control flow,
-- multiple relevant events,
-- meaningful nested mutations, or
-- a result whose derivation matters.
-
-If a helper merely produces one relevant value, mutation, or side effect,
-inline that event at the caller level and omit the helper call.
-
-Prefer:
-
-```text
-CALL task.execute(...)
-  │
-  ├─ VALUE config = {
-  │    model:    "...",
-  │    thinking: "medium"
-  │  }
-  │
-  └─ CALL this.run(...)
-```
-
-over:
-
-```text
-CALL task.execute(...)
-  CALL loadInlineConfig()
-    VALUE model = "..."
-    VALUE thinking = "medium"
-  CALL instance.execute(...)
-    CALL this.run(...)
-```
-
-when the omitted wrappers add no relevant behavior.
-
-## INPUT and CONTEXT format
-
-Render `INPUT` and `CONTEXT` as multiline structured blocks.
-
-Use this style:
-
-```text
-INPUT:
-  goal = {
-    objective: "make `pnpm test` pass",
-    status:    "active",
-    iteration: 2
-  }
-
-  verifierBusy = false
-
-  verifyTotals = {
-    tokens: 0,
-    cost:   0
-  }
-
-CONTEXT:
-  agent_settled fires once per completed run cycle
-  main agent idle, no pending messages
-
-  run 3 verifier result = {
-    passed:     false,
-    reason:     "lib/kline.test.ts one case still failing",
-    nextAction: "regenerate the snapshot for the CJK-width case"
-  }
-```
-
-Formatting rules:
-
-- Put one top-level binding or context fact per paragraph.
-- Expand object-like values vertically unless trivially short.
-- Indent nested fields by two spaces per level.
-- Align `:` within a local object when it improves readability.
-- Separate unrelated top-level bindings or context groups with one blank line.
-- Preserve identifiers and strings exactly.
-- Do not force alignment across unrelated objects.
-- Do not collapse structured input into long single-line literals.
-- Do not repeat an input/context value later as `VALUE` unless execution derives
-  a materially different value.
-
-## Document layout
-
-Write the saved document in this order:
+Unless the user requests `detail only`, save sections in this order:
 
 ```text
 INPUT:
@@ -233,31 +127,58 @@ DETAIL:
 
 `CONTEXT` is optional.
 
-`DETAIL` is conditional.
+Add no explanatory prose before, between, or after those sections.
 
-Include `DETAIL` by default when any of these are true:
+Use multiline structured blocks for `INPUT` and `CONTEXT`:
 
-- repository `CALL` nesting has depth 2 or greater,
+- one top-level binding or fact per paragraph,
+- expand non-trivial objects vertically; do not collapse them into long
+  single-line literals,
+- indent nested fields by two spaces per level,
+- align `:` locally when useful,
+- separate unrelated bindings with a blank line,
+- preserve identifiers and strings exactly.
+
+Do not repeat an input/context value later as `VALUE` unless execution derives
+a materially different value.
+
+Include `DETAIL` when:
+
+- repository `CALL` nesting reaches depth 2 or more,
 - execution spans multiple top-level invocations or event cycles,
-- an asynchronous/event-driven handoff causes later execution,
-- ownership of mutations or side effects would be ambiguous from `TRACE`,
-- the causal view intentionally collapses meaningful repository helpers.
+- an asynchronous handoff causes later execution,
+- ownership would otherwise be ambiguous, or
+- `TRACE` intentionally collapses meaningful repository helpers.
 
 Omit `DETAIL` for simple linear traces where it would merely duplicate
 `TRACE`.
 
-If the user explicitly asks for `compact`, `summary only`, `causal only`, or
-equivalent wording, omit `DETAIL`.
+For `compact`, `summary only`, or `causal only`, omit `DETAIL`.
 
-If the user explicitly asks for `detail only`, `tree only`, or exact call
-nesting, output `DETAIL` without `TRACE`.
+For `detail only`, `tree only`, or exact call nesting, output `DETAIL` without
+`TRACE`.
 
-Otherwise, for non-trivial traces, include both:
+Otherwise include both: `TRACE` answers what happened and why; `DETAIL`
+answers where it happened and which call owns it.
 
-- `TRACE` answers **what happened and why**.
-- `DETAIL` answers **where it happened and which call owns it**.
+## Shared rendering rules
 
-Do not put explanatory prose between the two views.
+Keep both views sparse and limited to the concrete executed path.
+
+Do not restore:
+
+- untraversed branches,
+- irrelevant temporaries,
+- bookkeeping,
+- trivial wrappers,
+- fabricated runtime values.
+
+Omit ordinary valueless `RETURN` when normal frame completion is obvious.
+Keep it when it carries a meaningful value, is an early return, determines
+caller behavior, distinguishes an outcome, or explains termination.
+
+`TRACE` and `DETAIL` must describe the same execution, neither more
+speculative nor more complete.
 
 ## TRACE view
 
@@ -293,18 +214,10 @@ CALL process(...)
 CALL next(...)
 ```
 
-Keep the structure sparse.
-
 Do not draw decorative boxes around every function.
 
-Do not render:
-
-- untraversed branches,
-- alternate outcomes,
-- decision diamonds,
-- a full control-flow graph.
-
-This is a concrete execution trace, not a CFG.
+Do not render alternate outcomes, decision diamonds, or a full control-flow
+graph: this is a concrete execution trace, not a CFG.
 
 ### Calls and results
 
@@ -379,19 +292,15 @@ unless timer creation itself affects later traced behavior.
 
 Use one `SIDE EFFECT` per line.
 
-Truncate long payloads at the first line break or approximately 80 characters
-and append:
-
-```text
-... (truncated at N chars)
-```
-
+When a payload is long, elide its tail with `...` and keep the true
+identifying head (for example `content: "[goal kickoff] ..."`). Keep each
+trace event on one line. Do not append `...` to a value that is complete,
+and never replace unseen content with an invented tail.
 
 When rendering a string that a source line assembles (footer, status, notify
 text), reproduce it including its computed parts, or mark the elision. Do not
 round a glyph, number, or suffix to a neighboring plausible value.
 
-### Top-level invocations and event cycles
 ### Top-level invocations and event cycles
 
 When execution crosses into another top-level invocation, callback cycle,
@@ -486,19 +395,6 @@ first, transitional, and final meaningful iterations.
 
 Do not emit statement-level loop bookkeeping.
 
-### Returns
-
-Omit ordinary valueless `RETURN` lines when normal control return is visually
-obvious and the return does not explain later behavior.
-
-Always show `RETURN` when it:
-
-- carries a meaningful value,
-- is an early return,
-- determines caller behavior,
-- distinguishes success from failure, or
-- explains termination.
-
 ## DETAIL view
 
 `DETAIL` is a structural call-tree view of the same execution.
@@ -537,27 +433,6 @@ Use blank visual rows sparingly around materially nested `CALL` frames.
 
 Do not put blank rows between every event.
 
-Omit ordinary valueless returns when the tree structure already makes the end
-of a call frame obvious.
-
-Keep `RETURN` when it:
-
-- carries a meaningful value,
-- is early,
-- determines caller behavior, or
-- explains termination.
-
-Do not restore omitted:
-
-- trivial wrappers,
-- irrelevant temporaries,
-- bookkeeping,
-- fabricated runtime values,
-- untraversed branches.
-
-`DETAIL` must describe the same execution as `TRACE`, not a more speculative or
-more complete execution.
-
 ### Multi-cycle DETAIL
 
 For multiple top-level cycles, render one tree per cycle:
@@ -582,35 +457,6 @@ Do not nest the second top-level invocation beneath the first merely because
 the first caused it indirectly.
 
 Cross-cycle causality belongs primarily in `TRACE`.
-
-## Inference comments
-
-`#` comments are allowed only in these forms:
-
-```text
-# iteration: <label>
-# inferred: <what is not directly established>
-```
-
-Do not add comments explaining code intent or branch reasoning.
-
-Never use `# inferred:` to justify a fabricated concrete value.
-
-Prefer:
-
-```text
-VALUE exitCode = unknown
-# inferred: process completion result was not supplied
-```
-
-over:
-
-```text
-VALUE exitCode = 0
-# inferred: plausible runtime result
-```
-
-If the unknown value is path-critical, stop that path.
 
 ## Language
 
@@ -638,36 +484,19 @@ Derive `[slug]` from the traced function or method in kebab-case.
 Overwrite an existing file at the same output path rather than creating a
 `v2`, `final`, or similarly suffixed copy.
 
-The saved document contains only:
-
-1. `INPUT`
-2. optional `CONTEXT`
-3. `TRACE`, unless detail-only output was explicitly requested
-4. conditional `DETAIL`
-
-Add no explanatory prose before, between, or after those sections.
-
-Before composing:
-
-- list every path-critical runtime result the traced path depends on; for
-  each one not derivable from source code, obtain it, assume it under the
-  labeled-assumption rule above, or stop the path at that branch point.
-
 Before saving:
 
-- re-read the trace,
-- verify every concrete scalar, string, count, timing, cost, token usage, or
-  payload in TRACE and DETAIL traces back to source, INPUT, CONTEXT, or an
-  `assumed:` entry,
-- remove invented concrete values,
-- remove irrelevant helper calls and temporary values,
-- verify `INPUT` and `CONTEXT` use structured block formatting,
-- verify `TRACE` is chronological and causal,
-- verify cross-run handoffs are explicit,
-- verify `DETAIL` matches the same execution as `TRACE`,
-- verify detail trees use `├─`, `└─`, and `│` rather than whitespace alone,
-- verify no event appears beneath a call after its meaningful terminal return,
-- delete any `#` comment that is not `# iteration: ...` or `# inferred: ...`.
+- resolve every path-critical runtime result by deriving it, supplying it in
+  `CONTEXT`, assuming it under the `assumed:` rules, or stopping at that
+  branch;
+- verify every concrete value traces to source, `INPUT`, `CONTEXT`, or an
+  `assumed:` entry;
+- remove irrelevant helpers, temporaries, bookkeeping, and invented values;
+- verify `TRACE` is chronological and cross-cycle handoffs are explicit;
+- verify `DETAIL`, when present, represents the same execution and uses
+  `├─`, `└─`, and `│`;
+- ensure no event appears beneath a call after its terminal `RETURN`;
+- allow only `# iteration:` and `# inferred:` comments.
 
 See `references/examples.md` for worked examples.
 

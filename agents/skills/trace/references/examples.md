@@ -33,42 +33,9 @@ CALL deductStock(qty, warehouses)
 RETURN "success"
 ```
 
-`DETAIL` is omitted because the trace is linear and contains no meaningful
-nested repository call structure.
-
 ---
 
-## Example 2: Simple caller-object mutation — TRACE only
-
-```text
-INPUT:
-  session = {
-    status:           "active",
-    lastActive:       14:05,
-    timeoutThreshold: 20min
-  }
-
-  now = 14:30
-
-TRACE:
-
-CALL checkSession(session, now)
-  │
-  ├─ VALUE idleMinutes = 25
-  ├─ MUTATE session.status: "active" → "expired"
-  │
-  ▼
-RETURN "expired - re-login required"
-```
-
-No alternate branch is rendered because the concrete input determines the
-expired path.
-
-`DETAIL` would duplicate the same structure, so it is omitted.
-
----
-
-## Example 3: Nested repository calls — TRACE + DETAIL
+## Example 2: Nested repository calls — TRACE + DETAIL
 
 ```text
 INPUT:
@@ -165,14 +132,9 @@ result can be represented directly as `VALUE config`.
 A forwarding wrapper such as `instance.execute()` is likewise omitted when it
 adds no relevant behavior.
 
-The causal view emphasizes the chronological path.
-
-The detail view shows that both `this.run(...)` and
-`this.buildTaskBlock(result)` belong to `task.execute(...)`.
-
 ---
 
-## Example 4: Event-driven execution across multiple run cycles
+## Example 3: Event-driven execution across multiple run cycles
 
 ```text
 INPUT:
@@ -242,7 +204,7 @@ RETURN {
   │  )
   ├─ SIDE EFFECT pi.sendMessage(
   │    {customType: "goal-continuation",
-  │     content: "[goal continuation, iteration 3] ... (truncated)"},
+  │     content: "[goal continuation, iteration 3] ..."},
   │    {triggerTurn: true}
   │  )
   │
@@ -324,7 +286,7 @@ CALL processSettled(pi, ctx)
 │  │  )
 │  └─ SIDE EFFECT pi.sendMessage(
 │       {customType: "goal-continuation",
-│        content: "[goal continuation, iteration 3] ... (truncated)"},
+│        content: "[goal continuation, iteration 3] ..."},
 │       {triggerTurn: true}
 │     )
 │
@@ -370,17 +332,12 @@ CALL processSettled(pi, ctx)
 └─ MUTATE verifierBusy: true → false
 ```
 
-The causal view makes the cross-run handoff easy to see.
-
-The detail view shows exactly which events belong to `runSettleCycle`,
-`runVerifier`, and `endGoal`.
-
 The second `processSettled()` invocation is a separate tree rather than a child
 of the first.
 
 ---
 
-## Example 5: Unknown external boundary
+## Example 4: Unknown external boundary
 
 ```text
 INPUT:
@@ -413,41 +370,28 @@ past the unknown boundary.
 
 ---
 
-## Example 6: User requests detail only
 
-```text
-INPUT:
-  session = {
-    status:           "active",
-    lastActive:       14:05,
-    timeoutThreshold: 20min
-  }
+## Example 5: Chained assumed judgments
 
-  now = 14:30
-
-DETAIL:
-
-CALL checkSession(session, now)
-├─ VALUE idleMinutes = 25
-├─ MUTATE session.status: "active" → "expired"
-└─ RETURN "expired - re-login required"
-```
-
-When detail-only output is explicitly requested, omit `TRACE`.
-
-The grounding and sparsity rules remain unchanged.
-
----
-
-## Example 7: Assumed exit judgment
-
-The traced loop's exit condition is an external judgment whose result was not
-supplied. Keep the happy path, but carry the two marks: the `assumed:` entry
-in CONTEXT and the `# inferred:` line naming the branch not rendered.
+The loop's exit condition is an external judgment whose results were not
+supplied. Two assumed judgments render the loop's full shape: the fail path
+shows the continuation, the pass path shows termination. Each carries its own
+`assumed:` entry, and the trace closes with one line naming both as
+illustrative.
 
 ```text
 CONTEXT:
-  assumed: verifier judgment = { passed: true, reason: "", nextAction: "" }
+  assumed: run 1 verifier result = {
+    passed:     false,
+    reason:     "one test still failing",
+    nextAction: "fix the failing assertion"
+  }
+
+  assumed: run 2 verifier result = {
+    passed:     true,
+    reason:     "",
+    nextAction: ""
+  }
 
 TRACE:
 
@@ -461,13 +405,32 @@ CALL runVerifier(ctx, objective)
   ├─ SIDE EFFECT verifier request
   │
   ▼
-RETURN { passed: true, reason: "", nextAction: "" }
+RETURN { passed: false, reason: "one test still failing", nextAction: "..." }
+  │
+  └─ SIDE EFFECT send goal-continuation message
+       │
+       └─ triggerTurn
 
-# inferred: judgment not supplied; rendered as assumed pass
-# inferred: with passed=false the loop sends a goal-continuation
-# message and enters another cycle
+# inferred: triggerTurn starts another agent run; agent_settled fires after it settles
+
+[run 2]
+
+SIDE EFFECT agent_settled
+  │
+  ▼
+CALL runVerifier(ctx, objective)
+  │
+  ├─ SIDE EFFECT verifier request
+  │
+  ▼
+RETURN { passed: true, reason: "", nextAction: "" }
+  │
+  └─ SIDE EFFECT endGoal("complete")
+
+# inferred: both verifier judgments are assumed to render the loop; a real
+# session may take more cycles or fail differently
 ```
 
-Do not render the pass path without both lines. One assumed scalar is fine;
-two composed results (for example, a judgment that fails then passes) are a
-fabricated narrative, not an assumption.
+Every assumed value is labeled at its source, and the closing line covers the
+sequence. A trace that assumed either judgment without these marks would be
+fabrication, not illustration.
