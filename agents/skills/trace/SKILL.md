@@ -59,6 +59,32 @@ SIDE EFFECT spawn("pnpm", ["test"])
 
 Do not invent the missing internals.
 
+### Provenance
+
+A concrete value in TRACE or DETAIL is legitimate only when it is traceable
+to source code, INPUT, CONTEXT, or a labeled assumption. An unlabeled
+plausible-looking value is an invention, regardless of how likely it is.
+
+## Assumed values
+
+When a path-critical runtime result was not supplied, you may assume one to
+keep the trace readable. Three conditions apply:
+
+1. List it once in `CONTEXT` with an `assumed:` prefix:
+
+     assumed: run 2 verifier result = { passed: true, reason: "", nextAction: "" }
+
+2. When the assumption decides the trace's length or termination point, add
+   one line naming the branch you did not render:
+
+     # inferred: if not passed, run 2 would send a goal-continuation
+     # message and the loop would enter another cycle
+
+3. Assume only single independent values. Do not compose a multi-step
+   narrative from several invented values (for example, a judgment that
+   "fails on run 1 and passes on run 2"): each added invention multiplies
+   the fabricated story.
+
 ## Causal selection
 
 Optimize for causal readability, not statement coverage.
@@ -360,6 +386,12 @@ and append:
 ... (truncated at N chars)
 ```
 
+
+When rendering a string that a source line assembles (footer, status, notify
+text), reproduce it including its computed parts, or mark the elision. Do not
+round a glyph, number, or suffix to a neighboring plausible value.
+
+### Top-level invocations and event cycles
 ### Top-level invocations and event cycles
 
 When execution crosses into another top-level invocation, callback cycle,
@@ -413,6 +445,13 @@ Do not place events beneath a `CALL` after that invocation's `RETURN`.
 
 If the handoff between cycles is external to the traced source, mark it with
 `# inferred: ...`.
+
+Render repeated top-level cycles at the same granularity. Guards evaluated
+in one cycle are evaluated in every cycle: show them in all cycles, or in
+none plus `# inferred: same guards as [run N]`.
+
+The iteration-compression rule below applies only to iterations of one loop
+inside an invocation, or to cycles whose guards and state are all identical.
 
 ### Loops
 
@@ -608,9 +647,18 @@ The saved document contains only:
 
 Add no explanatory prose before, between, or after those sections.
 
+Before composing:
+
+- list every path-critical runtime result the traced path depends on; for
+  each one not derivable from source code, obtain it, assume it under the
+  labeled-assumption rule above, or stop the path at that branch point.
+
 Before saving:
 
 - re-read the trace,
+- verify every concrete scalar, string, count, timing, cost, token usage, or
+  payload in TRACE and DETAIL traces back to source, INPUT, CONTEXT, or an
+  `assumed:` entry,
 - remove invented concrete values,
 - remove irrelevant helper calls and temporary values,
 - verify `INPUT` and `CONTEXT` use structured block formatting,

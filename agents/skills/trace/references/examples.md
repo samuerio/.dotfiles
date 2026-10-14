@@ -193,6 +193,10 @@ CONTEXT:
   agent_settled fires once per completed run cycle
   main agent idle, no pending messages
 
+  The two verifier results are supplied runtime results. Without them the
+  path would be undetermined at each judgment and could only be rendered
+  with an `assumed:` entry.
+
   run 3 verifier result = {
     passed:     false,
     reason:     "lib/kline.test.ts one case still failing",
@@ -214,6 +218,9 @@ SIDE EFFECT agent_settled
   ▼
 CALL processSettled(pi, ctx)
   │
+  ├─ VALUE userAbortedSinceLastSettle = false
+  ├─ VALUE goal.status = "active", goal.iteration (2) < MAX_ITERATIONS (25)
+  ├─ VALUE last assistant stopReason ≠ "error", ctx.isIdle() = true
   ├─ MUTATE verifierBusy: false → true
   │
   ▼
@@ -231,10 +238,11 @@ RETURN {
   ├─ MUTATE goal.iteration: 2 → 3
   ├─ SIDE EFFECT pi.appendEntry(
   │    "goal-verification",
-  │    {passed: false, iteration: 3, ...}
+  │    {objective, passed: false, reason, nextAction, iteration: 3}
   │  )
   ├─ SIDE EFFECT pi.sendMessage(
-  │    {customType: "goal-continuation", ...},
+  │    {customType: "goal-continuation",
+  │     content: "[goal continuation, iteration 3] ... (truncated)"},
   │    {triggerTurn: true}
   │  )
   │
@@ -249,6 +257,9 @@ SIDE EFFECT agent_settled
   ▼
 CALL processSettled(pi, ctx)
   │
+  ├─ VALUE userAbortedSinceLastSettle = false
+  ├─ VALUE goal.status = "active", goal.iteration (3) < MAX_ITERATIONS (25)
+  ├─ VALUE last assistant stopReason ≠ "error", ctx.isIdle() = true
   ├─ MUTATE verifierBusy: false → true
   │
   ▼
@@ -266,7 +277,7 @@ RETURN {
   ├─ MUTATE goal.iteration: 3 → 4
   ├─ SIDE EFFECT pi.appendEntry(
   │    "goal-verification",
-  │    {passed: true, iteration: 4, ...}
+  │    {objective, passed: true, reason, nextAction, iteration: 4}
   │  )
   │
   ▼
@@ -275,7 +286,7 @@ CALL endGoal(pi, ctx, "complete", "verified complete")
   ├─ MUTATE goal.status: "active" → "complete"
   ├─ SIDE EFFECT pi.appendEntry(
   │    "goal",
-  │    {status: "complete", iteration: 4, ...}
+  │    {objective, status: "complete", iteration: 4, reason: "verified complete"}
   │  )
   └─ SIDE EFFECT ctx.ui.notify(
        "Goal complete: make `pnpm test` pass",
@@ -289,6 +300,9 @@ DETAIL:
 [run 3]
 
 CALL processSettled(pi, ctx)
+├─ VALUE userAbortedSinceLastSettle = false
+├─ VALUE goal.status = "active", goal.iteration (2) < MAX_ITERATIONS (25)
+├─ VALUE last assistant stopReason ≠ "error", ctx.isIdle() = true
 ├─ MUTATE verifierBusy: false → true
 │
 ├─ CALL runSettleCycle(pi, ctx)
@@ -306,10 +320,11 @@ CALL processSettled(pi, ctx)
 │  ├─ MUTATE goal.iteration: 2 → 3
 │  ├─ SIDE EFFECT pi.appendEntry(
 │  │    "goal-verification",
-│  │    {passed: false, iteration: 3, ...}
+│  │    {objective, passed: false, reason, nextAction, iteration: 3}
 │  │  )
 │  └─ SIDE EFFECT pi.sendMessage(
-│       {customType: "goal-continuation", ...},
+│       {customType: "goal-continuation",
+│        content: "[goal continuation, iteration 3] ... (truncated)"},
 │       {triggerTurn: true}
 │     )
 │
@@ -318,9 +333,14 @@ CALL processSettled(pi, ctx)
 [run 4]
 
 CALL processSettled(pi, ctx)
+├─ VALUE userAbortedSinceLastSettle = false
+├─ VALUE goal.status = "active", goal.iteration (3) < MAX_ITERATIONS (25)
+├─ VALUE last assistant stopReason ≠ "error", ctx.isIdle() = true
 ├─ MUTATE verifierBusy: false → true
 │
 ├─ CALL runSettleCycle(pi, ctx)
+│  │
+│  ├─ SIDE EFFECT ctx.ui.setStatus("goal", "verifying iter 4...")
 │  │
 │  ├─ CALL runVerifier(ctx, "make `pnpm test` pass")
 │  │  ├─ SIDE EFFECT rush verifier HTTP request (...)
@@ -333,14 +353,14 @@ CALL processSettled(pi, ctx)
 │  ├─ MUTATE goal.iteration: 3 → 4
 │  ├─ SIDE EFFECT pi.appendEntry(
 │  │    "goal-verification",
-│  │    {passed: true, iteration: 4, ...}
+│  │    {objective, passed: true, reason, nextAction, iteration: 4}
 │  │  )
 │  │
 │  └─ CALL endGoal(pi, ctx, "complete", "verified complete")
 │     ├─ MUTATE goal.status: "active" → "complete"
 │     ├─ SIDE EFFECT pi.appendEntry(
 │     │    "goal",
-│     │    {status: "complete", iteration: 4, ...}
+│     │    {objective, status: "complete", iteration: 4, reason: "verified complete"}
 │     │  )
 │     └─ SIDE EFFECT ctx.ui.notify(
 │          "Goal complete: make `pnpm test` pass",
@@ -416,3 +436,38 @@ CALL checkSession(session, now)
 When detail-only output is explicitly requested, omit `TRACE`.
 
 The grounding and sparsity rules remain unchanged.
+
+---
+
+## Example 7: Assumed exit judgment
+
+The traced loop's exit condition is an external judgment whose result was not
+supplied. Keep the happy path, but carry the two marks: the `assumed:` entry
+in CONTEXT and the `# inferred:` line naming the branch not rendered.
+
+```text
+CONTEXT:
+  assumed: verifier judgment = { passed: true, reason: "", nextAction: "" }
+
+TRACE:
+
+[run 1]
+
+SIDE EFFECT agent_settled
+  │
+  ▼
+CALL runVerifier(ctx, objective)
+  │
+  ├─ SIDE EFFECT verifier request
+  │
+  ▼
+RETURN { passed: true, reason: "", nextAction: "" }
+
+# inferred: judgment not supplied; rendered as assumed pass
+# inferred: with passed=false the loop sends a goal-continuation
+# message and enters another cycle
+```
+
+Do not render the pass path without both lines. One assumed scalar is fine;
+two composed results (for example, a judgment that fails then passes) are a
+fabricated narrative, not an assumption.
