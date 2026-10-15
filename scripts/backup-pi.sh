@@ -2,7 +2,7 @@
 # 打包 pi 配置及 SKILL 为 zip
 # 范围:
 #   ~/.pi/agent/ 下: AGENTS.md settings.json keybindings.json models.json
-#                   modes.json subagent.json trust.json extensions/ prompts/ git/
+#                   modes.json trust.json extensions/ prompts/ git/
 #   ~/.agents/skills/ 全部
 # 排除: sessions/ bin/ auth.json telegram.json node_modules/
 # 输出: 脚本执行目录/pi-config-YYYYMMDD-HHMMSS.zip
@@ -27,7 +27,7 @@ trap 'rm -rf "$STAGE"' EXIT
 mkdir -p "$STAGE/pi-agent" "$STAGE/skills"
 
 # 收集 pi-agent 配置文件与目录
-PI_ITEMS=(AGENTS.md settings.json keybindings.json models.json modes.json subagent.json trust.json extensions prompts git)
+PI_ITEMS=(AGENTS.md settings.json keybindings.json models.json modes.json trust.json extensions prompts git)
 for item in "${PI_ITEMS[@]}"; do
     if [[ -e "$PI_AGENT_DIR/$item" ]]; then
         cp -a "$PI_AGENT_DIR/$item" "$STAGE/pi-agent/"

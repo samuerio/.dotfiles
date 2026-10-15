@@ -46,8 +46,8 @@ pi 只把 `extensions/*.ts` 顶层文件与含 `index.ts` 的子目录
 pi coding agent 的运行时配置中心。`models.json` 定义多 provider 的模型清单与成本参数；`modes.json` 定义
 default/rush/smart/deep 四种工作模式及其模型绑定；`keybindings.json` 定制 TUI 键位；`settings.json` 存放
 agent 全局设置（不再使用 `packages` 声明第三方扩展包）；子代理能力由本地扩展提供（`task`/`finder`/
-`oracle`/`librarian` 四个工具，机制在 `extensions/lib/subagent.ts`），其中 inline `task` 工具的模型与
-工具配置由 `~/.pi/agent/subagent.json`（getAgentDir() 解析）提供；`telegram.json` 配置 Telegram bot
+`oracle`/`librarian` 四个工具，机制在 `extensions/lib/subagent.ts`），各工具的模型/工具配置内联
+在各自扩展文件的 spec 常量中；`telegram.json` 配置 Telegram bot
 远程交互通道；`auth.json` 管理 API 密钥；`trust.json` 记录项目信任状态；`prompts/` 存放可复用
 提示词模板（`prototype.md`、`simplify.md`、`clarify.md`、`summary.md`、`translate-paragraph.md`）。
 `AGENTS.md` 定义 agent 行为规范。
