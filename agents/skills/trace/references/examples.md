@@ -2,10 +2,6 @@
 
 These examples demonstrate the conventions defined in `SKILL.md`.
 
-`TRACE` is the primary causal view.
-
-`DETAIL` is included for non-trivial call nesting or multi-cycle execution.
-
 ## Example 1: Simple loop — TRACE only
 
 ```text

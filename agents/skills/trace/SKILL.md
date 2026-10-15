@@ -105,29 +105,19 @@ Do not mechanically render repository helpers. Inline a helper's relevant
 value, mutation, or side effect unless entering the helper materially explains
 control flow, nested events, or result derivation.
 
-Render actual emitted output or events as `SIDE EFFECT`, never `VALUE`.
-
 ## Output structure
 
-Unless the user requests `detail only`, save sections in this order:
+Save the sections the mode includes, in the order `INPUT`, `CONTEXT`
+(optional), `TRACE`, `DETAIL`.
 
-```text
-INPUT:
-  ...
+Wrap the whole output in a single fenced code block tagged `text`, so `#`
+comment lines stay plain text and whitespace is preserved; output nothing
+outside the fence and no prose between sections. The first line inside the
+fence is the first included section's label line (`INPUT:`, or `TRACE:`
+when `CONTEXT` is omitted, or `DETAIL:` for detail-only).
 
-CONTEXT:
-  ...
-
-TRACE:
-  ...
-
-DETAIL:
-  ...
-```
-
-`CONTEXT` is optional.
-
-Add no explanatory prose before, between, or after those sections.
+If the content contains a run of three or more backticks, use a longer
+fence.
 
 Use multiline structured blocks for `INPUT` and `CONTEXT`:
 
@@ -484,22 +474,20 @@ Derive `[slug]` from the traced function or method in kebab-case.
 Overwrite an existing file at the same output path rather than creating a
 `v2`, `final`, or similarly suffixed copy.
 
-Before saving:
+Before saving, verify:
 
-- resolve every path-critical runtime result by deriving it, supplying it in
-  `CONTEXT`, assuming it under the `assumed:` rules, or stopping at that
-  branch;
-- verify every concrete value traces to source, `INPUT`, `CONTEXT`, or an
-  `assumed:` entry;
-- remove irrelevant helpers, temporaries, bookkeeping, and invented values;
-- verify `TRACE` is chronological and cross-cycle handoffs are explicit;
-- verify `DETAIL`, when present, represents the same execution and uses
-  `├─`, `└─`, and `│`;
-- ensure no event appears beneath a call after its terminal `RETURN`;
-- allow only `# iteration:` and `# inferred:` comments.
+- every concrete value traces to source, `INPUT`, `CONTEXT`, or an
+  `assumed:` entry, and path-critical gaps are `assumed:` or stop the
+  trace;
+- `TRACE` is chronological, cross-cycle handoffs are explicit, and no event
+  follows a call's terminal `RETURN`;
+- `DETAIL`, when present, is the same execution with `├─`, `└─`, `│`;
+- the whole output is a single `text` fence, longer than any run of three
+  or more backticks, containing only the sections and `# iteration:` /
+  `# inferred:` lines.
 
 See `references/examples.md` for worked examples.
 
 After writing the file, reply exactly:
 
-> Trace saved — run `code [output-path] &` to review.
+> Trace saved - run `code [output-path] &` to review.
