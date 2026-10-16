@@ -19,3 +19,4 @@ pi/agent/models-store.json
 spec/
 research/
 /.pi/background-tasks/
+.workbuddy

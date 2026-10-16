@@ -88,8 +88,8 @@ Guidelines:
 - Be thorough but concise - focus on the highest-leverage insights.
 
 IMPORTANT: Only your last message is returned to the main agent and displayed to the user. Your last message should be comprehensive yet focused, with a clear, simple recommendation that helps the user act immediately.`,
-    model: "opencode-go/glm-5.2",
-    thinking: "medium",
+    model: "opencode-go/hy4-preview",
+    thinking: "high",
     tools: ["read", "bash"],
     skills: [],
 };

@@ -13,8 +13,8 @@
       "thinkingLevel": "medium"
     },
     "smart": {
-      "provider": "engy",
-      "modelId": "glm-5.3-flash",
+      "provider": "opencode-go",
+      "modelId": "step-5-preview-free",
       "thinkingLevel": "medium"
     },
     "deep": {
