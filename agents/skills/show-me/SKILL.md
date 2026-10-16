@@ -19,20 +19,58 @@ on(save)
 - Show runtime control flow as a call tree:
 
 ```text
-submitForm
-  createSession
-    persistPrompt
-    launchAgent
-  navigateToSession
+renderer requests a live chat
+└── PiService.createAgentSession(options)
+      ├── WorkspaceService.getLayout()
+      ├── options.sessionId absent
+      │     └── SessionManager.create()
+      ├── options.sessionId set
+      │     ├── SessionManager.list()
+      │     └── SessionManager.open()
+      └── createAgentSession({ services, sessionManager })
+          └── live AgentSession returned to caller
 ```
 
-- Show UI structure as a component tree, including state and module boundaries that matter:
+- Show UI structure as a component tree, including state and module boundaries that matter.
+  Write sibling nodes as `<A> + <B>`. Only layers that own state, hotkeys, or callbacks
+  carry a block; pure render nodes stay bare.
 
-```tsx
-<SessionPage> (apps/example/src/routes/session.tsx)
-  useSessionEvents()
-  <SessionToolbar>
-    <RunSkillButton> (packages/ui)
+```text
+apps/riptide-ui/storybook
+├── <SessionsPageWrapper>                   [Storybook full demo]
+│     State: activeTab, mockSessions, mockDrafts, mockArchived
+│     Hotkeys: useSessionsPageHotkeys (tab switching, cmd+n create)
+│     Callbacks: handleCreateSession (mock), handleTabChange
+│   └── <SessionsPage>                      [packages/ui - pure page component]
+│         Props: sessions, drafts, archivedSessions, activeTab, onTabChange,
+│               onCreateSession, focusedSessionId, selectedSessionIds,
+│               ...table callbacks
+│         ├── <Tabs> + <TabsList> + <TabsTrigger>
+│         ├── <CreateSessionButton onClick={onCreateSession}>
+│         └── <SessionTableWrapper>         [Storybook table demo]
+│               State: focusedSessionId, selectedSessionIds
+│               Hotkeys: useSessionTableHotkeys
+│                 - j/k: navigation
+│                 - shift+j/k: range selection
+│                 - x: toggle selection
+│                 - meta+a: select/deselect all
+│                 - enter: activate session
+│                 - shift+r: start rename
+│                 - e: archive/discard
+│                 - alt+y: bypass permissions
+│               Callbacks: handleArchive, handleBulkArchive, handleDiscard,
+│                         handleBulkDiscard, handleActivateSession,
+│                         handleBypassPermissions
+│               └── <SessionTable>          [packages/ui - pure table]
+│                     Props: sessions, focusedSessionId, selectedSessionIds,
+│                           searchText, matchedSessions, isArchivedView,
+│                           isDraftsView, onRowClick, onToggleSelection,
+│                           onActivateSession, onSaveTitle, onArchive,
+│                           onDiscard, onBypassPermissions, onStartEdit
+│                     Internal state: editingSessionId, editValue
+│                     ├── <TableHeader>
+│                     └── <TableBody>
+│                           └── <SessionTableRow>  [packages/ui - pure row]
 ```
 
 - Show file responsibility or a broad refactor as a shallow file tree:
@@ -61,12 +99,14 @@ sequenceDiagram
 For a component change:
 
 ```diff
- <SessionPage>
-   useSessionEvents()
-   <SessionToolbar>
-+    <RunSkillButton />
-   <SessionTimeline>
-+    <SkillResultCard />
+ <SessionsPage>
+   ├── <Tabs> + <TabsList> + <TabsTrigger>
++  ├── <StorageWarning />      [packages/ui]
+   └── <SessionTableWrapper>
+         └── <SessionTable>
+             ├── <TableHeader>
++            │     └── <SessionTableHeaderCell name="lastActive" />
+             └── <TableBody>
 ```
 
 For a file-layout change:
@@ -85,14 +125,22 @@ For a file-layout change:
 For a call-tree or call-stack change:
 
 ```diff
- submitForm
-   createSession
-     persistPrompt
-+    expandSkillMention
-     launchAgent
--  navigateToSession
-+  navigateToSession
-+    subscribeToEvents
+ renderer requests a live chat
+ └── PiService.createAgentSession(options)
+       ├── WorkspaceService.getLayout()
+-      ├── AuthStorage.create()
+-      ├── new ModelRegistry()
+-      ├── createCodingTools()
++      ├── PiService.getServices()
++      │     ├── AuthStorage.create()
++      │     ├── new ModelRegistry()
++      │     ├── SettingsManager.create()
++      │     ├── new DefaultResourceLoader()
++      │     ├── DefaultResourceLoader.reload()
++      │     └── createCodingTools()
+       ├── options.sessionId absent
+       │     └── SessionManager.create()
+       └── createAgentSession({ services, sessionManager })
 ```
 
 For a state or control-flow change:
