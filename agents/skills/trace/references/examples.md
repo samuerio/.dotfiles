@@ -503,6 +503,23 @@ RETURN { ok: false, reason: "inactive user" }
 Keep the condition symbolic when a runtime operand was not supplied:
 `IF order.items > 0` needs no concrete count, while `IF remaining = 0` would.
 
+When a guard's operand is supplied rather than derived, it comes from an
+`assumed:` entry in `CONTEXT`, and the `IF` renders that value:
+
+```text
+CONTEXT:
+  assumed: verifier result = { passed: false, reason: "one test still failing" }
+
+TRACE:
+
+CALL processSettled(pi, ctx)
+  │
+  IF result.passed = false
+  │
+  ▼
+SIDE EFFECT send goal-continuation message
+```
+
 In `DETAIL`, `IF` sits at the same tree level as the call it gates, directly
 above it — never as a parent frame:
 

@@ -6,10 +6,9 @@ description: >
   relevant calls, guard conditions, derived values, state mutations, side
   effects, event-driven handoffs, and termination as a compact ASCII execution
   trace, with an optional structural detail view for non-trivial call nesting.
-  Use for requests such as "trace this call", "walk me through input X", "why
-  does
-  this run again?", or "show the state changes". Never execute, modify, or
-  instrument the target.
+  Use for requests such as "trace this call", "walk me through input X",
+  "which path execution took", "why does this run again?", or "show the state
+  changes". Never execute, modify, or instrument the target.
 ---
 
 # Trace
@@ -95,6 +94,7 @@ Prefer the shallowest representation that preserves causal understanding.
   traced step; rendered only under the Branch conditions rules.
 - `VALUE` — derive a value later used by traced control flow, mutation, side
   effect, or return; not merely computed, copied, logged, or passed through.
+  A routing condition renders as `IF`, not `VALUE`.
 - `MUTATE` — meaningful state transition.
 - `SIDE EFFECT` — observable I/O, process, callback, event, timer,
   subscription, UI update, persistence, or logging.
@@ -107,6 +107,16 @@ returned data as `VALUE` only when later traced logic needs it.
 Do not mechanically render repository helpers. Inline a helper's relevant
 value, mutation, or side effect unless entering the helper materially explains
 control flow, nested events, or result derivation.
+
+## Modes
+
+- default — `INPUT`, `CONTEXT` (optional), `TRACE`, `DETAIL`
+- `compact`, `summary only`, or `causal only` — `TRACE` only, no `DETAIL`
+- `detail only`, `tree only`, or exact call nesting — `DETAIL` only, no
+  `TRACE`
+
+`INPUT` and `CONTEXT` are included in every mode when values are supplied;
+only `TRACE` and `DETAIL` vary.
 
 ## Output structure
 
@@ -381,9 +391,9 @@ Do not place events beneath a `CALL` after that invocation's `RETURN`.
 If the handoff between cycles is external to the traced source, mark it with
 `# inferred: ...`.
 
-Render repeated top-level cycles at the same granularity. Guards evaluated
-in one cycle are evaluated in every cycle: show them in all cycles, or in
-none plus `# inferred: same guards as [run N]`.
+Render repeated top-level cycles at the same granularity. Guards, including
+`IF` conditions, evaluated in one cycle are evaluated in every cycle: show
+them in all cycles, or in none plus `# inferred: same guards as [run N]`.
 
 The iteration-compression rule below applies only to iterations of one loop
 inside an invocation, or to cycles whose guards and state are all identical.
