@@ -94,6 +94,25 @@ Unlike `trace`, untraversed branches are the point. Cover at least:
 Skip a category only when it is structurally impossible, and say why in one
 line.
 
+## Branch conditions
+
+Render a routing condition as `IF` when the design artifact determines it,
+placed above the events it gates, as in `trace`.
+
+`IF` and `[branch: <name>]` divide the work: `IF` carries the condition, the
+label carries the scenario.
+
+- the label is a short noun phrase naming the scenario or divergence point;
+- the label never restates a condition rendered as `IF`, nor context the
+  block itself shows;
+- the condition appears once — as `IF`, or in the label for scenario-shaped
+  branches (retry, concurrency, empty or maximum input) that have no point
+  condition.
+
+Ground `IF` in the artifact's own control-flow wording or pseudocode. When
+the design is silent about the condition, record `UNDECIDED` instead — never
+fill the gap with an invented `IF`.
+
 ## Output structure
 
 Sections in order: `DESIGN`, `WALK`, `BREAKS`, `OPEN QUESTIONS`.
@@ -106,11 +125,13 @@ outside the fence and no prose between sections.
   `identified from conversation` if none was written down, limited to what the
   walk actually uses.
 - `WALK` — the primary flow as causal ASCII, using trace's vocabulary of
-  `CALL`, `VALUE`, `MUTATE`, `SIDE EFFECT`, `RETURN`, plus `UNDECIDED`.
-- `BREAKS` — one block per failure branch, labeled `[branch: <name>]`, each
-  ending in the observable consequence: a `RETURN`, a `MUTATE`, or a named
-  failure mode such as lost update, duplicate delivery, deadlock, or unbounded
-  growth.
+  `CALL`, `VALUE`, `MUTATE`, `SIDE EFFECT`, `RETURN`, plus `IF` and
+  `UNDECIDED`.
+- `BREAKS` — one block per failure branch. `[branch: <name>]` labels the
+  scenario with a short noun phrase; the branch's entry condition renders as
+  `IF` above the events it gates. Each block ends in the observable
+  consequence: a `RETURN`, a `MUTATE`, or a named failure mode such as lost
+  update, duplicate delivery, deadlock, or unbounded growth.
 - `OPEN QUESTIONS` — every `UNDECIDED` restated as a question the designer must
   answer, ordered by how early it blocks the flow.
 
@@ -156,6 +177,8 @@ UNDECIDED: gateway returns 200 but settlement is async - is the charge
   considered done here?
   → proceeding as: done, since the sketch has no settlement state
   │
+  IF charge succeeded
+  │
   ▼
 SIDE EFFECT emit order.created
 
@@ -163,9 +186,11 @@ RETURN orderId
 
 BREAKS:
 
-[branch: charge fails after stock is reserved]
+[branch: leaked reservation]
 
 CALL chargePayment(order.total)
+  │
+  IF charge fails
   │
   ▼
 RETURN error
@@ -218,6 +243,9 @@ Before saving, verify:
 
 - every non-`UNDECIDED` line traces to the design artifact, documented external
   semantics, or a user-stated decision;
+- every `IF` condition traces to the artifact's control-flow wording, and a
+  condition the design leaves silent is `UNDECIDED`, not an invented `IF`;
+- no `[branch: <name>]` label restates a condition already rendered as `IF`;
 - every `UNDECIDED` appears in `OPEN QUESTIONS`;
 - no assumptions were chained;
 - the whole output is a single `text` fence, longer than any run of three or
