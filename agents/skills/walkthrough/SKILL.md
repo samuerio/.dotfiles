@@ -72,8 +72,9 @@ UNDECIDED: <the question the design does not answer>
 
 Every `UNDECIDED` must be restated in `OPEN QUESTIONS`.
 
-Do not chain assumptions. If a second gap depends on a first unresolved gap,
-stop that branch there and say so.
+The `proceeding as` choice is the one assumption a branch may make to keep
+walking; never build a second decision on top of it. If a second gap depends
+on a first unresolved gap, stop that branch there and say so.
 
 ## Walking
 
@@ -113,6 +114,32 @@ Ground `IF` in the artifact's own control-flow wording or pseudocode. When
 the design is silent about the condition, record `UNDECIDED` instead — never
 fill the gap with an invented `IF`.
 
+## Concurrent operations
+
+Render each concurrent operation as its own block with a structural label,
+as in `trace`:
+
+```text
+[concurrent: reserveStock]
+
+CALL reserveStock(order.items)
+  │
+  ▼
+MUTATE stock.reserved: 0 → 2
+
+[concurrent: chargePayment]
+
+CALL chargePayment(order.total)
+  │
+  ▼
+SIDE EFFECT payment gateway charge
+```
+
+Structural labels are not events. A mutation shared by concurrent
+operations appears in every block that performs it. If the design does not
+specify interleaving or ordering, that gap is `UNDECIDED` — never invent an
+interleaving.
+
 ## Output structure
 
 Sections in order: `DESIGN`, `WALK`, `BREAKS`, `OPEN QUESTIONS`.
@@ -131,11 +158,15 @@ outside the fence and no prose between sections.
   scenario with a short noun phrase; the branch's entry condition renders as
   `IF` above the events it gates. Each block ends in the observable
   consequence: a `RETURN`, a `MUTATE`, or a named failure mode such as lost
-  update, duplicate delivery, deadlock, or unbounded growth.
+  update, duplicate delivery, deadlock, or unbounded growth. Order blocks by
+  the `Walking` category they cover, so coverage is auditable; a skipped
+  category's one-line reason is a `#` comment at that position.
 - `OPEN QUESTIONS` — every `UNDECIDED` restated as a question the designer must
-  answer, ordered by how early it blocks the flow.
+  answer, ordered by how early it blocks the flow. Merge duplicates raised in
+  different branches into one question.
 
-Use `▼` for chronology and `├─` / `└─` for sibling effects, as in `trace`.
+Use `▼` for chronology, `│` for ancestry, and `├─` / `└─` for sibling
+effects, as in `trace`.
 
 Render only what the design actually determines. A short walk that names five
 real gaps beats a long walk that reads as settled.
@@ -213,12 +244,39 @@ SIDE EFFECT payment gateway charge   # charged twice
 
 # failure mode: no idempotency key in the sketch
 
+[branch: two submits racing]
+
+[concurrent: submit]   # order A
+
+CALL submit(order)
+  │
+  ▼
+MUTATE stock.reserved: 0 → 2
+
+[concurrent: submit]   # order B
+
+CALL submit(order)
+  │
+  ▼
+MUTATE stock.reserved: 0 → 2   # same baseline — one write is lost
+  │
+  ▼
+SIDE EFFECT payment gateway charge
+
+# failure mode: both submits reserve from the same baseline — the sketch has
+# no atomic reserve, so the second write is lost and stock is oversold
+
+UNDECIDED: does the design make reservation atomic across concurrent
+  submits?
+  → proceeding as: non-atomic, to expose the oversell
+
 OPEN QUESTIONS:
 
-1. Is payment settled synchronously, or does the flow need a state between
+1. Does reservation need to be atomic across concurrent submits?
+2. Is payment settled synchronously, or does the flow need a state between
    charged and confirmed?
-2. Who releases a stock reservation when charging fails?
-3. What idempotency key makes a retried submit safe?
+3. Who releases a stock reservation when charging fails?
+4. What idempotency key makes a retried submit safe?
 ```
 
 ## Save
@@ -246,6 +304,8 @@ Before saving, verify:
 - every `IF` condition traces to the artifact's control-flow wording, and a
   condition the design leaves silent is `UNDECIDED`, not an invented `IF`;
 - no `[branch: <name>]` label restates a condition already rendered as `IF`;
+- every applicable `Walking` category is covered by a `BREAKS` block in
+  category order, or carries a one-line skip reason;
 - every `UNDECIDED` appears in `OPEN QUESTIONS`;
 - no assumptions were chained;
 - the whole output is a single `text` fence, longer than any run of three or
