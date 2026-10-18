@@ -457,3 +457,84 @@ RETURN { passed: true, reason: "", nextAction: "" }
 Every assumed value is labeled at its source, and the closing line covers the
 sequence. A trace that assumed either judgment without these marks would be
 fabrication, not illustration.
+
+---
+
+## Example 6: Guard conditions on the taken path
+
+An `IF` names the condition that routed execution; the untaken branch is never
+rendered. Guards that merely pass an obvious null check are omitted.
+
+```text
+INPUT:
+  order = { id: "A-100", items: 3 }
+  user  = { id: 7, active: true }
+
+TRACE:
+
+CALL checkout(order, user)
+  │
+  IF user.active
+  │
+  ▼
+CALL charge(order)
+  │
+  IF order.items > 0
+  │
+  ▼
+CALL reserveStock(order)
+  │
+  ▼
+RETURN { ok: true }
+```
+
+A guard that determines early termination renders the same way, with the
+condition as the cause of the return:
+
+```text
+CALL checkout(order, user)
+  │
+  IF !user.active
+  │
+  ▼
+RETURN { ok: false, reason: "inactive user" }
+```
+
+Keep the condition symbolic when a runtime operand was not supplied:
+`IF order.items > 0` needs no concrete count, while `IF remaining = 0` would.
+
+In `DETAIL`, `IF` sits at the same tree level as the call it gates, directly
+above it — never as a parent frame:
+
+```text
+DETAIL:
+
+CALL checkout(order, user)
+├─ IF user.active
+│
+├─ CALL charge(order)
+│  ├─ IF order.items > 0
+│  │
+│  └─ CALL reserveStock(order)
+│     └─ RETURN { reserved: 3 }
+│
+└─ RETURN { ok: true }
+```
+
+A loop guard renders once above the first iteration when it explains entry,
+continuation, or exit:
+
+```text
+CALL drain(queue)
+  │
+  IF queue.length > 0
+  │
+  # iteration: job A
+  ├─ SIDE EFFECT process(job A)
+  │
+  # iteration: job B
+  ├─ SIDE EFFECT process(job B)
+  │
+  ▼
+RETURN
+```

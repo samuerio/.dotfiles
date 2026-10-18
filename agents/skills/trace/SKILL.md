@@ -3,10 +3,11 @@ name: trace
 description: >
   Statically reconstruct the causal execution path of a function or method for
   concrete inputs from source code and supplied context. Show behaviorally
-  relevant calls, derived values, state mutations, side effects, event-driven
-  handoffs, and termination as a compact ASCII execution trace, with an
-  optional structural detail view for non-trivial call nesting. Use for
-  requests such as "trace this call", "walk me through input X", "why does
+  relevant calls, guard conditions, derived values, state mutations, side
+  effects, event-driven handoffs, and termination as a compact ASCII execution
+  trace, with an optional structural detail view for non-trivial call nesting.
+  Use for requests such as "trace this call", "walk me through input X", "why
+  does
   this run again?", or "show the state changes". Never execute, modify, or
   instrument the target.
 ---
@@ -90,6 +91,8 @@ that materially explain:
 Prefer the shallowest representation that preserves causal understanding.
 
 - `CALL` — enter repository code whose internals materially explain the path.
+- `IF` — guard condition on the taken path that materially determines the next
+  traced step; rendered only under the Branch conditions rules.
 - `VALUE` — derive a value later used by traced control flow, mutation, side
   effect, or return; not merely computed, copied, logged, or passed through.
 - `MUTATE` — meaningful state transition.
@@ -207,7 +210,40 @@ CALL next(...)
 Do not draw decorative boxes around every function.
 
 Do not render alternate outcomes, decision diamonds, or a full control-flow
-graph: this is a concrete execution trace, not a CFG.
+graph: this is a concrete execution trace, not a CFG. The one allowed
+exception is a single `IF` line naming the condition on the taken path; see
+Branch conditions below.
+
+### Branch conditions
+
+Render a guard as `IF` only when the condition materially determines the next
+traced step and its outcome is not already evident from the rendered events:
+
+- an early-return guard,
+- a loop continuation or iteration guard,
+- a dispatch between materially different traced behavior, or
+- a non-obvious condition that explains why the path continued or stopped.
+
+Omit ordinary null checks and guards whose taken direction is unambiguous
+from the surrounding events.
+
+Write the condition as a source-level expression. Concrete operands follow
+the same grounding rules as every other value; when a runtime value is
+unavailable, keep the expression symbolic rather than inventing it.
+
+Place `IF` above the events it gates:
+
+```text
+CALL processSettled(pi, ctx)
+  │
+  IF !verifierBusy
+  │
+  ▼
+CALL runSettleCycle(...)
+```
+
+`IF` marks the taken branch only. Never render the untaken alternative, an
+`ELSE`, or a decision diamond.
 
 ### Calls and results
 
@@ -357,6 +393,9 @@ inside an invocation, or to cycles whose guards and state are all identical.
 For loops whose data changes each round and is read later, retain relevant
 events for each meaningful iteration.
 
+Render a loop guard once as `IF` above the first `# iteration:` label when it
+materially explains entry, continuation, or exit.
+
 Use:
 
 ```text
@@ -423,6 +462,23 @@ Use blank visual rows sparingly around materially nested `CALL` frames.
 
 Do not put blank rows between every event.
 
+Render an `IF` condition at the same tree level as the events it gates,
+directly above them — never as a parent frame that owns calls:
+
+```text
+CALL processSettled(pi, ctx)
+├─ MUTATE verifierBusy: false → true
+│
+├─ IF !verifierBusy
+│
+├─ CALL runSettleCycle(pi, ctx)
+│  ├─ SIDE EFFECT ctx.ui.setStatus("goal", "verifying...")
+│  │
+│  └─ MUTATE goal.iteration: 2 → 3
+│
+└─ MUTATE verifierBusy: true → false
+```
+
 ### Multi-cycle DETAIL
 
 For multiple top-level cycles, render one tree per cycle:
@@ -482,6 +538,9 @@ Before saving, verify:
 - `TRACE` is chronological, cross-cycle handoffs are explicit, and no event
   follows a call's terminal `RETURN`;
 - `DETAIL`, when present, is the same execution with `├─`, `└─`, `│`;
+- every `IF` names a condition on the taken path only, with no untaken
+  alternative, and every concrete operand traces to source, `INPUT`,
+  `CONTEXT`, or an `assumed:` entry;
 - the whole output is a single `text` fence, longer than any run of three
   or more backticks, containing only the sections and `# iteration:` /
   `# inferred:` lines.
