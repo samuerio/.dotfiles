@@ -18,7 +18,11 @@ IDE 级编辑能力，集成 `telescope`/`fzf` 搜索与 `opencode.nvim` AI 工�
 pi coding agent 的自定义 TypeScript 扩展集，仓库中除 `nvim/` 外最活跃的子系统。按职责分组：
 会话编排与交接（`continue`、`pick-session`、`handoff`、`session-breakdown`、`background-task`（后台任务派发：
 可选 git worktree + tmux 子会话 + `.pi/background-tasks/tasks/` 任务注册表 + 结果回报）、`tmux-split-fork`、
-`goal`（目标驱动自动迭代：`/goal` 命令族 + agent_settled 续跑循环 + rush 模型无工具 verifier 判定完成））、
+`goal`（目标驱动自动迭代：`/goal` 命令族 + agent_settled 续跑循环 + rush 模型无工具 verifier 判定完成）、
+`loop`（定时任务：`/loop [interval] <prompt>` 命令 + loop_create/loop_list/loop_delete 模型工具，
+任务存 `.pi/loop-tasks.json`，30s 自调度 tick 链按 `lastFiredAt + intervalMs` 到点后复用
+`background-task` 的 dispatchBackgroundTask 派发隔离子 pi；`.pi/loop-tasks.lock` 文件锁 +
+mtime 陈旧判定做多会话调度权互斥，claim-then-dispatch 毫秒级关键区））、
 TUI 工具与编辑（`preview`、`view-image`、`files`、
 `context`、`unified-edit`、`review`、`security-review`（安全审查：高置信漏洞识别 +
 并行子代理误报过滤，rubric 改编自 Claude Code 的 security-review）、`answer`、`btw`（在主会话旁开启独立旁路线程））、
