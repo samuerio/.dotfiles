@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "currentMode": "rush",
+  "currentMode": "smart",
   "modes": {
     "default": {
       "provider": "opencode-go",
@@ -14,8 +14,8 @@
     },
     "smart": {
       "provider": "opencode-go",
-      "modelId": "step-5-preview-free",
-      "thinkingLevel": "medium"
+      "modelId": "step-5-preview",
+      "thinkingLevel": "high"
     },
     "deep": {
       "provider": "opencode-go",
