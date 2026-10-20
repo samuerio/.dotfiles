@@ -7,6 +7,8 @@
  *   - expandHome          — tilde expansion shared by path handling
  *   - resolveSessionRef   — pi `--session <path|id>` semantics
  *   - loadSessionEntries  — read + parse + migrate a session JSONL file
+ *   - readSessionText     — raw text only (prefilter-friendly read/parse split)
+ *   - parseSessionText    — parse + migrate raw text (the parse half of the split)
  *   - textOf              — text-part concatenation over message content
  *
  * Each of these carries a contract (id resolution order, migration order,
@@ -78,6 +80,39 @@ export async function resolveSessionRef(ref: string): Promise<string> {
 }
 
 /**
+ * Read a session JSONL file's raw text (tilde-expanded). Throws when the file
+ * is unreadable. Split from parsing so callers can run a cheap substring
+ * prefilter on the raw text before paying for the parse.
+ */
+export function readSessionText(rawPath: string): string {
+	const filePath = expandHome(rawPath);
+	try {
+		return fs.readFileSync(filePath, "utf-8");
+	} catch (error) {
+		throw new Error(`cannot read ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+	}
+}
+
+/**
+ * Parse + migrate raw session text to the current version and split the
+ * header from the entry array. The read/parse split mirrors
+ * loadSessionEntries: migrate the FULL entry array first, because
+ * migrateToCurrentVersion reads the header's version (migrating a headerless
+ * array would assume version 1 and regenerate every entry id, destroying
+ * branch structure and firstKeptEntryId references).
+ */
+export function parseSessionText(text: string): {
+	header: SessionHeader | undefined;
+	entries: SessionEntry[];
+} {
+	const parsed = parseSessionEntries(text);
+	migrateSessionEntries(parsed);
+	const header = parsed.find((entry): entry is SessionHeader => entry.type === "session");
+	const entries = parsed.filter((entry): entry is SessionEntry => entry.type !== "session");
+	return { header, entries };
+}
+
+/**
  * Read a session JSONL file, parse, migrate to the current version, and split
  * the header from the entry array. Shared by every session-viewer tool. Throws
  * when the file is unreadable.
@@ -86,24 +121,7 @@ export function loadSessionEntries(
 	rawPath: string,
 ): { filePath: string; header: SessionHeader | undefined; entries: SessionEntry[] } {
 	const filePath = expandHome(rawPath);
-
-	let content: string;
-	try {
-		content = fs.readFileSync(filePath, "utf-8");
-	} catch (error) {
-		throw new Error(`cannot read ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
-	}
-
-	const parsed = parseSessionEntries(content);
-	// Migrate the FULL entry array first: migrateToCurrentVersion reads the
-	// header's version. Migrating a headerless array would assume version 1 and
-	// regenerate every entry id (destroying branch structure and
-	// firstKeptEntryId references). Then mirror
-	// SessionManager.buildContextEntries(): build functions receive entries
-	// only, the header is handled separately.
-	migrateSessionEntries(parsed);
-	const header = parsed.find((entry): entry is SessionHeader => entry.type === "session");
-	const entries = parsed.filter((entry): entry is SessionEntry => entry.type !== "session");
+	const { header, entries } = parseSessionText(readSessionText(filePath));
 	return { filePath, header, entries };
 }
 

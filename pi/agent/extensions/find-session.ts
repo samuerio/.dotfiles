@@ -6,35 +6,66 @@
  * its `g`/`y` flag stripping, snippet generation, newest-first ordering, and
  * the no-index realtime-scan stance) but rebuilt on the active-branch parse
  * pipeline shared with read-session.ts (`lib/session-common.ts`): each session
- * file goes through `loadSessionEntries` → `buildContextEntries`, so only the
- * resolved active branch is searched — upstream's raw-JSONL grep hits
- * abandoned branches, which here it cannot.
+ * file is read once (`readSessionText`), literal queries prefilter on the raw
+ * text, and survivors go through `parseSessionText` → `buildContextEntries`,
+ * so only the resolved active branch is searched — upstream's raw-JSONL grep
+ * hits abandoned branches, which here it cannot.
  *
  * ─ Scope (deliberate) ─
- * Current project only, one level: the file list comes from
- * `SessionManager.list(cwd)` (the same source as the drill tools' id
- * resolution in `resolveSessionRef`), which physically equals "all sessions
- * of the current project" and naturally excludes subagent sessions (they live
- * under `sessions/<tool>/<runId>/`, a different tree). Every emitted session
- * ref is therefore always drillable by the existing tool trio. No index, no
- * cross-project search, no tool-result search (upstream defaults, kept).
+ * Current project only, one level: discovery is readdir+stat over
+ * `ctx.sessionManager.getSessionDir()` (the in-memory `--no-session` mode
+ * reports "" and falls back to `SessionManager.list(cwd)`), which physically
+ * equals "all sessions of the current project" and naturally excludes
+ * subagent sessions (they live under `sessions/<tool>/<runId>/`, a different
+ * tree). Every emitted session ref is therefore always drillable by the
+ * existing tool trio. No index, no cross-project search, no tool-result
+ * search (upstream defaults, kept).
  *
  * Summary invariant: a compaction/branch_summary hit never duplicates an
  * original-message hit within the same session — the raw messages compacted
  * away are no longer in buildContextEntries' active-branch projection, so the
  * summary is the only searchable copy of that stretch of history.
  *
+ * Summary invariant: a compaction/branch_summary hit never duplicates an
+ * original-message hit within the same session — the raw messages compacted
+ * away are no longer in buildContextEntries' active-branch projection, so the
+ * summary is the only searchable copy of that stretch of history.
+ *
+ * ─ Command flow (human path) ─
+ * `/search-sessions <query>` runs two cancellable phases and writes NOTHING
+ * to the session unless the human explicitly picks a hit: (1) the scan runs
+ * under a CancellableLoader (Esc aborts; ctx.signal is only live while the
+ * agent streams, so the loader owns cancellation here), (2) a hit picker
+ * (files.ts-style ctx.ui.custom + Input + SelectList; the filter box filters
+ * the fetched hits only and never re-scans). Enter injects the picked hit as
+ * a framed custom_message (formatSingleHit: custom_message converts to a
+ * USER-role message downstream, so bare refs would read as instructions);
+ * Esc closes with nothing written — a pure search. Without a UI (print/json
+ * modes) the command degrades to injecting the full result set.
+ *
+ * ctrl+o in the picker opens a preview of the selected hit: the picked
+ * message's FULL text (picker rows only ever show a 100-char slice) plus the
+ * session's other matching messages (the `more=N` hits the grouped output
+ * never shows), re-scanned from that one file through the same
+ * collectEntryHits matching. The preview is a second render mode of the
+ * picker component, not a nested overlay; it reads one file and writes
+ * nothing.
+ *
  * ─ Output contract ─
  * No fourth read tool. Each hit emits both a session path and a session id:
  *
- *   session=<path> id=<sessionId> entry=<entryId> ts=<timestamp> role=<role>
+ *   session=<path> id=<sessionId> entry=<entryId> ts=<timestamp> role=<role>[ more=N]
  *     <snippet>
  *
- * `<path>` (home collapsed to ~) is always drillable by read_session /
- * read_session_entry; `<sessionId>` is the natural id form both drill tools
- * accept; `<entryId>` is the read_session_entry drill handle, recovered with
- * the same entry/message zip `alignAnnotations` uses in read-session.ts.
- * The model's natural next step is read_session or read_session_entry.
+ * Hits are grouped per session (one representative hit each; `more=N` counts
+ * the session's other matching messages) and ordered by match tier (first-
+ * user-message hit > body-only hit, exact first-message match first within
+ * the tier) then newest-first. `<path>` (home collapsed to ~) is always
+ * drillable by read_session / read_session_entry; `<sessionId>` is the
+ * natural id form both drill tools accept; `<entryId>` is the
+ * read_session_entry drill handle, recovered with the same entry/message zip
+ * `alignAnnotations` uses in read-session.ts. The model's natural next step
+ * is read_session or read_session_entry.
  *
  * Sections: pure helpers (compileQuery / snippet / args parsing) →
  * searchSessions core → tool + command registration with TUI rendering
@@ -50,15 +81,35 @@ import type {
 } from "@earendil-works/pi-agent-core";
 import {
     buildContextEntries,
+    DynamicBorder,
     type ExtensionAPI,
+    getAgentDir,
     keyHint,
     SessionManager,
     type SessionEntry,
     sessionEntryToContextMessages,
 } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
+import {
+    CancellableLoader,
+    Container,
+    fuzzyFilter,
+    Input,
+    Key,
+    matchesKey,
+    type SelectItem,
+    SelectList,
+    Spacer,
+    Text,
+    truncateToWidth,
+    type TUI,
+    wrapTextWithAnsi,
+} from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { loadSessionEntries, textOf } from "./lib/session-common.ts";
+import {
+    parseSessionText,
+    readSessionText,
+    textOf,
+} from "./lib/session-common.ts";
 
 const SNIPPET_BEFORE = 120;
 const SNIPPET_AFTER = 240;
@@ -67,12 +118,35 @@ const MAX_SESSION_FILE_BYTES = 5 * 1024 * 1024; // skip oversized files (visible
 const DEFAULT_MAX_RESULTS = 50;
 const HARD_MAX_RESULTS = 1000;
 const TOOL_CALL_ARGS_PREVIEW = 400;
+/**
+ * Soft scan budget: a query that outruns it stops early with
+ * truncated=time-budget. At the current corpus scale (one project ~0.5s,
+ * --all ~1s) this never fires; it is the headroom valve for 10x growth, the
+ * pi equivalent of WorkBuddy's 3s rg soft-stop (without detaching rg).
+ */
+const SOFT_BUDGET_MS = 3000;
 
-/** custom_message customTypes that are THIS family's own injected output; searching them self-amplifies. */
-const SELF_EXCLUDED_CUSTOM_TYPES = new Set(["search-sessions"]);
+/**
+ * custom_message customTypes excluded from search. Only `custom_message`
+ * entries project to role=custom and reach the haystack; plain `custom`
+ * bookkeeping entries (viewer-state, preview-state, goal, pi-subagent:*, ...)
+ * are dropped by the projection, so listing them here would be dead code.
+ * The set is deliberately minimal: answers/goal-continuation/inline are real
+ * injected conversation content and stay searchable, so every addition needs
+ * its own justification.
+ *   - search-sessions: this tool's own output (self-amplification).
+ *   - context: the /context panel injection.
+ *   - session-breakdown: the breakdown injection.
+ */
+const SELF_EXCLUDED_CUSTOM_TYPES = new Set([
+    "search-sessions",
+    "context",
+    "session-breakdown",
+]);
 
 const SEARCH_SESSIONS_DESCRIPTION =
-    "Search the CURRENT PROJECT's pi sessions (one level: ~/.pi/agent/sessions/<project>/) for a " +
+    "Search the current project's pi sessions (one level: ~/.pi/agent/sessions/<project>/; pass " +
+    "scope=\"all\" for every project, current project ranked first) for a " +
     "keyword or /regex/, over the resolved active branch of each session (abandoned branches are not " +
     "searched). Searches user/assistant body text, custom injected messages (the search tool's own " +
     "search-sessions output excluded), and branch_summary/compaction summaries; tool results are never " +
@@ -80,10 +154,15 @@ const SEARCH_SESSIONS_DESCRIPTION =
     "and branch_summary hits drill to " +
     "their full text via read_session_entry; compaction originals are restored with " +
     "read_session_compaction. Returns " +
-    "hits sorted newest-first, each as " +
+    "one representative hit per session (the session's other matching messages counted as more=N), " +
+    "ordered by match tier (a hit in the session's first user message ranks above body-only hits, an " +
+    "exact first-message match first within that tier) then newest-first; maxResults caps sessions, not " +
+    "messages. Each hit is " +
     "session=<path> id=<sessionId> entry=<entryId> ts=<timestamp> role=<role> plus a snippet: pass the " +
     "path or id to read_session for the full transcript, or entry=<entryId> to read_session_entry to " +
-    "drill into the exact entry. Read-only.";
+    "drill into the exact entry. In scope=\"all\", each hit line also carries project=<dir>. The result " +
+    "envelope reports query/scope/hits/scanned/listed/unreadable/ms and, when results were cut short, " +
+    "truncated=<reason> (maxResults, time-budget, or aborted). Read-only.";
 
 export const SearchSessionsParams = Type.Object({
     query: Type.String({
@@ -112,13 +191,23 @@ export const SearchSessionsParams = Type.Object({
     ),
     maxResults: Type.Optional(
         Type.Number({
-            description: `Maximum hits. Default ${DEFAULT_MAX_RESULTS}, hard cap ${HARD_MAX_RESULTS}. Explicit invalid values (0, negative, NaN, non-integer) throw.`,
+            description: `Maximum sessions returned (one representative hit per session; that session's remaining matching messages are counted as more=N). Default ${DEFAULT_MAX_RESULTS}, hard cap ${HARD_MAX_RESULTS}. Explicit invalid values (0, negative, NaN, non-integer) throw.`,
         }),
     ),
     includeCurrentSession: Type.Optional(
         Type.Boolean({
             description:
                 "Include the live session in the search. Default false (excluded).",
+        }),
+    ),
+    scope: Type.Optional(
+        Type.Union([Type.Literal("project"), Type.Literal("all")], {
+            description:
+                "Search scope. 'project' (default) searches the current project's sessions only. " +
+                "'all' searches every project directory under the sessions root " +
+                "(~/.pi/agent/sessions/<project>/), ranking the current project's sessions first; " +
+                "subagent session trees (sessions/<tool>/<runId>/) stay excluded. Under a custom " +
+                "--session-dir outside the sessions root, 'all' degrades to 'project'.",
         }),
     ),
 });
@@ -136,15 +225,32 @@ export interface SearchHit {
     role: string;
     /** Match plus surrounding context (120 chars before / 240 after). */
     snippet: string;
+    /**
+     * The session's OTHER matching messages, when this hit is the session's
+     * representative (grouping output); absent for single-hit sessions.
+     */
+    more?: number;
 }
 
 export interface SearchSessionsDetails {
     path?: string;
     hitCount: number;
-    /** Hard cap reached: there were more matches than maxResults. */
-    truncated: boolean;
+    /** Set when results were cut short: "maxResults" or "aborted". */
+    truncated?: string;
     /** Session files skipped for size (>5 MB); each entry is "path (N KB)". */
     skippedFiles: string[];
+    /** Files that could not be stat'd, parsed, or had no session header. */
+    unreadable: string[];
+    /** Session files discovered in the session directory (one level). */
+    listed: number;
+    /** Session files actually searched. */
+    scanned: number;
+    /** Scan wall time in milliseconds. */
+    ms: number;
+    /** Scope actually searched ('all' can degrade to 'project'). */
+    scope: "project" | "all";
+    /** True when an 'all' request degraded to project scope. */
+    allDegraded: boolean;
 }
 
 // ============================================================================
@@ -169,6 +275,69 @@ export function compileQuery(query: string): RegExp {
         return new RegExp(m[1], safeFlags);
     }
     return new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+}
+
+/**
+ * Normalization for tier-1 comparison: lowercase + whitespace removed, so
+ * "追踪 Goal.ts" and "追踪goal.ts" compare equal.
+ */
+function normalizeForTier(text: string): string {
+    return text.toLowerCase().replace(/\s+/g, "");
+}
+
+/** A `/regex/flags` query (as opposed to a literal keyword). */
+function isRegexQuery(query: string): boolean {
+    return /^\/(.+)\/([gimsuy]*)$/.test(query);
+}
+
+/**
+ * Role weight for representative-hit selection and same-tier tiebreaks:
+ * user > branch/compaction summary > assistant > custom. Never a sort key on
+ * its own.
+ */
+const ROLE_WEIGHTS: Record<string, number> = {
+    user: 1.0,
+    branchSummary: 0.9,
+    compactionSummary: 0.9,
+    assistant: 0.75,
+    custom: 0.5,
+};
+
+function roleWeightOf(msg: AgentMessage): number {
+    return ROLE_WEIGHTS[msg.role] ?? 0;
+}
+
+/**
+ * Message timestamp in ms (the runtime's getMessageActivityTime prefers the
+ * message timestamp over the entry timestamp); undefined when absent.
+ */
+function messageTimestampMs(msg: AgentMessage): number | undefined {
+    const ts = (msg as { timestamp?: unknown }).timestamp;
+    return typeof ts === "number" && Number.isFinite(ts) ? ts : undefined;
+}
+
+/** Ranking key of one hit within its session. */
+interface HitRank {
+    /** 1 = query hits the session's first user message; 2 = body-only hit. */
+    tier: number;
+    /** Literal query exactly equals the first user message (normalized). */
+    exact: boolean;
+    /** Message timestamp in ms (NaN sorts last). */
+    ts: number;
+    roleWeight: number;
+}
+
+/** Order hits/sessions: tier asc, exact-first-message, newest, role weight. */
+function compareRank(a: HitRank, b: HitRank): number {
+    if (a.tier !== b.tier) return a.tier - b.tier;
+    if (a.exact !== b.exact) return a.exact ? -1 : 1;
+    if (a.ts !== b.ts) return (Number.isFinite(b.ts) ? b.ts : 0) - (Number.isFinite(a.ts) ? a.ts : 0);
+    return b.roleWeight - a.roleWeight;
+}
+
+/** True when rank `a` outranks `b` for representative-hit selection. */
+function betterRank(a: HitRank, b: HitRank): boolean {
+    return compareRank(a, b) < 0;
 }
 
 /** One-line, whitespace-collapsed preview (shared shape with read-session.ts). */
@@ -264,11 +433,13 @@ export function parseSearchArgs(args: string): {
     until: string | undefined;
     maxResults: number | undefined;
     includeToolCalls: boolean;
+    all: boolean;
 } {
     let since: string | undefined;
     let until: string | undefined;
     let maxResults: number | undefined;
     let includeToolCalls = false;
+    let all = false;
     const queryParts: string[] = [];
 
     for (const token of args.trim().split(/\s+/).filter(Boolean)) {
@@ -287,9 +458,12 @@ export function parseSearchArgs(args: string): {
                 case "include-tool-calls":
                     includeToolCalls = true;
                     break;
+                case "all":
+                    all = true;
+                    break;
                 default:
                     throw new Error(
-                        `unknown flag --${flag} (supported: since, until, max, include-tool-calls).`,
+                        `unknown flag --${flag} (supported: since, until, max, include-tool-calls, all).`,
                     );
             }
             continue;
@@ -300,9 +474,9 @@ export function parseSearchArgs(args: string): {
     const query = queryParts.join(" ").trim();
     if (!query)
         throw new Error(
-            "usage: /search-sessions [--since=ISO] [--until=ISO] [--max=N] [--include-tool-calls] <query>",
+            "usage: /search-sessions [--since=ISO] [--until=ISO] [--max=N] [--include-tool-calls] [--all] <query>",
         );
-    return { query, since, until, maxResults, includeToolCalls };
+    return { query, since, until, maxResults, includeToolCalls, all };
 }
 
 /** Display-only path shortening (matches read-session.ts shortenPath): cwd-relative or ~-collapsed. */
@@ -320,6 +494,12 @@ function shortenPath(p: string): string {
         : resolved;
 }
 
+/** Envelope list rendering: show the first few entries, count the rest. */
+function capList(items: string[], max = 10): string {
+    if (items.length <= max) return items.join(", ");
+    return `${items.slice(0, max).join(", ")} +${items.length - max} more`;
+}
+
 // ============================================================================
 // searchSessions core
 // ============================================================================
@@ -333,27 +513,197 @@ export interface SearchSessionsOptions {
     includeCurrentSession?: boolean;
     /** Live session file path + id, when running inside a pi session (exclusion). */
     currentSessionFile?: string;
+    /**
+     * Session directory to scan (ctx.sessionManager.getSessionDir()). Empty or
+     * omitted falls back to SessionManager.list(cwd), the only correct source
+     * in the in-memory (--no-session) mode where getSessionDir() is "".
+     */
+    sessionDir?: string;
+    /** Project cwd for the header.cwd filter; defaults to process.cwd(). */
+    cwd?: string;
+    /** Cancellation signal, observed between files (absent on the command path). */
+    signal?: AbortSignal;
+    /**
+     * Search scope: 'project' (default) or 'all' (every project under the
+     * sessions root, current project ranked first).
+     */
+    scope?: "project" | "all";
 }
 
 export interface SearchSessionsResult {
     hits: SearchHit[];
-    truncated: boolean;
+    /** Set when results were cut short: "maxResults" or "aborted". */
+    truncated?: string;
     skippedFiles: string[];
+    /** Files that could not be stat'd, parsed, or had no session header. */
+    unreadable: string[];
     scanned: number;
+    /** Session files discovered across the searched project directories. */
+    listed: number;
+    /** Scan wall time in milliseconds. */
+    ms: number;
+    /** Scope actually searched (an 'all' request can degrade to 'project'). */
+    scope: "project" | "all";
+    /** True when an 'all' request degraded to project scope. */
+    allDegraded: boolean;
 }
 
 /**
- * Search the current project's sessions (SessionManager.list(cwd), one level)
- * over the resolved active branch of each session file. Hits are collected
- * then sorted newest-first by message timestamp (no relevance scoring;
- * unparseable timestamps sort last). Stops scanning at maxResults hits —
- * the list is mtime-desc, so early exit biases toward recent sessions.
+ * Search the current project's sessions over the resolved active branch of
+ * each session file. Discovery is one level of the session directory
+ * (`ctx.sessionManager.getSessionDir()` via options.sessionDir, readdir +
+ * stat, no parse); the in-memory (--no-session) mode reports "" and falls
+ * back to `SessionManager.list(cwd)` — the pre-P0 source, which costs a full
+ * stream-parse of every file but is the only correct source there.
+ *
+ * Hits are collected across ALL sessions, grouped per session (one
+ * representative hit: best rank, remaining matches counted as more=N),
+ * ordered by (tier asc, exact-first-message, message timestamp desc, role
+ * weight) and truncated at maxResults — which caps SESSIONS, not messages.
+ * Tier 1 = the query hits the session's first user message (the active-
+ * branch projection's first role=user message, i.e. the first kept one after
+ * a compaction); tier 2 = body-only hit. No early exit: a chatty recent
+ * session can no longer fill the whole budget before older sessions are
+ * scanned.
  *
  * Time bounds bind to MESSAGE timestamps (post-resolution), not file mtime:
  * mtime would let an old session rewritten recently bypass the filter.
- * `since`/`until` and explicit invalid maxResults throw loudly; unreadable
- * files are skipped silently (sessions are written live and may be mid-write).
+ * `since`/`until` and explicit invalid maxResults throw loudly. Files that
+ * cannot be stat'd, parsed, or that carry no session header are reported in
+ * the `unreadable` envelope field instead of being skipped silently. The
+ * scan yields to the event loop between files and observes `signal` at the
+ * yield point (the slash-command path has no signal and never aborts).
+ *
+ * Perf: literal queries prefilter on each file's raw text before parsing
+ * (read once, parse only candidates); a 3s soft budget stops the scan early
+ * with truncated=time-budget. Both are headroom for corpus growth, inert at
+ * the current scale.
  */
+/**
+ * Match one session's resolved active-branch projection, with the same
+ * tier/rank logic the scan uses. Extracted from searchSessions so the
+ * picker's ctrl+o preview can re-run the exact matching against a single
+ * session file (its full hit list, including the `more=N` hits the grouped
+ * scan output never shows) without duplicating any of it.
+ *
+ * `withFullText` attaches the untruncated message text to every record; the
+ * scan leaves it off (holding every matched message's full text for a whole
+ * corpus in memory is the one thing the grouped output does not need).
+ */
+function collectEntryHits(
+    entries: SessionEntry[],
+    match: {
+        re: RegExp;
+        /** The query was in /regex/flags form (no equality semantics). */
+        regexQuery: boolean;
+        normalizedQuery: string;
+        sinceMs?: number;
+        untilMs?: number;
+        includeToolCalls: boolean;
+    },
+    session: { sessionPath: string; sessionId: string },
+    options: { withFullText?: boolean } = {},
+): Array<{ hit: SearchHit; rank: HitRank; fullText?: string }> {
+    const out: Array<{ hit: SearchHit; rank: HitRank; fullText?: string }> =
+        [];
+    // First user message of the ACTIVE-BRANCH projection: after a compaction
+    // this is the first KEPT user message, not the file's first user message.
+    // Non-user roles are skipped (a compaction's systemMessage can lead the
+    // projection).
+    let firstUserEntryId: string | undefined;
+    let firstUserText: string | undefined;
+
+    // The resolved active-branch entry list — the same list
+    // buildSessionContext projects into context.messages (each entry yields
+    // 0/1 messages via sessionEntryToContextMessages, in order), so entry →
+    // message pairing is exact: the entry id IS the read_session_entry
+    // drill handle (same zip read-session.ts's alignAnnotations relies on).
+    const contextEntries = buildContextEntries(entries);
+    for (const entry of contextEntries) {
+        for (const msg of sessionEntryToContextMessages(entry)) {
+            // Self-reference guard: the slash command injects its own result
+            // as a custom message; searching it would self-amplify. (Only
+            // custom_message entries project to role=custom at all; plain
+            // `custom` bookkeeping entries never reach this loop.)
+            if (
+                msg.role === "custom" &&
+                SELF_EXCLUDED_CUSTOM_TYPES.has(msg.customType)
+            )
+                continue;
+
+            if (msg.role === "user" && firstUserEntryId === undefined) {
+                firstUserEntryId = entry.id;
+                firstUserText = textOf(msg.content);
+            }
+
+            // Haystack via haystackFor (empty = unsearchable role), then
+            // truncated before matching (ReDoS bound).
+            const rawHaystack = haystackFor(msg, match.includeToolCalls);
+            if (!rawHaystack) continue;
+            const haystack =
+                rawHaystack.length > MAX_HAYSTACK_CHARS
+                    ? rawHaystack.slice(0, MAX_HAYSTACK_CHARS)
+                    : rawHaystack;
+
+            const found = haystack.match(match.re);
+            if (!found) continue;
+
+            // Message timestamp preferred (runtime getMessageActivityTime
+            // semantics), entry timestamp as fallback.
+            const msgTs = messageTimestampMs(msg);
+            const tsMs = msgTs ?? Date.parse(entry.timestamp);
+            if (
+                match.sinceMs !== undefined &&
+                !(Number.isFinite(tsMs) && tsMs >= match.sinceMs)
+            )
+                continue;
+            if (
+                match.untilMs !== undefined &&
+                !(Number.isFinite(tsMs) && tsMs <= match.untilMs)
+            )
+                continue;
+
+            // Tier 1: the query hits the session's first user message (pi's
+            // de-facto title); tier 2: body-only hit. Exact equality on the
+            // first user message is the first intra-tier-1 tiebreak (literal
+            // queries only — a regex has no equality semantics).
+            const tier =
+                firstUserText !== undefined &&
+                entry.id === firstUserEntryId &&
+                match.re.test(firstUserText)
+                    ? 1
+                    : 2;
+            const rank: HitRank = {
+                tier,
+                exact:
+                    tier === 1 &&
+                    !match.regexQuery &&
+                    normalizeForTier(firstUserText ?? "") ===
+                        match.normalizedQuery,
+                ts: tsMs,
+                roleWeight: roleWeightOf(msg),
+            };
+
+            out.push({
+                hit: {
+                    sessionPath: session.sessionPath,
+                    sessionId: session.sessionId,
+                    entryId: entry.id,
+                    timestamp:
+                        msgTs !== undefined
+                            ? new Date(msgTs).toISOString()
+                            : entry.timestamp,
+                    role: msg.role,
+                    snippet: buildSnippet(haystack, found.index ?? 0),
+                },
+                rank,
+                fullText: options.withFullText ? rawHaystack : undefined,
+            });
+        }
+    }
+    return out;
+}
+
 export async function searchSessions(
     options: SearchSessionsOptions,
 ): Promise<SearchSessionsResult> {
@@ -367,21 +717,140 @@ export async function searchSessions(
         throw new Error(`search_sessions: invalid since "${options.since}".`);
     if (untilMs !== undefined && Number.isNaN(untilMs))
         throw new Error(`search_sessions: invalid until "${options.until}".`);
+    const startedAt = Date.now();
     const includeToolCalls = options.includeToolCalls === true;
+    const cwd = path.resolve(options.cwd ?? process.cwd());
+    const signal = options.signal;
+    const normalizedQuery = normalizeForTier(options.query);
 
-    const sessions = await SessionManager.list(process.cwd());
+    // Discovery: one level of the session directory (readdir + stat, no
+    // parse). SessionManager.list streams and JSON.parses every line of every
+    // file just to hand back paths that readdir already provides. The
+    // in-memory (--no-session) mode reports sessionDir "", where the default
+    // directory derived from cwd is the only correct source.
+    const sessionDir = options.sessionDir?.trim() || undefined;
+    const scope = options.scope === "all" ? "all" : "project";
+
+    // Discovery yields one entry per session file. Project scope is one
+    // readdir of the session directory. --all enumerates the sessions root's
+    // project directories: subagent tool dirs (sessions/finder/, ...) keep
+    // their jsonl one level deeper (sessions/<tool>/<runId>/) and contribute
+    // nothing, so the subagent trees stay excluded by construction.
+    const discovered: Array<{ path: string; id?: string }> = [];
+    let viaList = false;
+    let allDegraded = false;
+
+    const readJsonlDir = (
+        dir: string,
+    ): Array<{ path: string; id?: string }> => {
+        try {
+            return fs
+                .readdirSync(dir)
+                .filter((name) => name.endsWith(".jsonl"))
+                .map((name) => ({ path: path.join(dir, name) }));
+        } catch {
+            return [];
+        }
+    };
+
+    if (scope === "all" && sessionDir) {
+        const root = path.join(getAgentDir(), "sessions");
+        const currentDirAbs = path.resolve(sessionDir);
+        if (path.dirname(currentDirAbs) === path.resolve(root)) {
+            let dirNames: string[] = [];
+            try {
+                dirNames = fs
+                    .readdirSync(root, { withFileTypes: true })
+                    .filter((entry) => entry.isDirectory())
+                    .map((entry) => entry.name);
+            } catch {
+                dirNames = [];
+            }
+            for (const name of dirNames) {
+                discovered.push(...readJsonlDir(path.join(root, name)));
+            }
+        } else {
+            // Custom --session-dir outside the sessions root: the root no
+            // longer describes this installation, so --all degrades to
+            // project scope instead of scanning unrelated directories.
+            allDegraded = true;
+            discovered.push(...readJsonlDir(sessionDir));
+        }
+    } else if (sessionDir) {
+        discovered.push(...readJsonlDir(sessionDir));
+    } else {
+        // In-memory mode (--no-session): getSessionDir() is "", so the
+        // SessionManager listings are the only correct source (double parse
+        // accepted in this degraded mode). For --all, SessionInfo.cwd is the
+        // ownership key since there is no sessionDir to compare against.
+        const infos =
+            scope === "all"
+                ? await SessionManager.listAll()
+                : await SessionManager.list(cwd);
+        for (const info of infos) {
+            discovered.push({ path: info.path, id: info.id });
+        }
+        viaList = true;
+    }
+
     const currentAbs = options.currentSessionFile
         ? path.resolve(options.currentSessionFile)
         : undefined;
 
-    const hits: SearchHit[] = [];
-    const skippedFiles: string[] = [];
-    let truncated = false;
-    let scanned = 0;
+    // Stat up front: the size cap needs it, mtime-desc keeps a familiar scan
+    // order (it no longer influences results — truncation happens after
+    // sorting), and stat failures become visible instead of silent.
+    const files: Array<{
+        path: string;
+        id?: string;
+        size: number;
+        mtimeMs: number;
+    }> = [];
+    const unreadable: string[] = [];
+    for (const item of discovered) {
+        try {
+            const st = fs.statSync(item.path);
+            files.push({ ...item, size: st.size, mtimeMs: st.mtimeMs });
+        } catch {
+            unreadable.push(shortenPath(item.path));
+        }
+    }
+    files.sort((a, b) => b.mtimeMs - a.mtimeMs);
 
-    for (const session of sessions) {
-        if (hits.length >= max) {
-            truncated = true;
+    // Session-level grouping: one representative hit per session (best rank),
+    // the session's remaining matching messages counted as more=N. This is
+    // what keeps a chatty session from filling the whole result budget.
+    const groups = new Map<
+        string,
+        {
+            sessionPath: string;
+            sessionId: string;
+            best: SearchHit;
+            rank: HitRank;
+            total: number;
+            /** --all ownership key: the current project's sessions rank first. */
+            isCurrentProject: boolean;
+        }
+    >();
+    const skippedFiles: string[] = [];
+    let scanned = 0;
+    let truncated: string | undefined;
+    for (const file of files) {
+        if (signal?.aborted) {
+            truncated = "aborted";
+            break;
+        }
+        if (Date.now() - startedAt > SOFT_BUDGET_MS) {
+            truncated = "time-budget";
+            break;
+        }
+        // Yield between files: the parse loop below is fully synchronous and
+        // would otherwise freeze the TUI for the whole scan. The yield point
+        // doubles as the cancellation checkpoint (the slash-command path has
+        // no signal, so it simply never aborts).
+        await new Promise((resolve) => setImmediate(resolve));
+        if (signal?.aborted) {
+            truncated = "aborted";
             break;
         }
 
@@ -390,7 +859,7 @@ export async function searchSessions(
         // deserve exclusion when they ARE the current session).
         if (
             currentAbs &&
-            path.resolve(session.path) === currentAbs &&
+            path.resolve(file.path) === currentAbs &&
             options.includeCurrentSession !== true
         ) {
             continue;
@@ -398,94 +867,147 @@ export async function searchSessions(
 
         // Size cap (upstream convention): skip oversized files, keep the skip
         // visible. Sessions are written live and can legitimately grow large.
-        let stat: fs.Stats;
-        try {
-            stat = fs.statSync(session.path);
-        } catch {
-            continue;
-        }
-        if (stat.size > MAX_SESSION_FILE_BYTES) {
+        if (file.size > MAX_SESSION_FILE_BYTES) {
             skippedFiles.push(
-                `${shortenPath(session.path)} (${Math.round(stat.size / 1024)} KB)`,
+                `${shortenPath(file.path)} (${Math.round(file.size / 1024)} KB)`,
             );
             continue;
         }
 
+        // Read once, parse only when the raw text can match: a literal query
+        // that does not appear in the file's raw JSONL text cannot appear in
+        // any parsed haystack either, so the parse is skipped entirely. This
+        // is the rg coarse-filter role, minus the second read on hits (the
+        // text is already in hand) and minus abandoned-branch false hits
+        // (the active-branch projection happens after the prefilter).
+        let rawText: string;
+        try {
+            rawText = readSessionText(file.path);
+        } catch {
+            unreadable.push(shortenPath(file.path));
+            continue;
+        }
+        // Case-insensitive: the literal query regex carries the `i` flag, so
+        // a case-sensitive prefilter would drop real hits ("Goal" vs "goal").
+        // A regex test is ~8x cheaper than lowercasing the whole file (no
+        // 50MB+ allocation). JSON-special characters (quote, backslash,
+        // control chars) appear escaped on disk, so those queries fall back
+        // to the escaped-needle substring test. Known gap: a query spanning
+        // two text parts of one message matches the joined haystack but not
+        // the raw line — rare, accepted.
+        if (!isRegexQuery(options.query)) {
+            const jsonSafe = !/["\\\u0000-\u001f]/.test(options.query);
+            const prefilterHit = jsonSafe
+                ? re.test(rawText)
+                : rawText
+                      .toLowerCase()
+                      .includes(
+                          JSON.stringify(options.query)
+                              .slice(1, -1)
+                              .toLowerCase(),
+                      );
+            if (!prefilterHit) continue;
+        }
+
         let header, entries;
         try {
-            ({ header, entries } = loadSessionEntries(session.path));
+            ({ header, entries } = parseSessionText(rawText));
         } catch {
+            unreadable.push(shortenPath(file.path));
             continue;
+        }
+        // SessionManager.list silently drops files whose first line is not a
+        // session header (buildSessionInfo returns null); readdir discovery
+        // has no such filter, so enforce it here — and never let a sessionId
+        // degrade to undefined.
+        if (!header) {
+            unreadable.push(shortenPath(file.path));
+            continue;
+        }
+        // Project-scope cwd filter, mirroring SessionManager.list's filterCwd
+        // (sessionCwdMatches): a custom --session-dir can hold sessions of
+        // several projects. A missing header cwd is not grounds for exclusion.
+        // The list fallback already applied this filter; --all deliberately
+        // skips it (cross-project results are the point).
+        if (scope === "project" && !viaList) {
+            const sessionCwd =
+                typeof header.cwd === "string" ? header.cwd : "";
+            if (sessionCwd && path.resolve(sessionCwd) !== cwd) continue;
         }
         scanned++;
 
-        const sessionId = header?.id ?? session.id;
-        // The resolved active-branch entry list — the same list
-        // buildSessionContext projects into context.messages (each entry yields
-        // 0/1 messages via sessionEntryToContextMessages, in order), so entry →
-        // message pairing is exact: the entry id IS the read_session_entry
-        // drill handle (same zip read-session.ts's alignAnnotations relies on).
-        const contextEntries = buildContextEntries(entries);
-        for (const entry of contextEntries) {
-            if (hits.length >= max) {
-                truncated = true;
-                break;
-            }
-            for (const msg of sessionEntryToContextMessages(entry)) {
-                // Self-reference guard: the slash command injects its own
-                // result as a custom message; searching it would self-amplify.
-                if (
-                    msg.role === "custom" &&
-                    SELF_EXCLUDED_CUSTOM_TYPES.has(msg.customType)
-                )
-                    continue;
-
-                // Haystack via haystackFor (empty = unsearchable role), then
-                // truncated before matching (ReDoS bound).
-                let haystack = haystackFor(msg, includeToolCalls);
-                if (!haystack) continue;
-                if (haystack.length > MAX_HAYSTACK_CHARS)
-                    haystack = haystack.slice(0, MAX_HAYSTACK_CHARS);
-
-                const match = haystack.match(re);
-                if (!match) continue;
-
-                const tsMs = Date.parse(entry.timestamp);
-                if (
-                    sinceMs !== undefined &&
-                    !(Number.isFinite(tsMs) && tsMs >= sinceMs)
-                )
-                    continue;
-                if (
-                    untilMs !== undefined &&
-                    !(Number.isFinite(tsMs) && tsMs <= untilMs)
-                )
-                    continue;
-
-                hits.push({
-                    sessionPath: session.path,
-                    sessionId,
-                    entryId: entry.id,
-                    timestamp: entry.timestamp,
-                    role: msg.role,
-                    snippet: buildSnippet(haystack, match.index ?? 0),
-                });
-                if (hits.length >= max) {
-                    truncated = true;
-                    break;
+        const sessionId = header.id ?? file.id ?? "";
+        // Ownership key for --all ordering: the current project's sessions
+        // rank first. In-memory --all has no sessionDir to compare against,
+        // so header.cwd is the key there.
+        const isCurrentProject =
+            scope === "project"
+                ? true
+                : viaList
+                  ? typeof header.cwd === "string" &&
+                    path.resolve(header.cwd) === cwd
+                  : path.dirname(file.path) === path.resolve(sessionDir ?? "");
+        const matched = collectEntryHits(
+            entries,
+            {
+                re,
+                regexQuery: isRegexQuery(options.query),
+                normalizedQuery,
+                sinceMs,
+                untilMs,
+                includeToolCalls,
+            },
+            { sessionPath: file.path, sessionId },
+        );
+        for (const { hit, rank } of matched) {
+            const group = groups.get(file.path);
+            if (group) {
+                group.total++;
+                if (betterRank(rank, group.rank)) {
+                    group.best = hit;
+                    group.rank = rank;
                 }
+            } else {
+                groups.set(file.path, {
+                    sessionPath: file.path,
+                    sessionId,
+                    best: hit,
+                    rank,
+                    total: 1,
+                    isCurrentProject,
+                });
             }
-            if (hits.length >= max) break;
         }
     }
 
-    hits.sort((a, b) => {
-        const ta = Date.parse(a.timestamp);
-        const tb = Date.parse(b.timestamp);
-        return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+    // Session-level output: one representative hit per session, ordered by
+    // (current project first, tier asc, exact-first-message, newest, role
+    // weight), then truncated. Truncation happens after the full scan +
+    // ordering, so the budget is spent on the best sessions rather than on
+    // whichever was scanned first.
+    const ordered = [...groups.values()].sort((a, b) => {
+        if (a.isCurrentProject !== b.isCurrentProject)
+            return a.isCurrentProject ? -1 : 1;
+        return compareRank(a.rank, b.rank);
     });
+    const representatives: SearchHit[] = ordered.map((g) =>
+        g.total > 1 ? { ...g.best, more: g.total - 1 } : g.best,
+    );
+    const finalHits = representatives.slice(0, max);
+    if (representatives.length > finalHits.length && truncated === undefined)
+        truncated = "maxResults";
 
-    return { hits, truncated, skippedFiles, scanned };
+    return {
+        hits: finalHits,
+        truncated,
+        skippedFiles,
+        unreadable,
+        scanned,
+        listed: discovered.length,
+        ms: Date.now() - startedAt,
+        scope,
+        allDegraded,
+    };
 }
 
 /** Format hits for the tool result / slash command: the output contract lines. */
@@ -496,26 +1018,210 @@ export function formatHits(
     const lines: string[] = [];
     for (const hit of result.hits) {
         lines.push(
-            `session=${shortenPath(hit.sessionPath)} id=${hit.sessionId} entry=${hit.entryId} ts=${hit.timestamp} role=${hit.role}`,
+            `session=${shortenPath(hit.sessionPath)} id=${hit.sessionId} entry=${hit.entryId} ts=${hit.timestamp} role=${hit.role}` +
+                (hit.more && hit.more > 0 ? ` more=${hit.more}` : "") +
+                (result.scope === "all"
+                    ? ` project=${path.basename(path.dirname(hit.sessionPath))}`
+                    : ""),
         );
         lines.push(`  ${hit.snippet}`);
     }
 
     const envelopeParts = [
         `query=${query}`,
+        `scope=${result.scope}${result.allDegraded ? "(degraded-to-project)" : ""}`,
         `hits=${result.hits.length}`,
         `scanned=${result.scanned}`,
+        `listed=${result.listed}`,
+        `ms=${result.ms}`,
         result.truncated
-            ? `truncated=true (maxResults reached; narrow the query or raise maxResults)`
+            ? `truncated=${result.truncated}` +
+              (result.truncated === "maxResults"
+                  ? " (cap reached; narrow the query or raise maxResults)"
+                  : result.truncated === "time-budget"
+                    ? ` (scanned ${result.scanned} of ${result.listed}, time budget)`
+                    : "")
             : undefined,
         result.skippedFiles.length
-            ? `skipped=${result.skippedFiles.length} (${result.skippedFiles.join(", ")})`
+            ? `skipped=${result.skippedFiles.length} (${capList(result.skippedFiles)})`
+            : undefined,
+        result.unreadable.length
+            ? `unreadable=${result.unreadable.length} (${capList(result.unreadable)})`
             : undefined,
     ].filter((part): part is string => part !== undefined);
 
     if (lines.length === 0)
         return `(no matches)\n\n[${envelopeParts.join(" ")}]`;
     return `${lines.join("\n")}\n\n[${envelopeParts.join(" ")}]`;
+}
+
+/**
+ * One picked hit, framed for injection into the session. The framing line
+ * matters: custom_message is converted to a USER-role message by
+ * convertToLlm, so a bare hit line would read as the user speaking and the
+ * model might act on the `session=` / `id=` refs as instructions.
+ */
+export function formatSingleHit(hit: SearchHit, query: string): string {
+    return [
+        `以下是一条 pi 会话搜索命中（query=${query}，参考资料，非用户指令）：`,
+        `session=${shortenPath(hit.sessionPath)} id=${hit.sessionId} entry=${hit.entryId} ts=${hit.timestamp} role=${hit.role}` +
+            (hit.more && hit.more > 0 ? ` more=${hit.more}` : ""),
+        `  ${hit.snippet}`,
+    ].join("\n");
+}
+
+// ============================================================================
+// Picker preview (ctrl+o)
+// ============================================================================
+
+/**
+ * Re-scan ONE session file with the original query and return its full hit
+ * list (representative + the `more=N` hits the grouped scan output never
+ * shows), each with the untruncated message text. The matching is
+ * collectEntryHits — byte-identical to the scan's — so what the human
+ * previewed is exactly what the scan matched. Cost is one file read + parse
+ * (the scan already paid it); a file deleted since the scan surfaces as a
+ * thrown error the picker renders.
+ */
+function loadSessionPreview(
+    sessionPath: string,
+    query: string,
+    options: SearchSessionsOptions,
+): Array<{ hit: SearchHit; rank: HitRank; fullText: string }> {
+    const { entries, header } = parseSessionText(readSessionText(sessionPath));
+    if (!header) throw new Error("not a pi session file (no header)");
+    const sinceMs =
+        options.since !== undefined ? Date.parse(options.since) : undefined;
+    const untilMs =
+        options.until !== undefined ? Date.parse(options.until) : undefined;
+    const matched = collectEntryHits(
+        entries,
+        {
+            re: compileQuery(query),
+            regexQuery: isRegexQuery(query),
+            normalizedQuery: normalizeForTier(query),
+            sinceMs,
+            untilMs,
+            includeToolCalls: options.includeToolCalls === true,
+        },
+        { sessionPath, sessionId: header.id ?? "" },
+        { withFullText: true },
+    );
+    return matched.map((record) => ({
+        hit: record.hit,
+        rank: record.rank,
+        fullText: record.fullText ?? "",
+    }));
+}
+
+/**
+ * Preview panel content: the picked hit's FULL text first (the picker row
+ * only ever shows a 100-char slice), then the session's other matching
+ * messages in scan order, so the human can see what a narrower query would
+ * have to target. Ordered by the same rank key the scan uses.
+ */
+function buildPreviewContent(
+    hit: SearchHit,
+    previewHits: Array<{ hit: SearchHit; rank: HitRank; fullText: string }>,
+): string {
+    const ordered = [...previewHits].sort((a, b) => compareRank(a.rank, b.rank));
+    const picked = ordered.find((item) => item.hit.entryId === hit.entryId);
+    const others = ordered.filter((item) => item.hit.entryId !== hit.entryId);
+    const lines: string[] = [];
+    lines.push(
+        `  session=${shortenPath(hit.sessionPath)} id=${hit.sessionId}`,
+    );
+    lines.push("");
+    lines.push(
+        `  ── picked hit · ${hit.role} · ${hit.timestamp} · entry=${hit.entryId} ──`,
+    );
+    lines.push(...indentBlock(picked?.fullText || hit.snippet));
+    if (others.length > 0) {
+        lines.push("");
+        lines.push(
+            `  ── other hits in this session (${others.length}) ──`,
+        );
+        for (const item of others) {
+            lines.push("");
+            lines.push(
+                `  ▸ ${item.hit.timestamp} · ${item.hit.role} · entry=${item.hit.entryId}`,
+            );
+            lines.push(...indentBlock(item.fullText || item.hit.snippet));
+        }
+    } else {
+        lines.push("");
+        lines.push("  (no other hits in this session)");
+    }
+    return lines.join("\n");
+}
+
+/** Indent a (possibly multi-line) block by two spaces. */
+function indentBlock(text: string): string[] {
+    return text
+        .split("\n")
+        .map((line) => (line.trim() ? `  ${line}` : line));
+}
+
+/**
+ * Windowed plain-text viewer for the preview panel (the scroll pattern from
+ * lib/session-preview.ts, minus markdown): wraps once per width, keeps its
+ * own scroll offset, and clamps it to the content. Height is budgeted from
+ * the terminal so the panel never claims the whole screen — the picker's
+ * list viewport is the reference size.
+ */
+class PreviewText {
+    private wrapped: string[] | undefined;
+    private wrappedWidth = 0;
+    private scrollOffset = 0;
+    private viewHeight = 0;
+
+    constructor(
+        private readonly tui: TUI,
+        private readonly text: string,
+    ) {}
+
+    render(width: number): string[] {
+        const rows = this.tui.terminal.rows || 24;
+        const contentHeight = Math.max(
+            4,
+            Math.min(12, Math.floor(rows * 0.4)),
+        );
+        if (this.wrapped === undefined || this.wrappedWidth !== width) {
+            this.wrapped = wrapTextWithAnsi(this.text, Math.max(10, width));
+            this.wrappedWidth = width;
+        }
+        this.viewHeight = contentHeight;
+        const maxScroll = Math.max(0, this.wrapped.length - contentHeight);
+        this.scrollOffset = Math.max(
+            0,
+            Math.min(this.scrollOffset, maxScroll),
+        );
+        const visible = this.wrapped.slice(
+            this.scrollOffset,
+            this.scrollOffset + contentHeight,
+        );
+        const lines = visible.map((line) => truncateToWidth(line, width));
+        while (lines.length < contentHeight) lines.push("");
+        return lines;
+    }
+
+    invalidate(): void {
+        this.wrapped = undefined;
+    }
+
+    scrollBy(delta: number): void {
+        const total = this.wrapped?.length ?? 0;
+        const maxScroll = Math.max(0, total - this.viewHeight);
+        this.scrollOffset = Math.max(
+            0,
+            Math.min(this.scrollOffset + delta, maxScroll),
+        );
+    }
+
+    /** Visible line count (0 before the first render); drives page scrolls. */
+    get viewport(): number {
+        return this.viewHeight;
+    }
 }
 
 // ============================================================================
@@ -604,7 +1310,7 @@ export default function (pi: ExtensionAPI) {
         async execute(
             _toolCallId,
             params,
-            _signal,
+            signal,
             _onUpdate,
             ctx,
         ): Promise<AgentToolResult<SearchSessionsDetails>> {
@@ -616,8 +1322,12 @@ export default function (pi: ExtensionAPI) {
                     includeToolCalls: params.includeToolCalls,
                     maxResults: params.maxResults,
                     includeCurrentSession: params.includeCurrentSession,
+                    scope: params.scope,
                     currentSessionFile:
                         ctx.sessionManager.getSessionFile() ?? undefined,
+                    sessionDir: ctx.sessionManager.getSessionDir(),
+                    cwd: ctx.cwd,
+                    signal,
                 });
                 const text = formatHits(result, params.query);
                 return {
@@ -626,6 +1336,12 @@ export default function (pi: ExtensionAPI) {
                         hitCount: result.hits.length,
                         truncated: result.truncated,
                         skippedFiles: result.skippedFiles,
+                        unreadable: result.unreadable,
+                        listed: result.listed,
+                        scanned: result.scanned,
+                        ms: result.ms,
+                        scope: result.scope,
+                        allDegraded: result.allDegraded,
                     },
                 };
             } catch (error) {
@@ -656,20 +1372,376 @@ export default function (pi: ExtensionAPI) {
         },
     });
 
+
+    // ── /search-sessions ─────────────────────────────────────────────────
+    // Two phases, both cancellable, and NOTHING is written to the session
+    // unless the human explicitly picks a hit:
+    //   1. scan under a CancellableLoader (Esc aborts the scan),
+    //   2. hit picker (Enter sends the picked hit into the session as a
+    //      framed custom message; Esc writes nothing — a pure search).
+    // Without a UI (print/json modes) the command degrades to the historical
+    // behavior: inject the full result set.
     pi.registerCommand("search-sessions", {
-        description: "Search the current project's pi sessions",
+        description: "Search the current project's pi sessions (--all for every project)",
         handler: async (args, ctx) => {
             const parsed = parseSearchArgs(args);
-            const result = await searchSessions({
-                ...parsed,
+            const options: SearchSessionsOptions = {
+                query: parsed.query,
+                since: parsed.since,
+                until: parsed.until,
+                maxResults: parsed.maxResults,
+                includeToolCalls: parsed.includeToolCalls,
+                scope: parsed.all ? "all" : "project",
                 currentSessionFile:
                     ctx.sessionManager.getSessionFile() ?? undefined,
-            });
-            // Injected as a display-only custom message; no new turn.
+                sessionDir: ctx.sessionManager.getSessionDir(),
+                cwd: ctx.cwd,
+            };
+
+            if (!ctx.hasUI) {
+                const result = await searchSessions(options);
+                await pi.sendMessage(
+                    {
+                        customType: "search-sessions",
+                        content: formatHits(result, parsed.query),
+                        display: true,
+                    },
+                    { triggerTurn: false },
+                );
+                return;
+            }
+
+            // Phase 1: scan under a cancellable loader. ctx.signal only
+            // exists while the agent streams, so the loader owns cancellation
+            // here (Esc → abort → the scan stops, nothing is written).
+            const result = await ctx.ui.custom<SearchSessionsResult | null>(
+                (tui, theme, _keybindings, done) => {
+                    const loader = new CancellableLoader(
+                        tui,
+                        (str) => theme.fg("accent", str),
+                        (str) => theme.fg("dim", str),
+                        `searching "${parsed.query}"${parsed.all ? " (all projects)" : ""}...`,
+                    );
+                    let settled = false;
+                    const finish = (value: SearchSessionsResult | null) => {
+                        if (settled) return;
+                        settled = true;
+                        done(value);
+                    };
+                    loader.onAbort = () => finish(null);
+                    loader.start();
+                    searchSessions({ ...options, signal: loader.signal })
+                        .then(finish)
+                        .catch((error) => {
+                            ctx.ui.notify(
+                                `search-sessions: ${error instanceof Error ? error.message : String(error)}`,
+                                "error",
+                            );
+                            finish(null);
+                        });
+                    return {
+                        render: (width: number) => loader.render(width),
+                        invalidate: () => loader.invalidate(),
+                        handleInput: (data: string) =>
+                            loader.handleInput(data),
+                        dispose: () => loader.dispose(),
+                    };
+                },
+            );
+
+            if (!result) return; // aborted or failed: nothing written
+            if (result.hits.length === 0) {
+                ctx.ui.notify(
+                    `search-sessions: no matches for "${parsed.query}"`,
+                    "warning",
+                );
+                return;
+            }
+
+            // Phase 2: hit picker. The filter box filters the FETCHED hits
+            // only (never re-scans the corpus). Enter injects the picked hit;
+            // Esc/ctrl+c closes without writing anything.
+            const items: SelectItem[] = result.hits.map((hit, index) => ({
+                value: String(index),
+                label:
+                    `${shortenPath(hit.sessionPath)}  ${hit.timestamp}  ${hit.role}` +
+                    (hit.more && hit.more > 0 ? `  (+${hit.more})` : ""),
+                description: preview(hit.snippet, 100),
+            }));
+            const pickedIndex = await ctx.ui.custom<string | null>(
+                (tui, theme, keybindings, done) => {
+                    // The root swaps between the list view (container) and
+                    // the preview view (ctrl+o): one component, two modes,
+                    // no nested overlays to unwind.
+                    const root = new Container();
+
+                    const container = new Container();
+                    container.addChild(
+                        new DynamicBorder((str) => theme.fg("accent", str)),
+                    );
+                    container.addChild(
+                        new Text(
+                            theme.fg(
+                                "accent",
+                                theme.bold(
+                                    ` Search hits: "${parsed.query}" (${result.hits.length})`,
+                                ),
+                            ),
+                            0,
+                            0,
+                        ),
+                    );
+                    const searchInput = new Input();
+                    container.addChild(searchInput);
+                    container.addChild(new Spacer(1));
+
+                    const listContainer = new Container();
+                    container.addChild(listContainer);
+                    container.addChild(
+                        new Text(
+                            theme.fg(
+                                "dim",
+                                "Type to filter • ctrl+o previews the full text • enter to send the hit into the session • esc to cancel (nothing is written)",
+                            ),
+                            0,
+                            0,
+                        ),
+                    );
+                    container.addChild(
+                        new DynamicBorder((str) => theme.fg("accent", str)),
+                    );
+
+                    let filteredItems = items;
+                    let selectList: SelectList | null = null;
+
+                    const updateList = () => {
+                        listContainer.clear();
+                        if (filteredItems.length === 0) {
+                            listContainer.addChild(
+                                new Text(
+                                    theme.fg("warning", "  No matching hits"),
+                                    0,
+                                    0,
+                                ),
+                            );
+                            selectList = null;
+                            return;
+                        }
+                        selectList = new SelectList(
+                            filteredItems,
+                            Math.min(filteredItems.length, 12),
+                            {
+                                selectedPrefix: (text) =>
+                                    theme.fg("accent", text),
+                                selectedText: (text) =>
+                                    theme.fg("accent", text),
+                                description: (text) => theme.fg("muted", text),
+                                scrollInfo: (text) => theme.fg("dim", text),
+                                noMatch: (text) => theme.fg("warning", text),
+                            },
+                        );
+                        selectList.onSelect = (item) => done(item.value);
+                        selectList.onCancel = () => done(null);
+                        listContainer.addChild(selectList);
+                    };
+
+                    const applyFilter = () => {
+                        const q = searchInput.getValue();
+                        filteredItems = q
+                            ? fuzzyFilter(
+                                  items,
+                                  q,
+                                  (item) =>
+                                      `${item.label} ${item.description ?? ""} ${item.value}`,
+                              )
+                            : items;
+                        updateList();
+                    };
+
+                    applyFilter();
+                    root.addChild(container);
+
+                    // ── preview mode (ctrl+o) ──
+                    let mode: "list" | "preview" = "list";
+                    let previewText: PreviewText | null = null;
+
+                    const showList = () => {
+                        mode = "list";
+                        previewText = null;
+                        root.clear();
+                        root.addChild(container);
+                    };
+
+                    const showPreview = () => {
+                        const item = selectList?.getSelectedItem();
+                        if (!item) return;
+                        const hit = result.hits[Number(item.value)];
+                        if (!hit) return;
+                        const previewView = new Container();
+                        previewView.addChild(
+                            new DynamicBorder((str) => theme.fg("accent", str)),
+                        );
+                        previewView.addChild(
+                            new Text(
+                                theme.fg(
+                                    "accent",
+                                    theme.bold(
+                                        ` Preview: "${parsed.query}" — ${hit.role} · ${hit.timestamp}`,
+                                    ),
+                                ),
+                                0,
+                                0,
+                            ),
+                        );
+                        let content: string;
+                        try {
+                            content = buildPreviewContent(
+                                hit,
+                                loadSessionPreview(
+                                    hit.sessionPath,
+                                    parsed.query,
+                                    options,
+                                ),
+                            );
+                        } catch (error) {
+                            content = `  (preview failed: ${error instanceof Error ? error.message : String(error)})`;
+                        }
+                        previewText = new PreviewText(tui, content);
+                        previewView.addChild(previewText);
+                        previewView.addChild(
+                            new Text(
+                                theme.fg(
+                                    "dim",
+                                    "esc/o: back to the list • ↑/↓ or j/k: scroll • ctrl+d/u: half page",
+                                ),
+                                0,
+                                0,
+                            ),
+                        );
+                        previewView.addChild(
+                            new DynamicBorder((str) => theme.fg("accent", str)),
+                        );
+                        mode = "preview";
+                        root.clear();
+                        root.addChild(previewView);
+                    };
+
+                    return {
+                        render(width: number) {
+                            return root.render(width);
+                        },
+                        invalidate() {
+                            root.invalidate();
+                        },
+                        handleInput(data: string) {
+                            if (mode === "preview") {
+                                if (
+                                    keybindings.matches(data, "tui.select.cancel") ||
+                                    keybindings.matches(data, "tui.select.confirm") ||
+                                    matchesKey(data, "o") ||
+                                    matchesKey(data, Key.ctrl("o"))
+                                ) {
+                                    showList();
+                                    tui.requestRender();
+                                    return;
+                                }
+                                if (
+                                    keybindings.matches(data, "tui.select.up") ||
+                                    matchesKey(data, "k")
+                                ) {
+                                    previewText?.scrollBy(-1);
+                                    tui.requestRender();
+                                    return;
+                                }
+                                if (
+                                    keybindings.matches(data, "tui.select.down") ||
+                                    matchesKey(data, "j")
+                                ) {
+                                    previewText?.scrollBy(1);
+                                    tui.requestRender();
+                                    return;
+                                }
+                                if (matchesKey(data, Key.ctrl("d"))) {
+                                    previewText?.scrollBy(
+                                        Math.floor(
+                                            (previewText?.viewport ?? 12) / 2,
+                                        ),
+                                    );
+                                    tui.requestRender();
+                                    return;
+                                }
+                                if (matchesKey(data, Key.ctrl("u"))) {
+                                    previewText?.scrollBy(
+                                        -Math.floor(
+                                            (previewText?.viewport ?? 12) / 2,
+                                        ),
+                                    );
+                                    tui.requestRender();
+                                    return;
+                                }
+                                if (
+                                    keybindings.matches(data, "tui.select.pageUp") ||
+                                    matchesKey(data, Key.left)
+                                ) {
+                                    previewText?.scrollBy(
+                                        -(previewText?.viewport ?? 12),
+                                    );
+                                    tui.requestRender();
+                                    return;
+                                }
+                                if (
+                                    keybindings.matches(data, "tui.select.pageDown") ||
+                                    matchesKey(data, Key.right)
+                                ) {
+                                    previewText?.scrollBy(
+                                        previewText?.viewport ?? 12,
+                                    );
+                                    tui.requestRender();
+                                    return;
+                                }
+                                // Swallow everything else: typing must not
+                                // reach the (hidden) filter box.
+                                return;
+                            }
+                            if (matchesKey(data, Key.ctrl("o"))) {
+                                showPreview();
+                                tui.requestRender();
+                                return;
+                            }
+                            if (
+                                keybindings.matches(data, "tui.select.up") ||
+                                keybindings.matches(data, "tui.select.down") ||
+                                keybindings.matches(data, "tui.select.confirm") ||
+                                keybindings.matches(data, "tui.select.cancel")
+                            ) {
+                                if (selectList) {
+                                    selectList.handleInput(data);
+                                } else if (
+                                    keybindings.matches(data, "tui.select.cancel")
+                                ) {
+                                    done(null);
+                                }
+                                tui.requestRender();
+                                return;
+                            }
+                            searchInput.handleInput(data);
+                            applyFilter();
+                            tui.requestRender();
+                        },
+                    };
+                },
+            );
+
+            if (pickedIndex === null) return; // Esc: nothing written
+            const hit = result.hits[Number(pickedIndex)];
+            if (!hit) return;
+            // Injected as a display-only custom message; no new turn. The
+            // customType stays in SELF_EXCLUDED_CUSTOM_TYPES so neither this
+            // injection nor the historical full-result ones self-amplify.
             await pi.sendMessage(
                 {
                     customType: "search-sessions",
-                    content: formatHits(result, parsed.query),
+                    content: formatSingleHit(hit, parsed.query),
                     display: true,
                 },
                 { triggerTurn: false },
