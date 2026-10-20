@@ -33,8 +33,9 @@ TUI 工具与编辑（`preview`、`view-image`、`files`、
 （`read-session.ts`：read_session、read_session_compaction、read_session_entry 三件套，只读解析 session
 JSONL；`find-session.ts`：search_sessions 工具 + /search-sessions 命令，无索引实时扫描：原始文本预滤 +
 活跃分支解析，会话级归组（代表命中 + more=N）与两级键排序（首条 user 消息命中优先），
-scope=all 可跨项目搜索（当前项目优先）；命令侧为两阶段可取消 picker（CancellableLoader 扫描 +
-命中选择，Esc 不写会话，Enter 才注入选中命中，ctrl+o 预览该命中全文与会话内其他命中））
+scope=all 可跨项目搜索（当前项目优先）；命令侧为常驻搜索面板（查询框 + 结果列表 + 扫描信封；
+Enter 上下文敏感：词干净时注入选中命中、词改动时重扫，Esc 不写会话，ctrl+o 预览该命中全文与
+会话内其他命中））
 也都是本目录的顶层扩展。
 扩展间共享的非扩展模块放在 `lib/` 子目录（`lib/rush.ts`：从 modes.json 解析 rush 模式的 provider/
 model/thinkingLevel，供 `answer`、`handoff` 与 `goal` 的 verifier 发起一次性 LLM 请求时使用；`lib/subagent.ts`：Subagent

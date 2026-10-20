@@ -32,16 +32,33 @@
  * summary is the only searchable copy of that stretch of history.
  *
  * ─ Command flow (human path) ─
- * `/search-sessions <query>` runs two cancellable phases and writes NOTHING
- * to the session unless the human explicitly picks a hit: (1) the scan runs
- * under a CancellableLoader (Esc aborts; ctx.signal is only live while the
- * agent streams, so the loader owns cancellation here), (2) a hit picker
- * (files.ts-style ctx.ui.custom + Input + SelectList; the filter box filters
- * the fetched hits only and never re-scans). Enter injects the picked hit as
- * a framed custom_message (formatSingleHit: custom_message converts to a
- * USER-role message downstream, so bare refs would read as instructions);
- * Esc closes with nothing written — a pure search. Without a UI (print/json
- * modes) the command degrades to injecting the full result set.
+ * `/search-sessions` opens ONE persistent panel: a query Input on top,
+ * results below, hint line at the bottom. It writes NOTHING to the session
+ * unless the human explicitly picks a hit. Esc while scanning aborts the
+ * scan (back to the previous results — `results` only ever changes on a
+ * successful scan); Esc while idle closes the panel, a pure search. Each
+ * scan owns a CancellableLoader (ctx.signal is only live while the agent
+ * streams) and a generation counter that makes stale settlements no-ops.
+ * Without a UI (print/json modes) the command degrades to the historical
+ * behavior: inject the full result set.
+ *
+ * Key contract (settled, do not re-litigate): Enter is state-sensitive by
+ * design. It re-scans when the box differs from the last scanned query (or
+ * nothing has been scanned yet, or the last scan was empty) and injects the
+ * selected hit when the box is unchanged and hits are visible. Tab is
+ * deliberately NOT the send key: it is the TUI's reserved
+ * autocomplete/focus key, and Enter=confirm is the repo-wide picker
+ * convention. The hint line always states Enter's current meaning; a
+ * mistaken Enter costs at most a redundant re-scan, never a wrong
+ * injection. The old two-phase flow (command args → loader → picker with a
+ * local filter box) is gone: the filter box could only narrow the already
+ * truncated result set, and re-searching cost a full command retype. A
+ * query written on the command line is still honored — it prefills the box
+ * and runs the first scan immediately.
+ *
+ * Picking a hit injects it as a framed custom_message (formatSingleHit:
+ * custom_message converts to a USER-role message downstream, so bare refs
+ * would read as instructions).
  *
  * ctrl+o in the picker opens a preview of the selected hit: the picked
  * message's FULL text (picker rows only ever show a 100-char slice) plus the
@@ -92,7 +109,6 @@ import {
 import {
     CancellableLoader,
     Container,
-    fuzzyFilter,
     Input,
     Key,
     matchesKey,
@@ -471,11 +487,11 @@ export function parseSearchArgs(args: string): {
         queryParts.push(token);
     }
 
+    // Query is OPTIONAL on the command path: a bare /search-sessions opens the
+    // search panel with an empty box (the interactive path is the primary one
+    // now). Unknown-flag errors stay loud — only the missing-query error is
+    // gone.
     const query = queryParts.join(" ").trim();
-    if (!query)
-        throw new Error(
-            "usage: /search-sessions [--since=ISO] [--until=ISO] [--max=N] [--include-tool-calls] [--all] <query>",
-        );
     return { query, since, until, maxResults, includeToolCalls, all };
 }
 
@@ -1374,15 +1390,26 @@ export default function (pi: ExtensionAPI) {
 
 
     // ── /search-sessions ─────────────────────────────────────────────────
-    // Two phases, both cancellable, and NOTHING is written to the session
-    // unless the human explicitly picks a hit:
-    //   1. scan under a CancellableLoader (Esc aborts the scan),
-    //   2. hit picker (Enter sends the picked hit into the session as a
-    //      framed custom message; Esc writes nothing — a pure search).
+    // ONE persistent panel (the no-arg invocation is the primary human path):
+    // a query Input on top, results below, hint line at the bottom. NOTHING is
+    // written to the session unless the human explicitly picks a hit. Esc
+    // while scanning aborts the scan (back to the previous results); Esc while
+    // idle closes the panel writing nothing — a pure search.
+    //
+    // Key contract (settled, do not re-litigate): Enter is state-sensitive by
+    // design. It re-scans when the box differs from the last scanned query (or
+    // nothing has been scanned yet) and injects the selected hit when the box
+    // is unchanged and hits are visible. Tab is deliberately NOT the send key:
+    // it is the TUI's reserved autocomplete/focus key, and Enter=confirm is
+    // the repo-wide picker convention. The hint line always states Enter's
+    // current meaning; a mistaken Enter costs at most a redundant re-scan,
+    // never a wrong injection.
+    //
     // Without a UI (print/json modes) the command degrades to the historical
     // behavior: inject the full result set.
     pi.registerCommand("search-sessions", {
-        description: "Search the current project's pi sessions (--all for every project)",
+        description:
+            "Search pi sessions interactively (opens a search panel; --all for every project)",
         handler: async (args, ctx) => {
             const parsed = parseSearchArgs(args);
             const options: SearchSessionsOptions = {
@@ -1411,337 +1438,433 @@ export default function (pi: ExtensionAPI) {
                 return;
             }
 
-            // Phase 1: scan under a cancellable loader. ctx.signal only
-            // exists while the agent streams, so the loader owns cancellation
-            // here (Esc → abort → the scan stops, nothing is written).
-            const result = await ctx.ui.custom<SearchSessionsResult | null>(
-                (tui, theme, _keybindings, done) => {
-                    const loader = new CancellableLoader(
-                        tui,
-                        (str) => theme.fg("accent", str),
-                        (str) => theme.fg("dim", str),
-                        `searching "${parsed.query}"${parsed.all ? " (all projects)" : ""}...`,
-                    );
-                    let settled = false;
-                    const finish = (value: SearchSessionsResult | null) => {
-                        if (settled) return;
-                        settled = true;
-                        done(value);
-                    };
-                    loader.onAbort = () => finish(null);
-                    loader.start();
-                    searchSessions({ ...options, signal: loader.signal })
-                        .then(finish)
-                        .catch((error) => {
-                            ctx.ui.notify(
-                                `search-sessions: ${error instanceof Error ? error.message : String(error)}`,
-                                "error",
-                            );
-                            finish(null);
-                        });
-                    return {
-                        render: (width: number) => loader.render(width),
-                        invalidate: () => loader.invalidate(),
-                        handleInput: (data: string) =>
-                            loader.handleInput(data),
-                        dispose: () => loader.dispose(),
-                    };
-                },
-            );
+            const picked = await ctx.ui.custom<{
+                hit: SearchHit;
+                query: string;
+            } | null>((tui, theme, keybindings, done) => {
+                const accent = (str: string) => theme.fg("accent", str);
+                const dim = (str: string) => theme.fg("dim", str);
 
-            if (!result) return; // aborted or failed: nothing written
-            if (result.hits.length === 0) {
-                ctx.ui.notify(
-                    `search-sessions: no matches for "${parsed.query}"`,
-                    "warning",
+                // ── state ──
+                // `results` only ever changes on a SUCCESSFUL scan, so an
+                // aborted scan restores the previous results by construction.
+                let results: SearchSessionsResult | null = null;
+                let lastScannedQuery = "";
+                let scanError: string | null = null;
+                let scanGen = 0;
+                let loader: CancellableLoader | null = null;
+                let mode: "list" | "preview" = "list";
+                let previewText: PreviewText | null = null;
+                let selectList: SelectList | null = null;
+
+                // ── static chrome (header) ──
+                const root = new Container();
+                const header = new Container();
+                header.addChild(new DynamicBorder(accent));
+                const scopeLabel = parsed.all ? "all projects" : "this project";
+                const bounds = [
+                    parsed.since ? `since ${parsed.since}` : "",
+                    parsed.until ? `until ${parsed.until}` : "",
+                    parsed.maxResults !== undefined
+                        ? `max ${parsed.maxResults}`
+                        : "",
+                ]
+                    .filter(Boolean)
+                    .join(" · ");
+                header.addChild(
+                    new Text(
+                        accent(
+                            theme.bold(
+                                ` Search sessions (${scopeLabel})${bounds ? ` — ${bounds}` : ""}`,
+                            ),
+                        ),
+                        0,
+                        0,
+                    ),
                 );
-                return;
-            }
+                const queryInput = new Input();
+                header.addChild(queryInput);
+                header.addChild(new Spacer(1));
 
-            // Phase 2: hit picker. The filter box filters the FETCHED hits
-            // only (never re-scans the corpus). Enter injects the picked hit;
-            // Esc/ctrl+c closes without writing anything.
-            const items: SelectItem[] = result.hits.map((hit, index) => ({
-                value: String(index),
-                label:
-                    `${shortenPath(hit.sessionPath)}  ${hit.timestamp}  ${hit.role}` +
-                    (hit.more && hit.more > 0 ? `  (+${hit.more})` : ""),
-                description: preview(hit.snippet, 100),
-            }));
-            const pickedIndex = await ctx.ui.custom<string | null>(
-                (tui, theme, keybindings, done) => {
-                    // The root swaps between the list view (container) and
-                    // the preview view (ctrl+o): one component, two modes,
-                    // no nested overlays to unwind.
-                    const root = new Container();
+                const listArea = new Container();
+                const footer = new Container();
+                // Persistent chrome lines: the hint must track every
+                // keystroke (its whole job is stating what Enter will do
+                // right now), and rebuilding the footer per keypress would
+                // reset the list selection.
+                const envelopeLineText = new Text("", 0, 0);
+                const hintLine = new Text("", 0, 0);
+                footer.addChild(envelopeLineText);
+                footer.addChild(hintLine);
+                footer.addChild(new DynamicBorder(accent));
+                root.addChild(header);
+                root.addChild(listArea);
+                root.addChild(footer);
 
-                    const container = new Container();
-                    container.addChild(
-                        new DynamicBorder((str) => theme.fg("accent", str)),
-                    );
-                    container.addChild(
-                        new Text(
-                            theme.fg(
-                                "accent",
-                                theme.bold(
-                                    ` Search hits: "${parsed.query}" (${result.hits.length})`,
-                                ),
+                // ── rendering ──
+                const buildItems = (): SelectItem[] =>
+                    (results?.hits ?? []).map((hit, index) => ({
+                        value: String(index),
+                        label:
+                            `${shortenPath(hit.sessionPath)}  ${hit.timestamp}  ${hit.role}` +
+                            (hit.more && hit.more > 0 ? `  (+${hit.more})` : ""),
+                        description: preview(hit.snippet, 100),
+                    }));
+
+                /**
+                 * The scan envelope, visible in the panel: re-scanning is the
+                 * primary narrowing lever now, so a maxResults-truncated result
+                 * the human cannot see would send them in circles.
+                 */
+                const envelopeLine = (): string | null => {
+                    if (!results) return null;
+                    const parts = [
+                        `${results.hits.length} hit${results.hits.length === 1 ? "" : "s"}`,
+                        `scanned ${results.scanned} of ${results.listed} files`,
+                        `${results.ms}ms`,
+                    ];
+                    if (results.truncated)
+                        parts.push(`truncated=${results.truncated}`);
+                    if (results.allDegraded)
+                        parts.push("scope degraded to this project");
+                    if (results.skippedFiles.length)
+                        parts.push(`skipped=${results.skippedFiles.length}`);
+                    if (results.unreadable.length)
+                        parts.push(`unreadable=${results.unreadable.length}`);
+                    return parts.join(" · ");
+                };
+
+                /** Dynamic hint: always states what Enter will do right now. */
+                const hintText = (): string => {
+                    if (loader)
+                        return "searching… · esc: abort (keeps previous results)";
+                    if (scanError) return "enter: retry · esc: close";
+                    if (!results)
+                        return "type a query · enter: search · esc: close (nothing is written)";
+                    if (results.hits.length === 0)
+                        return "no matches · enter: re-search · esc: close";
+                    const box = queryInput.getValue().trim();
+                    if (box !== lastScannedQuery)
+                        return `↑↓ select · enter: re-search "${box}" · the list is results for "${lastScannedQuery}" · esc: close`;
+                    return "↑↓ select · enter: send hit into session · ctrl+o: preview · esc: close";
+                };
+
+                /** Repaint the two footer lines from current state. */
+                const updateChrome = () => {
+                    const envelope = envelopeLine();
+                    envelopeLineText.setText(envelope ? dim(` ${envelope}`) : "");
+                    hintLine.setText(dim(` ${hintText()}`));
+                };
+
+                const render = () => {
+                    if (mode !== "list") return;
+                    listArea.clear();
+                    envelopeLineText.setText("");
+                    selectList = null;
+                    if (loader) {
+                        listArea.addChild(loader);
+                    } else if (scanError) {
+                        listArea.addChild(
+                            new Text(theme.fg("error", ` ${scanError}`), 0, 0),
+                        );
+                    } else if (!results) {
+                        listArea.addChild(
+                            new Text(
+                                dim(" (no search yet — type a query above)"),
+                                0,
+                                0,
                             ),
-                            0,
-                            0,
-                        ),
-                    );
-                    const searchInput = new Input();
-                    container.addChild(searchInput);
-                    container.addChild(new Spacer(1));
-
-                    const listContainer = new Container();
-                    container.addChild(listContainer);
-                    container.addChild(
-                        new Text(
-                            theme.fg(
-                                "dim",
-                                "Type to filter • ctrl+o previews the full text • enter to send the hit into the session • esc to cancel (nothing is written)",
+                        );
+                    } else if (results.hits.length === 0) {
+                        listArea.addChild(
+                            new Text(
+                                theme.fg("warning", " No matching hits"),
+                                0,
+                                0,
                             ),
-                            0,
-                            0,
-                        ),
-                    );
-                    container.addChild(
-                        new DynamicBorder((str) => theme.fg("accent", str)),
-                    );
-
-                    let filteredItems = items;
-                    let selectList: SelectList | null = null;
-
-                    const updateList = () => {
-                        listContainer.clear();
-                        if (filteredItems.length === 0) {
-                            listContainer.addChild(
-                                new Text(
-                                    theme.fg("warning", "  No matching hits"),
-                                    0,
-                                    0,
-                                ),
-                            );
-                            selectList = null;
-                            return;
-                        }
+                        );
+                    } else {
+                        const items = buildItems();
                         selectList = new SelectList(
-                            filteredItems,
-                            Math.min(filteredItems.length, 12),
+                            items,
+                            Math.min(items.length, 12),
                             {
-                                selectedPrefix: (text) =>
-                                    theme.fg("accent", text),
-                                selectedText: (text) =>
-                                    theme.fg("accent", text),
+                                selectedPrefix: (text) => accent(text),
+                                selectedText: (text) => accent(text),
                                 description: (text) => theme.fg("muted", text),
-                                scrollInfo: (text) => theme.fg("dim", text),
+                                scrollInfo: (text) => dim(text),
                                 noMatch: (text) => theme.fg("warning", text),
                             },
                         );
-                        selectList.onSelect = (item) => done(item.value);
-                        selectList.onCancel = () => done(null);
-                        listContainer.addChild(selectList);
-                    };
+                        listArea.addChild(selectList);
+                    }
+                    updateChrome();
+                    // The scan settles asynchronously (and disposes its
+                    // loader, which owned the repaint loop): without an
+                    // explicit request the screen freezes on the last painted
+                    // frame — the loader.
+                    tui.requestRender();
+                };
 
-                    const applyFilter = () => {
-                        const q = searchInput.getValue();
-                        filteredItems = q
-                            ? fuzzyFilter(
-                                  items,
-                                  q,
-                                  (item) =>
-                                      `${item.label} ${item.description ?? ""} ${item.value}`,
-                              )
-                            : items;
-                        updateList();
-                    };
+                const showList = () => {
+                    mode = "list";
+                    previewText = null;
+                    root.clear();
+                    root.addChild(header);
+                    root.addChild(listArea);
+                    root.addChild(footer);
+                };
 
-                    applyFilter();
-                    root.addChild(container);
-
-                    // ── preview mode (ctrl+o) ──
-                    let mode: "list" | "preview" = "list";
-                    let previewText: PreviewText | null = null;
-
-                    const showList = () => {
-                        mode = "list";
-                        previewText = null;
-                        root.clear();
-                        root.addChild(container);
-                    };
-
-                    const showPreview = () => {
-                        const item = selectList?.getSelectedItem();
-                        if (!item) return;
-                        const hit = result.hits[Number(item.value)];
-                        if (!hit) return;
-                        const previewView = new Container();
-                        previewView.addChild(
-                            new DynamicBorder((str) => theme.fg("accent", str)),
-                        );
-                        previewView.addChild(
-                            new Text(
-                                theme.fg(
-                                    "accent",
-                                    theme.bold(
-                                        ` Preview: "${parsed.query}" — ${hit.role} · ${hit.timestamp}`,
-                                    ),
+                // Preview is the picker's second render mode (not a nested
+                // overlay). It re-scans the ONE session file with
+                // lastScannedQuery — the query the visible results actually
+                // came from, never the half-edited box content.
+                const showPreview = () => {
+                    const item = selectList?.getSelectedItem();
+                    if (!item || !results) return;
+                    const hit = results.hits[Number(item.value)];
+                    if (!hit) return;
+                    const previewView = new Container();
+                    previewView.addChild(new DynamicBorder(accent));
+                    previewView.addChild(
+                        new Text(
+                            accent(
+                                theme.bold(
+                                    ` Preview: "${lastScannedQuery}" — ${hit.role} · ${hit.timestamp}`,
                                 ),
-                                0,
-                                0,
+                            ),
+                            0,
+                            0,
+                        ),
+                    );
+                    let content: string;
+                    try {
+                        content = buildPreviewContent(
+                            hit,
+                            loadSessionPreview(
+                                hit.sessionPath,
+                                lastScannedQuery,
+                                options,
                             ),
                         );
-                        let content: string;
-                        try {
-                            content = buildPreviewContent(
-                                hit,
-                                loadSessionPreview(
-                                    hit.sessionPath,
-                                    parsed.query,
-                                    options,
-                                ),
-                            );
-                        } catch (error) {
-                            content = `  (preview failed: ${error instanceof Error ? error.message : String(error)})`;
-                        }
-                        previewText = new PreviewText(tui, content);
-                        previewView.addChild(previewText);
-                        previewView.addChild(
-                            new Text(
-                                theme.fg(
-                                    "dim",
-                                    "esc/o: back to the list • ↑/↓ or j/k: scroll • ctrl+d/u: half page",
-                                ),
-                                0,
-                                0,
+                    } catch (error) {
+                        content = `  (preview failed: ${error instanceof Error ? error.message : String(error)})`;
+                    }
+                    previewText = new PreviewText(tui, content);
+                    previewView.addChild(previewText);
+                    previewView.addChild(
+                        new Text(
+                            dim(
+                                " esc/o: back to the list • ↑/↓ or j/k: scroll • ctrl+d/u: half page",
                             ),
-                        );
-                        previewView.addChild(
-                            new DynamicBorder((str) => theme.fg("accent", str)),
-                        );
-                        mode = "preview";
-                        root.clear();
-                        root.addChild(previewView);
-                    };
+                            0,
+                            0,
+                        ),
+                    );
+                    previewView.addChild(new DynamicBorder(accent));
+                    mode = "preview";
+                    root.clear();
+                    root.addChild(previewView);
+                };
 
-                    return {
-                        render(width: number) {
-                            return root.render(width);
-                        },
-                        invalidate() {
-                            root.invalidate();
-                        },
-                        handleInput(data: string) {
-                            if (mode === "preview") {
-                                if (
-                                    keybindings.matches(data, "tui.select.cancel") ||
-                                    keybindings.matches(data, "tui.select.confirm") ||
-                                    matchesKey(data, "o") ||
-                                    matchesKey(data, Key.ctrl("o"))
-                                ) {
-                                    showList();
-                                    tui.requestRender();
-                                    return;
-                                }
-                                if (
-                                    keybindings.matches(data, "tui.select.up") ||
-                                    matchesKey(data, "k")
-                                ) {
-                                    previewText?.scrollBy(-1);
-                                    tui.requestRender();
-                                    return;
-                                }
-                                if (
-                                    keybindings.matches(data, "tui.select.down") ||
-                                    matchesKey(data, "j")
-                                ) {
-                                    previewText?.scrollBy(1);
-                                    tui.requestRender();
-                                    return;
-                                }
-                                if (matchesKey(data, Key.ctrl("d"))) {
-                                    previewText?.scrollBy(
-                                        Math.floor(
-                                            (previewText?.viewport ?? 12) / 2,
-                                        ),
-                                    );
-                                    tui.requestRender();
-                                    return;
-                                }
-                                if (matchesKey(data, Key.ctrl("u"))) {
-                                    previewText?.scrollBy(
-                                        -Math.floor(
-                                            (previewText?.viewport ?? 12) / 2,
-                                        ),
-                                    );
-                                    tui.requestRender();
-                                    return;
-                                }
-                                if (
-                                    keybindings.matches(data, "tui.select.pageUp") ||
-                                    matchesKey(data, Key.left)
-                                ) {
-                                    previewText?.scrollBy(
-                                        -(previewText?.viewport ?? 12),
-                                    );
-                                    tui.requestRender();
-                                    return;
-                                }
-                                if (
-                                    keybindings.matches(data, "tui.select.pageDown") ||
-                                    matchesKey(data, Key.right)
-                                ) {
-                                    previewText?.scrollBy(
-                                        previewText?.viewport ?? 12,
-                                    );
-                                    tui.requestRender();
-                                    return;
-                                }
-                                // Swallow everything else: typing must not
-                                // reach the (hidden) filter box.
-                                return;
-                            }
-                            if (matchesKey(data, Key.ctrl("o"))) {
-                                showPreview();
+                // ── scan runner ──
+                // One generation counter guards against stale results: a newer
+                // scan (or an abort) makes older settlements no-ops. Each scan
+                // owns its loader and disposes the previous one.
+                const startScan = (query: string) => {
+                    loader?.dispose();
+                    const gen = ++scanGen;
+                    scanError = null;
+                    const next = new CancellableLoader(
+                        tui,
+                        accent,
+                        dim,
+                        `searching "${query}"...`,
+                    );
+                    loader = next;
+                    next.onAbort = () => {
+                        if (gen !== scanGen) return;
+                        // Invalidate the pending settlement: an aborted scan
+                        // still RESOLVES (with a partial result and
+                        // truncated=aborted), and without the bump it would
+                        // overwrite the previous results the hint just
+                        // promised to keep.
+                        scanGen++;
+                        loader?.dispose();
+                        loader = null;
+                        render(); // back to the previous results (or empty)
+                    };
+                    next.start();
+                    searchSessions({ ...options, query, signal: next.signal })
+                        .then((result) => {
+                            if (gen !== scanGen) return;
+                            loader?.dispose();
+                            loader = null;
+                            results = result;
+                            lastScannedQuery = query;
+                            render();
+                        })
+                        .catch((error) => {
+                            if (gen !== scanGen) return;
+                            loader?.dispose();
+                            loader = null;
+                            scanError =
+                                error instanceof Error
+                                    ? error.message
+                                    : String(error);
+                            render();
+                        });
+                    render();
+                };
+
+                // Enter commit: re-scan when the box is dirty (or nothing has
+                // been scanned, or the last scan came back empty — a retry is
+                // the only sensible action), otherwise inject the picked hit.
+                // Typing DURING a scan is allowed (keystrokes are never
+                // swallowed) but Enter is a no-op until the scan settles.
+                queryInput.onSubmit = (value) => {
+                    const query = value.trim();
+                    if (!query || loader) return;
+                    if (
+                        !results ||
+                        results.hits.length === 0 ||
+                        query !== lastScannedQuery
+                    ) {
+                        startScan(query);
+                        return;
+                    }
+                    const item = selectList?.getSelectedItem();
+                    if (!item) return;
+                    const hit = results.hits[Number(item.value)];
+                    if (!hit) return;
+                    done({ hit, query: lastScannedQuery });
+                };
+
+                if (parsed.query) {
+                    // Old muscle memory (/search-sessions goal): prefill the box
+                    // and run the first scan immediately.
+                    queryInput.setValue(parsed.query);
+                    startScan(parsed.query);
+                } else {
+                    render();
+                }
+
+                return {
+                    render: (width: number) => root.render(width),
+                    invalidate: () => root.invalidate(),
+                    handleInput: (data: string) => {
+                        if (mode === "preview") {
+                            if (
+                                keybindings.matches(data, "tui.select.cancel") ||
+                                keybindings.matches(data, "tui.select.confirm") ||
+                                matchesKey(data, "o") ||
+                                matchesKey(data, Key.ctrl("o"))
+                            ) {
+                                showList();
                                 tui.requestRender();
                                 return;
                             }
                             if (
                                 keybindings.matches(data, "tui.select.up") ||
-                                keybindings.matches(data, "tui.select.down") ||
-                                keybindings.matches(data, "tui.select.confirm") ||
-                                keybindings.matches(data, "tui.select.cancel")
+                                matchesKey(data, "k")
                             ) {
-                                if (selectList) {
-                                    selectList.handleInput(data);
-                                } else if (
-                                    keybindings.matches(data, "tui.select.cancel")
-                                ) {
-                                    done(null);
-                                }
+                                previewText?.scrollBy(-1);
                                 tui.requestRender();
                                 return;
                             }
-                            searchInput.handleInput(data);
-                            applyFilter();
+                            if (
+                                keybindings.matches(data, "tui.select.down") ||
+                                matchesKey(data, "j")
+                            ) {
+                                previewText?.scrollBy(1);
+                                tui.requestRender();
+                                return;
+                            }
+                            if (matchesKey(data, Key.ctrl("d"))) {
+                                previewText?.scrollBy(
+                                    Math.floor(
+                                        (previewText?.viewport ?? 12) / 2,
+                                    ),
+                                );
+                                tui.requestRender();
+                                return;
+                            }
+                            if (matchesKey(data, Key.ctrl("u"))) {
+                                previewText?.scrollBy(
+                                    -Math.floor(
+                                        (previewText?.viewport ?? 12) / 2,
+                                    ),
+                                );
+                                tui.requestRender();
+                                return;
+                            }
+                            if (
+                                keybindings.matches(data, "tui.select.pageUp") ||
+                                matchesKey(data, Key.left)
+                            ) {
+                                previewText?.scrollBy(
+                                    -(previewText?.viewport ?? 12),
+                                );
+                                tui.requestRender();
+                                return;
+                            }
+                            if (
+                                keybindings.matches(data, "tui.select.pageDown") ||
+                                matchesKey(data, Key.right)
+                            ) {
+                                previewText?.scrollBy(
+                                    previewText?.viewport ?? 12,
+                                );
+                                tui.requestRender();
+                                return;
+                            }
+                            // Swallow everything else: typing must not reach
+                            // the (hidden) query box.
+                            return;
+                        }
+                        // Esc: scanning aborts the scan; idle closes the panel.
+                        if (keybindings.matches(data, "tui.select.cancel")) {
+                            if (loader) {
+                                loader.handleInput(data); // → onAbort
+                            } else {
+                                done(null);
+                            }
                             tui.requestRender();
-                        },
-                    };
-                },
-            );
+                            return;
+                        }
+                        if (matchesKey(data, Key.ctrl("o"))) {
+                            showPreview();
+                            tui.requestRender();
+                            return;
+                        }
+                        if (
+                            keybindings.matches(data, "tui.select.up") ||
+                            keybindings.matches(data, "tui.select.down")
+                        ) {
+                            selectList?.handleInput(data);
+                            tui.requestRender();
+                            return;
+                        }
+                        // Everything else is typing (Enter reaches the Input's
+                        // onSubmit — it is deliberately NOT intercepted here,
+                        // and it never goes to the list).
+                        queryInput.handleInput(data);
+                        // The hint states Enter's CURRENT meaning, so it has
+                        // to track every keystroke, not just state changes.
+                        updateChrome();
+                        tui.requestRender();
+                    },
+                };
+            });
 
-            if (pickedIndex === null) return; // Esc: nothing written
-            const hit = result.hits[Number(pickedIndex)];
-            if (!hit) return;
+            if (!picked) return; // Esc: nothing written
             // Injected as a display-only custom message; no new turn. The
             // customType stays in SELF_EXCLUDED_CUSTOM_TYPES so neither this
             // injection nor the historical full-result ones self-amplify.
             await pi.sendMessage(
                 {
                     customType: "search-sessions",
-                    content: formatSingleHit(hit, parsed.query),
+                    content: formatSingleHit(picked.hit, picked.query),
                     display: true,
                 },
                 { triggerTurn: false },
