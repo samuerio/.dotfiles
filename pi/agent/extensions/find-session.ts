@@ -137,7 +137,6 @@ const SNIPPET_AFTER = 240;
  */
 const SNIPPET_MAX_CHARS = 600;
 const MAX_HAYSTACK_CHARS = 256 * 1024; // ReDoS bound: truncate before regex
-const MAX_SESSION_FILE_BYTES = 5 * 1024 * 1024; // skip oversized files (visible in skippedFiles)
 const DEFAULT_MAX_RESULTS = 50;
 const HARD_MAX_RESULTS = 1000;
 const TOOL_CALL_ARGS_PREVIEW = 400;
@@ -185,7 +184,9 @@ const SEARCH_SESSIONS_DESCRIPTION =
     "line-aligned snippet (may span multiple lines): pass the " +
     "path or id to read_session for the full transcript, or entry=<entryId> to read_session_entry to " +
     "drill into the exact entry. In scope=\"all\", each hit line also carries project=<dir>. The result " +
-    "envelope reports query/scope/hits/scanned/listed/unreadable/ms and, when results were cut short, " +
+    "envelope reports query/scope/hits/scanned/listed/unreadable (a session's other matching messages " +
+    "are visible in the interactive panel's ctrl+o preview, and read_session returns the full " +
+    "transcript) and, when results were cut short, " +
     "truncated=<reason> (maxResults, time-budget, or aborted). Read-only.";
 
 export const SearchSessionsParams = Type.Object({
@@ -261,16 +262,12 @@ export interface SearchSessionsDetails {
     hitCount: number;
     /** Set when results were cut short: "maxResults" or "aborted". */
     truncated?: string;
-    /** Session files skipped for size (>5 MB); each entry is "path (N KB)". */
-    skippedFiles: string[];
     /** Files that could not be stat'd, parsed, or had no session header. */
     unreadable: string[];
     /** Session files discovered in the session directory (one level). */
     listed: number;
     /** Session files actually searched. */
     scanned: number;
-    /** Scan wall time in milliseconds. */
-    ms: number;
     /** Scope actually searched ('all' can degrade to 'project'). */
     scope: "project" | "all";
     /** True when an 'all' request degraded to project scope. */
@@ -580,16 +577,13 @@ export interface SearchSessionsOptions {
 
 export interface SearchSessionsResult {
     hits: SearchHit[];
-    /** Set when results were cut short: "maxResults" or "aborted". */
+    /** Set when results were cut short: "maxResults", "time-budget", or "aborted". */
     truncated?: string;
-    skippedFiles: string[];
     /** Files that could not be stat'd, parsed, or had no session header. */
     unreadable: string[];
     scanned: number;
     /** Session files discovered across the searched project directories. */
     listed: number;
-    /** Scan wall time in milliseconds. */
-    ms: number;
     /** Scope actually searched (an 'all' request can degrade to 'project'). */
     scope: "project" | "all";
     /** True when an 'all' request degraded to project scope. */
@@ -845,20 +839,23 @@ export async function searchSessions(
         ? path.resolve(options.currentSessionFile)
         : undefined;
 
-    // Stat up front: the size cap needs it, mtime-desc keeps a familiar scan
-    // order (it no longer influences results — truncation happens after
-    // sorting), and stat failures become visible instead of silent.
+    // Stat up front: mtime-desc keeps a familiar scan order (it no longer
+    // influences results — truncation happens after sorting), and stat
+    // failures become visible instead of silent. There is deliberately no
+    // size cap: a large session costs ~11ms/MB (parse-dominated), the soft
+    // budget already bounds the scan with a visible truncated=time-budget,
+    // and skipping files silently loses real, recent sessions (the largest
+    // sessions are the most recently active ones).
     const files: Array<{
         path: string;
         id?: string;
-        size: number;
         mtimeMs: number;
     }> = [];
     const unreadable: string[] = [];
     for (const item of discovered) {
         try {
             const st = fs.statSync(item.path);
-            files.push({ ...item, size: st.size, mtimeMs: st.mtimeMs });
+            files.push({ ...item, mtimeMs: st.mtimeMs });
         } catch {
             unreadable.push(shortenPath(item.path));
         }
@@ -880,7 +877,6 @@ export async function searchSessions(
             isCurrentProject: boolean;
         }
     >();
-    const skippedFiles: string[] = [];
     let scanned = 0;
     let truncated: string | undefined;
     for (const file of files) {
@@ -910,15 +906,6 @@ export async function searchSessions(
             path.resolve(file.path) === currentAbs &&
             options.includeCurrentSession !== true
         ) {
-            continue;
-        }
-
-        // Size cap (upstream convention): skip oversized files, keep the skip
-        // visible. Sessions are written live and can legitimately grow large.
-        if (file.size > MAX_SESSION_FILE_BYTES) {
-            skippedFiles.push(
-                `${shortenPath(file.path)} (${Math.round(file.size / 1024)} KB)`,
-            );
             continue;
         }
 
@@ -1048,11 +1035,9 @@ export async function searchSessions(
     return {
         hits: finalHits,
         truncated,
-        skippedFiles,
         unreadable,
         scanned,
         listed: discovered.length,
-        ms: Date.now() - startedAt,
         scope,
         allDegraded,
     };
@@ -1089,7 +1074,6 @@ export function formatHits(
         `hits=${result.hits.length}`,
         `scanned=${result.scanned}`,
         `listed=${result.listed}`,
-        `ms=${result.ms}`,
         result.truncated
             ? `truncated=${result.truncated}` +
               (result.truncated === "maxResults"
@@ -1097,9 +1081,6 @@ export function formatHits(
                   : result.truncated === "time-budget"
                     ? ` (scanned ${result.scanned} of ${result.listed}, time budget)`
                     : "")
-            : undefined,
-        result.skippedFiles.length
-            ? `skipped=${result.skippedFiles.length} (${capList(result.skippedFiles)})`
             : undefined,
         result.unreadable.length
             ? `unreadable=${result.unreadable.length} (${capList(result.unreadable)})`
@@ -1405,11 +1386,9 @@ export default function (pi: ExtensionAPI) {
                     details: {
                         hitCount: result.hits.length,
                         truncated: result.truncated,
-                        skippedFiles: result.skippedFiles,
                         unreadable: result.unreadable,
                         listed: result.listed,
                         scanned: result.scanned,
-                        ms: result.ms,
                         scope: result.scope,
                         allDegraded: result.allDegraded,
                     },
@@ -1575,14 +1554,11 @@ export default function (pi: ExtensionAPI) {
                     const parts = [
                         `${results.hits.length} hit${results.hits.length === 1 ? "" : "s"}`,
                         `scanned ${results.scanned} of ${results.listed} files`,
-                        `${results.ms}ms`,
                     ];
                     if (results.truncated)
                         parts.push(`truncated=${results.truncated}`);
                     if (results.allDegraded)
                         parts.push("scope degraded to this project");
-                    if (results.skippedFiles.length)
-                        parts.push(`skipped=${results.skippedFiles.length}`);
                     if (results.unreadable.length)
                         parts.push(`unreadable=${results.unreadable.length}`);
                     return parts.join(" · ");
