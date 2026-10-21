@@ -97,6 +97,12 @@
  * the snippet window skipped message text. A hit with neither note is a
  * single-match session whose snippet is the complete message, which is what
  * makes the absence meaningful rather than merely quiet.
+ * The envelope's listed/scanned pair measures FILE coverage, not hit counts:
+ * listed is every discovered session file, scanned the ones whose text was
+ * actually searched. A literal query prefilters the rest on the raw text (a
+ * query absent from a file's raw JSONL cannot appear in any parsed haystack),
+ * so scanned far below listed is still full coverage; regex queries prefilter
+ * nothing and scan every file.
  *
  * Sections: pure helpers (compileQuery / snippet / args parsing) →
  * searchSessions core → tool + command registration with TUI rendering
@@ -154,6 +160,14 @@ const DEFAULT_MAX_RESULTS = 50;
 const HARD_MAX_RESULTS = 1000;
 const TOOL_CALL_ARGS_PREVIEW = 400;
 /**
+ * Visual lines the collapsed tool-result preview shows (read-session.ts
+ * uses 5). Raised to 7 because the preview drops the note lines (see
+ * renderSearchResult), so the budget buys snippet lines rather than chrome.
+ */
+const PREVIEW_LINES = 7;
+/** The two note lines formatHits emits, matched at column 0. */
+const NOTE_LINE_RE = /^\(\+\d+ more matching|^\(\d+ lines? omitted/;
+/**
  * Soft scan budget: a query that outruns it stops early with
  * truncated=time-budget. At the current corpus scale (one project ~0.5s,
  * --all ~1s) this never fires; it is the headroom valve for 10x growth, the
@@ -203,11 +217,13 @@ const SEARCH_SESSIONS_DESCRIPTION =
     "counts the omitted lines before/after and points at read_session_entry for the full message " +
     "(a snippet carrying no such note IS the whole message). Drill with the " +
     "path or id via read_session for the full transcript, or entry=<entryId> via read_session_entry to " +
-    "drill into the exact entry. The result " +
-    "envelope reports query/scope/hits/scanned/listed/unreadable (a session's other matching messages " +
-    "are visible in the interactive panel's ctrl+o preview, and read_session returns the full " +
-    "transcript) and, when results were cut short, " +
-    "truncated=<reason> (maxResults, time-budget, or aborted). Read-only.";
+    "drill into the exact entry. The result envelope reports " +
+    "query/scope/hits/scanned/listed/unreadable: listed counts the session files discovered and " +
+    "scanned the files whose text was actually searched (a literal query prefilters the rest on " +
+    "the raw text, so scanned far below listed still means full coverage, while a regex query " +
+    "prefilters nothing and scans them all); a session's other matching messages stay visible in " +
+    "the interactive panel's ctrl+o preview, and read_session returns the full transcript. When " +
+    "results were cut short, truncated=<reason> (maxResults, time-budget, or aborted). Read-only.";
 
 export const SearchSessionsParams = Type.Object({
     query: Type.String({
@@ -425,23 +441,34 @@ function toolCallHaystack(
  * msg.summary (content is absent on those), and every other role
  * (toolResult, bashExecution, ...) is unsearchable. Assistant toolCall text
  * is appended opt-in via includeToolCalls.
+ *
+ * realEnd marks where the MESSAGE's own text ends: the tool-call blocks are
+ * synthetic `[tool: …]` renderings rather than entry text, so omission
+ * counts must stop there or they would promise "lines of this message" that
+ * exist only in that rendering.
  */
-function haystackFor(msg: AgentMessage, includeToolCalls: boolean): string {
+function haystackFor(
+    msg: AgentMessage,
+    includeToolCalls: boolean,
+): { text: string; realEnd: number } {
     if (
         msg.role === "user" ||
         msg.role === "assistant" ||
         msg.role === "custom"
     ) {
-        let text = textOf(msg.content);
+        const text = textOf(msg.content);
         if (msg.role === "assistant" && includeToolCalls) {
-            text += `\n${toolCallHaystack(msg)}`;
+            return {
+                text: `${text}\n${toolCallHaystack(msg)}`,
+                realEnd: text.length,
+            };
         }
-        return text;
+        return { text, realEnd: text.length };
     }
     if (msg.role === "branchSummary" || msg.role === "compactionSummary") {
-        return msg.summary;
+        return { text: msg.summary, realEnd: msg.summary.length };
     }
-    return "";
+    return { text: "", realEnd: 0 };
 }
 
 /**
@@ -479,16 +506,28 @@ function validateMaxResults(max: number | undefined): number {
  * indentBlock; pre-indenting would double-indent the preview panel's
  * fallback path). The omission counts travel WITH the text, because a bare
  * snippet cannot disclose that it is a window: the consumer sees text and
- * has no way to know the message continued past it. Both counts are line
- * breaks in the omitted raw spans, so they are exact for the haystack (a
- * blank-only span counts as nothing omitted); the cap case still reports
- * the line breaks its raw window skipped, only its first/last visible line
- * is additionally cut mid-line.
+ * has no way to know the message continued past it.
+ *
+ * `haystack` is the SEARCHED text (the ReDoS bound truncates it) and must be
+ * a prefix of `fullText`, the untruncated projection: the window and the
+ * visible text come from the searched prefix (byte-identical to searching
+ * the whole thing), while the omission counts may look past it, so a match
+ * near the search bound still reports the message text that follows instead
+ * of falsely claiming completeness. Both counts are line breaks in the
+ * omitted spans (a blank-only span counts as nothing omitted); the cap case
+ * still reports the line breaks its raw window skipped, only its first/last
+ * visible line is additionally cut mid-line.
  */
 export function buildSnippet(
     haystack: string,
     index: number,
+    bounds: { fullText?: string; realEnd?: number } = {},
 ): { text: string; omittedBeforeLines: number; omittedAfterLines: number } {
+    const fullText = bounds.fullText ?? haystack;
+    // Where the message's own text ends (see haystackFor): omission counts
+    // stop there so they never promise message lines that only exist in the
+    // synthetic tool-call rendering.
+    const realEnd = Math.min(bounds.realEnd ?? fullText.length, fullText.length);
     const from = Math.max(0, index - SNIPPET_BEFORE);
     const to = index + SNIPPET_AFTER;
     const lineStart = haystack.lastIndexOf("\n", from) + 1;
@@ -498,6 +537,11 @@ export function buildSnippet(
     const window = capped
         ? haystack.slice(from, to)
         : haystack.slice(lineStart, lineEnd);
+    // The capped window is a raw slice, so its visible end clamps to the
+    // searched length (a match within SNIPPET_AFTER of the search bound
+    // would otherwise start the omission count past real content).
+    const windowStart = capped ? from : lineStart;
+    const windowEnd = capped ? Math.min(to, haystack.length) : lineEnd;
     const text = window
         .replace(/\r\n/g, "\n") // CRLF first: a lone \r would otherwise
         // survive as trailing whitespace on its line
@@ -505,15 +549,28 @@ export function buildSnippet(
         .replace(/\n{3,}/g, "\n\n") // cap blank-line runs
         .trim();
     // Line breaks in an omitted span, blank-only spans excluded: "…\n\n…"
-    // before the window omits no information.
-    const breaksIn = (span: string): number =>
-        span.trim() ? span.split("\n").length - 1 : 0;
+    // before the window omits no information. indexOf scanning rather than
+    // trim+split: a span can be a whole large message and the count must not
+    // allocate a copy of it.
+    const breaksIn = (span: string): number => {
+        if (!/[^\s]/.test(span)) return 0;
+        let count = 0;
+        let at = span.indexOf("\n");
+        while (at !== -1) {
+            count += 1;
+            at = span.indexOf("\n", at + 1);
+        }
+        return count;
+    };
     return {
         text,
-        omittedBeforeLines: breaksIn(
-            haystack.slice(0, capped ? from : lineStart),
-        ),
-        omittedAfterLines: breaksIn(haystack.slice(capped ? to : lineEnd)),
+        // Before the window the searched text IS the full text (the search
+        // bound only ever cuts the tail), so either source counts the same.
+        // After it the count looks into fullText (past the search bound, so
+        // "no note = complete message" survives it) but stops at realEnd (so
+        // synthetic tool-call lines are never promised as message lines).
+        omittedBeforeLines: breaksIn(fullText.slice(0, windowStart)),
+        omittedAfterLines: breaksIn(fullText.slice(windowEnd, realEnd)),
     };
 }
 
@@ -725,17 +782,25 @@ function collectEntryHits(
             }
 
             // Haystack via haystackFor (empty = unsearchable role), then
-            // truncated before matching (ReDoS bound).
+            // truncated before matching (ReDoS bound). The untruncated text
+            // still travels to buildSnippet, so omission counts can see past
+            // the bound.
             const rawHaystack = haystackFor(msg, match.includeToolCalls);
-            if (!rawHaystack) continue;
-            const haystack =
-                rawHaystack.length > MAX_HAYSTACK_CHARS
-                    ? rawHaystack.slice(0, MAX_HAYSTACK_CHARS)
-                    : rawHaystack;
+            if (!rawHaystack.text) continue;
+            const searchedEnd = Math.min(
+                rawHaystack.text.length,
+                MAX_HAYSTACK_CHARS,
+            );
+            const haystack = rawHaystack.text.slice(0, searchedEnd);
 
             const found = haystack.match(match.re);
             if (!found) continue;
-            const snippet = buildSnippet(haystack, found.index ?? 0);
+            // The untruncated text travels along so omission counts can see
+            // past the ReDoS bound (see buildSnippet).
+            const snippet = buildSnippet(haystack, found.index ?? 0, {
+                fullText: rawHaystack.text,
+                realEnd: rawHaystack.realEnd,
+            });
 
             // Message timestamp preferred (runtime getMessageActivityTime
             // semantics), entry timestamp as fallback.
@@ -788,7 +853,7 @@ function collectEntryHits(
                     omittedAfterLines: snippet.omittedAfterLines,
                 },
                 rank,
-                fullText: options.withFullText ? rawHaystack : undefined,
+                fullText: options.withFullText ? rawHaystack.text : undefined,
             });
         }
     }
@@ -1170,7 +1235,7 @@ export function formatHits(
               (result.truncated === "maxResults"
                   ? " (cap reached; narrow the query or raise maxResults)"
                   : result.truncated === "time-budget"
-                    ? ` (scanned ${result.scanned} of ${result.listed}, time budget)`
+                    ? ` (time budget)`
                     : "")
             : undefined,
         result.unreadable.length
@@ -1436,12 +1501,25 @@ function searchCallComponent(
 }
 
 /**
- * Width-aware collapsed preview: first 5 visual lines at the current terminal
- * width plus the "more lines, expand" hint (same trick as read-session.ts's
- * renderSessionResult). ToolExecutionComponent stacks call + result with no
- * gap, so the renderer self-supplies the leading blank line.
+ * Width-aware collapsed preview: the first PREVIEW_LINES visual lines of
+ * `previewStyled` at the current terminal width plus the "more lines,
+ * expand" hint (same trick as read-session.ts's renderSessionResult).
+ * ToolExecutionComponent stacks call + result with no gap, so the renderer
+ * self-supplies the leading blank line.
+ *
+ * `previewStyled` is the result text with the note lines dropped and
+ * `styled` the full text: the notes are chrome for the model (they prevent
+ * misreading a windowed snippet), while the collapsed view exists to show
+ * EVIDENCE at a glance, and two ref lines plus two notes already fill a
+ * 5-line budget at 80-160 columns (measured: zero snippet lines). The
+ * expanded view and the model-visible text always carry the notes.
  */
-function renderSearchResult(styled: string, expanded: boolean, theme: any) {
+function renderSearchResult(
+    styled: string,
+    previewStyled: string,
+    expanded: boolean,
+    theme: any,
+) {
     if (!expanded) {
         const state: { width?: number; lines?: string[]; skipped?: number } =
             {};
@@ -1449,9 +1527,9 @@ function renderSearchResult(styled: string, expanded: boolean, theme: any) {
         return {
             render: (width: number) => {
                 if (state.lines === undefined || state.width !== width) {
-                    const all = new Text(styled, 0, 0).render(width);
-                    state.lines = all.slice(0, 5);
-                    state.skipped = Math.max(0, all.length - 5);
+                    const all = new Text(previewStyled, 0, 0).render(width);
+                    state.lines = all.slice(0, PREVIEW_LINES);
+                    state.skipped = Math.max(0, all.length - PREVIEW_LINES);
                     state.width = width;
                 }
                 const hint =
@@ -1553,21 +1631,25 @@ export default function (pi: ExtensionAPI) {
                 .join("");
             if (context.isError)
                 return new Text(theme.fg("error", content), 0, 0);
-            const styled = content
-                .split("\n")
-                .map((line: string) =>
-                    // The envelope line echoes the query back; highlighting it
-                    // would only dye the bracket chrome, so it stays plain.
-                    line.startsWith("[query=")
-                        ? theme.fg("toolOutput", line)
-                        : highlightLine(
-                              line,
-                              highlightRegex(context.args.query),
-                              theme,
-                          ),
-                )
+            const re = highlightRegex(context.args.query);
+            const colorize = (line: string): string =>
+                // The envelope line echoes the query back; highlighting it
+                // would only dye the bracket chrome, so it stays plain.
+                line.startsWith("[query=")
+                    ? theme.fg("toolOutput", line)
+                    : highlightLine(line, re, theme);
+            const lines = content.split("\n");
+            const styled = lines.map(colorize).join("\n");
+            // The collapsed preview renders the note-free variant: the notes
+            // are chrome for the model, and two ref lines plus two notes fill
+            // the whole preview budget at 80-160 columns, leaving zero
+            // evidence visible. The expanded view and the model-visible text
+            // stay the full, note-carrying string.
+            const previewStyled = lines
+                .filter((line) => !NOTE_LINE_RE.test(line))
+                .map(colorize)
                 .join("\n");
-            return renderSearchResult(styled, expanded, theme);
+            return renderSearchResult(styled, previewStyled, expanded, theme);
         },
     });
 
