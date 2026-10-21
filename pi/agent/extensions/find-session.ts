@@ -1279,6 +1279,55 @@ class PreviewText {
 // TUI rendering (same pattern as read-session.ts)
 // ============================================================================
 
+/**
+ * Highlight matcher for a rendered result: the same regex the scan used
+ * (compileQuery: literals escaped + case-insensitive, /regex/ forms keep
+ * their flags minus g/y), cloned with `g` so every occurrence on a line is
+ * found. An invalid user regex must not break rendering: it degrades to no
+ * highlighting (the scan surfaces such a query as a loud error instead).
+ */
+function highlightRegex(query: unknown): RegExp | undefined {
+    if (typeof query !== "string" || query.length === 0) return undefined;
+    try {
+        const re = compileQuery(query);
+        return re.flags.includes("g") ? re : new RegExp(re.source, `${re.flags}g`);
+    } catch {
+        return undefined;
+    }
+}
+
+/**
+ * Color one result line with every match in accent + bold. Segments are
+ * colored independently rather than nesting inside a line-wide toolOutput
+ * wrap: theme.fg appends a reset, so an inner span would strip the outer
+ * color from the rest of the line. Zero-length matches (a user regex like
+ * `a*`) advance the scan instead of looping forever.
+ *
+ * Why bold: the theme pins every foreground token to the same "readable"
+ * lightness on tool panels, so a color-only span differs from the body by
+ * hue alone (accent vs muted measures +0.39 on light, -0.15 on dark).
+ * Weight is the one channel the theme does not flatten, and it also
+ * carries the highlight for viewers who cannot separate the hues. The
+ * searchMatchBg block is not an alternative here: its edge against the
+ * tool panel measures ~1.0 luminance ratio in both themes.
+ */
+function highlightLine(line: string, re: RegExp | undefined, theme: any): string {
+    if (re === undefined) return theme.fg("toolOutput", line);
+    let out = "";
+    let last = 0;
+    re.lastIndex = 0;
+    for (let m = re.exec(line); m !== null; m = re.exec(line)) {
+        if (m[0].length === 0) {
+            re.lastIndex += 1;
+            continue;
+        }
+        out += theme.fg("toolOutput", line.slice(last, m.index));
+        out += theme.fg("accent", theme.bold(m[0]));
+        last = m.index + m[0].length;
+    }
+    return out + theme.fg("toolOutput", line.slice(last));
+}
+
 /** Bold toolTitle + muted summary on the component slot the harness allocated. */
 function searchCallComponent(
     theme: any,
@@ -1415,7 +1464,17 @@ export default function (pi: ExtensionAPI) {
                 return new Text(theme.fg("error", content), 0, 0);
             const styled = content
                 .split("\n")
-                .map((line: string) => theme.fg("toolOutput", line))
+                .map((line: string) =>
+                    // The envelope line echoes the query back; highlighting it
+                    // would only dye the bracket chrome, so it stays plain.
+                    line.startsWith("[query=")
+                        ? theme.fg("toolOutput", line)
+                        : highlightLine(
+                              line,
+                              highlightRegex(context.args.query),
+                              theme,
+                          ),
+                )
                 .join("\n");
             return renderSearchResult(styled, expanded, theme);
         },
