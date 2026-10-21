@@ -251,7 +251,12 @@ export const SearchSessionsParams = Type.Object({
     includeToolCalls: Type.Optional(
         Type.Boolean({
             description:
-                "Append formatted toolCall text ([tool: name args...]) to assistant haystacks. Default false.",
+                "Append formatted toolCall text ([tool: name args...]) to assistant haystacks. Default false. " +
+                "Turn it on to find the session that CREATED or CHANGED something: the discriminating " +
+                "evidence (bash commands, file paths, commit subjects) sits in tool call arguments, not " +
+                "in message prose. Search a distinctive artifact string as the query, e.g. " +
+                "query=\"pi/agent/extensions/goal.ts\". The target can rank below sessions whose first " +
+                "user message matches, so raise maxResults if it is missing.",
         }),
     ),
     maxResults: Type.Optional(
