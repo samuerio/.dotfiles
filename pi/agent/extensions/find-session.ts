@@ -69,14 +69,21 @@
  * nothing.
  *
  * ─ Output contract ─
- * No fourth read tool. Each hit emits both a session path and a session id:
+ * No fourth read tool. Each hit emits both a session path and a session id,
+ * on two ref lines (session layer first, then message layer) followed by the
+ * snippet:
  *
- *   session=<path> id=<sessionId> entry=<entryId> ts=<timestamp> role=<role>[ more=N]
+ *   session=<path> id=<sessionId>[ project=<dir>][ more=N]
+ *   entry=<entryId> ts=<timestamp> role=<role>
+ *   [(+N more matching messages in this session, not shown · read_session …)]
+ *   [(N lines omitted before · M after · read_session_entry …)]
  *     <snippet — line-aligned, may span multiple lines; continuation lines
- *      are indented two spaces under the ref line>
+ *      are indented two spaces under the ref lines>
  *
  * Hits are grouped per session (one representative hit each; `more=N` counts
- * the session's other matching messages) and ordered by match tier (first-
+ * the session's other matching messages and rides on the SESSION line, the
+ * layer its scope belongs to, with a note line turning the count into the
+ * next step) and ordered by match tier (first-
  * user-message hit > body-only hit, exact first-message match first within
  * the tier) then newest-first. `<path>` (home collapsed to ~) is always
  * drillable by read_session / read_session_entry; `<sessionId>` is the
@@ -84,6 +91,12 @@
  * read_session_entry drill handle, recovered with the same entry/message zip
  * `alignAnnotations` uses in read-session.ts. The model's natural next step
  * is read_session or read_session_entry.
+ *
+ * Both note lines are conditional: the session note appears only when the
+ * session had hits beyond the representative, the omission note only when
+ * the snippet window skipped message text. A hit with neither note is a
+ * single-match session whose snippet is the complete message, which is what
+ * makes the absence meaningful rather than merely quiet.
  *
  * Sections: pure helpers (compileQuery / snippet / args parsing) →
  * searchSessions core → tool + command registration with TUI rendering
@@ -176,14 +189,21 @@ const SEARCH_SESSIONS_DESCRIPTION =
     "and branch_summary hits drill to " +
     "their full text via read_session_entry; compaction originals are restored with " +
     "read_session_compaction. Returns " +
-    "one representative hit per session (the session's other matching messages counted as more=N), " +
+    "one representative hit per session (the session's other matching messages counted as more=N on " +
+    "the session line), " +
     "ordered by match tier (a hit in the session's first user message ranks above body-only hits, an " +
     "exact first-message match first within that tier) then newest-first; maxResults caps sessions, not " +
     "messages. Each hit is " +
-    "session=<path> id=<sessionId> entry=<entryId> ts=<timestamp> role=<role> plus an indented, " +
-    "line-aligned snippet (may span multiple lines): pass the " +
-    "path or id to read_session for the full transcript, or entry=<entryId> to read_session_entry to " +
-    "drill into the exact entry. In scope=\"all\", each hit line also carries project=<dir>. The result " +
+    "two ref lines plus an indented, " +
+    "line-aligned snippet (may span multiple lines): the session line carries session=<path> " +
+    "id=<sessionId>, plus project=<dir> in scope=\"all\" and more=N when the session has other " +
+    "matching messages; the message line carries entry=<entryId> ts=<timestamp> role=<role>. When " +
+    "more=N is present, a note line says those other matches are not shown and that read_session " +
+    "returns the full transcript; when the snippet window skipped message text, another note line " +
+    "counts the omitted lines before/after and points at read_session_entry for the full message " +
+    "(a snippet carrying no such note IS the whole message). Drill with the " +
+    "path or id via read_session for the full transcript, or entry=<entryId> via read_session_entry to " +
+    "drill into the exact entry. The result " +
     "envelope reports query/scope/hits/scanned/listed/unreadable (a session's other matching messages " +
     "are visible in the interactive panel's ctrl+o preview, and read_session returns the full " +
     "transcript) and, when results were cut short, " +
@@ -250,6 +270,12 @@ export interface SearchHit {
     role: string;
     /** Match plus surrounding context (120 chars before / 240 after). */
     snippet: string;
+    /** Line breaks the snippet window skipped in the message text BEFORE
+     *  the window (0 = the snippet starts at the message start). */
+    omittedBeforeLines: number;
+    /** Line breaks the snippet window skipped AFTER the window (0 = the
+     *  snippet runs to the message end). */
+    omittedAfterLines: number;
     /**
      * The session's OTHER matching messages, when this hit is the session's
      * representative (grouping output); absent for single-hit sessions.
@@ -451,24 +477,44 @@ function validateMaxResults(max: number | undefined): number {
  *
  * Pure text transform: no indentation here (the two formatters indent via
  * indentBlock; pre-indenting would double-indent the preview panel's
- * fallback path), no ellipsis markers.
+ * fallback path). The omission counts travel WITH the text, because a bare
+ * snippet cannot disclose that it is a window: the consumer sees text and
+ * has no way to know the message continued past it. Both counts are line
+ * breaks in the omitted raw spans, so they are exact for the haystack (a
+ * blank-only span counts as nothing omitted); the cap case still reports
+ * the line breaks its raw window skipped, only its first/last visible line
+ * is additionally cut mid-line.
  */
-export function buildSnippet(haystack: string, index: number): string {
+export function buildSnippet(
+    haystack: string,
+    index: number,
+): { text: string; omittedBeforeLines: number; omittedAfterLines: number } {
     const from = Math.max(0, index - SNIPPET_BEFORE);
     const to = index + SNIPPET_AFTER;
     const lineStart = haystack.lastIndexOf("\n", from) + 1;
     const lineEndAt = haystack.indexOf("\n", to);
     const lineEnd = lineEndAt === -1 ? haystack.length : lineEndAt;
-    const window =
-        lineEnd - lineStart <= SNIPPET_MAX_CHARS
-            ? haystack.slice(lineStart, lineEnd)
-            : haystack.slice(from, to);
-    return window
+    const capped = lineEnd - lineStart > SNIPPET_MAX_CHARS;
+    const window = capped
+        ? haystack.slice(from, to)
+        : haystack.slice(lineStart, lineEnd);
+    const text = window
         .replace(/\r\n/g, "\n") // CRLF first: a lone \r would otherwise
         // survive as trailing whitespace on its line
         .replace(/[^\S\n]+/g, " ") // horizontal runs only
         .replace(/\n{3,}/g, "\n\n") // cap blank-line runs
         .trim();
+    // Line breaks in an omitted span, blank-only spans excluded: "…\n\n…"
+    // before the window omits no information.
+    const breaksIn = (span: string): number =>
+        span.trim() ? span.split("\n").length - 1 : 0;
+    return {
+        text,
+        omittedBeforeLines: breaksIn(
+            haystack.slice(0, capped ? from : lineStart),
+        ),
+        omittedAfterLines: breaksIn(haystack.slice(capped ? to : lineEnd)),
+    };
 }
 
 /** Parse a slash-command argument string into search options + the query. */
@@ -689,6 +735,7 @@ function collectEntryHits(
 
             const found = haystack.match(match.re);
             if (!found) continue;
+            const snippet = buildSnippet(haystack, found.index ?? 0);
 
             // Message timestamp preferred (runtime getMessageActivityTime
             // semantics), entry timestamp as fallback.
@@ -736,7 +783,9 @@ function collectEntryHits(
                             ? new Date(msgTs).toISOString()
                             : entry.timestamp,
                     role: msg.role,
-                    snippet: buildSnippet(haystack, found.index ?? 0),
+                    snippet: snippet.text,
+                    omittedBeforeLines: snippet.omittedBeforeLines,
+                    omittedAfterLines: snippet.omittedAfterLines,
                 },
                 rank,
                 fullText: options.withFullText ? rawHaystack : undefined,
@@ -1043,6 +1092,36 @@ export async function searchSessions(
     };
 }
 
+/**
+ * The session-level note for more=N. The count is session-scoped by
+ * construction (the session's matching messages minus the representative),
+ * so it rides the session line; a bare number is not actionable, so the
+ * note names the next step. Absent for single-hit sessions.
+ */
+function moreNote(more: number): string | undefined {
+    if (more <= 0) return undefined;
+    return `(+${more} more matching message${more === 1 ? "" : "s"} in this session, not shown · read_session for the full transcript)`;
+}
+
+/**
+ * The message-level note for a windowed snippet: without it the consumer
+ * cannot tell a windowed hit from a complete short message. Absent when the
+ * snippet covers the whole message, which is the honest "nothing omitted"
+ * signal.
+ */
+function omissionNote(hit: SearchHit): string | undefined {
+    const parts = [
+        hit.omittedBeforeLines > 0
+            ? `${hit.omittedBeforeLines} line${hit.omittedBeforeLines === 1 ? "" : "s"} omitted before`
+            : undefined,
+        hit.omittedAfterLines > 0
+            ? `${hit.omittedAfterLines} line${hit.omittedAfterLines === 1 ? "" : "s"} omitted after`
+            : undefined,
+    ].filter((part): part is string => part !== undefined);
+    if (parts.length === 0) return undefined;
+    return `(${parts.join(" · ")} · read_session_entry for the full message)`;
+}
+
 /** Format hits for the tool result / slash command: the output contract lines. */
 export function formatHits(
     result: SearchSessionsResult,
@@ -1053,18 +1132,30 @@ export function formatHits(
     // used to be the only place a blank line appeared).
     const blocks: string[] = [];
     for (const hit of result.hits) {
+        // Two ref lines, one layer each: the session line (where the session
+        // is, plus the session-scoped more=N) and the message line (which
+        // message inside it matched). more=N lives on the session line by
+        // construction (it is the session's total minus this hit), never on
+        // the message line; a bare count is not actionable either, so it
+        // also gets a note line naming the next step.
+        const more = hit.more && hit.more > 0 ? hit.more : 0;
         blocks.push(
             [
-                `session=${shortenPath(hit.sessionPath)} id=${hit.sessionId} entry=${hit.entryId} ts=${hit.timestamp} role=${hit.role}` +
-                    (hit.more && hit.more > 0 ? ` more=${hit.more}` : "") +
+                `session=${shortenPath(hit.sessionPath)} id=${hit.sessionId}` +
                     (result.scope === "all"
                         ? ` project=${path.basename(path.dirname(hit.sessionPath))}`
-                        : ""),
+                        : "") +
+                    (more > 0 ? ` more=${more}` : ""),
+                `entry=${hit.entryId} ts=${hit.timestamp} role=${hit.role}`,
+                moreNote(more),
+                omissionNote(hit),
                 // Snippets may span multiple lines (line-aligned, see
                 // buildSnippet); indentBlock keeps continuation lines under
-                // the ref line.
+                // the ref lines.
                 ...indentBlock(hit.snippet),
-            ].join("\n"),
+            ]
+                .filter((line): line is string => line !== undefined)
+                .join("\n"),
         );
     }
 
