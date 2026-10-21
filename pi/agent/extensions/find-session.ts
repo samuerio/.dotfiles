@@ -230,7 +230,11 @@ export const SearchSessionsParams = Type.Object({
         description:
             "Search query: a plain keyword (case-insensitive substring, regex metacharacters escaped) or a " +
             "/regex/flags form. The g and y flags are stripped if present (they break index-based snippet " +
-            "positioning and leak lastIndex state across messages).",
+            "positioning and leak lastIndex state across messages). A plain MULTI-WORD query is an EXACT " +
+            "PHRASE, not one keyword per word (\"foo bar\" matches only that literal string, whitespace " +
+            "included); to OR across keywords use the regex form, e.g. /foo|bar|baz/i, and /foo\\s+bar/i " +
+            "when the spacing between two words is unknown. There is no AND form. Regex queries skip the " +
+            "raw-text prefilter and parse every session file, so scanned then equals listed.",
     }),
     since: Type.Optional(
         Type.String({
