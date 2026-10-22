@@ -16,7 +16,6 @@ import { fileURLToPath } from "node:url";
 import {
     loadRushModeSpec,
     rushComplete,
-    RUSH_MODE,
 } from "./lib/rush.ts";
 
 type ExtensionUI = ExtensionCommandContext["ui"];
@@ -324,7 +323,9 @@ export default function (pi: ExtensionAPI) {
         // Resolve model/auth (needed for describe in regenerate case)
         const rushSpec = loadRushModeSpec(ctx.cwd);
         if (!rushSpec) {
-            return fail(`No '${RUSH_MODE}' mode in modes.json`);
+            return fail(
+                "No subagent model routing in modes.json (modes[currentMode].roles.subagents)",
+            );
         }
         const model = ctx.modelRegistry.find(
             rushSpec.provider!,
@@ -332,7 +333,7 @@ export default function (pi: ExtensionAPI) {
         );
         if (!model) {
             return fail(
-                `Mode '${RUSH_MODE}' references unknown model ${rushSpec.provider}/${rushSpec.modelId}`,
+                `Active mode references unknown model ${rushSpec.provider}/${rushSpec.modelId}`,
             );
         }
         if (!ctx.modelRegistry.hasConfiguredAuth(model)) {

@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Resolve the default pi model and thinking level for headless runs.
 
-Reads the `smart` mode from pi's modes.json and prints two lines:
+Reads the currently active mode's subagent routing from pi's modes.json
+(modes[currentMode].roles.subagents) and prints two lines:
   line 1: model as `provider/modelId`
   line 2: thinkingLevel (may be empty)
 
 Project-level `.pi/modes.json` (relative to cwd) takes precedence, then the
-global `~/.pi/agent/modes.json` (honoring PI_CODING_AGENT_DIR). If `smart` is
-absent or malformed, both lines are empty so the caller can fall back to pi's
-own defaults by omitting --model/--thinking.
+global `~/.pi/agent/modes.json` (honoring PI_CODING_AGENT_DIR). If no binding
+resolves, both lines are empty so the caller can fall back to pi's own
+defaults by omitting --model/--thinking.
 """
 from __future__ import annotations
 
@@ -16,8 +17,6 @@ import json
 import os
 import sys
 from pathlib import Path
-
-MODE_NAME = "smart"
 
 
 def global_agent_dir() -> Path:
@@ -48,14 +47,32 @@ def read_spec(path: Path) -> dict | None:
     modes = parsed.get("modes")
     if not isinstance(modes, dict):
         return None
-    spec = modes.get(MODE_NAME)
+    current_mode = parsed.get("currentMode")
+    if not isinstance(current_mode, str):
+        return None
+    spec = modes.get(current_mode)
     if not isinstance(spec, dict):
         return None
-    provider = spec.get("provider")
-    model_id = spec.get("modelId")
+    # New schema: roles.subagents of the active mode (headless runs are
+    # worker/subagent class); fall back to roles.main, then the legacy
+    # top-level provider/modelId/thinkingLevel fields.
+    roles = spec.get("roles")
+    pin = None
+    if isinstance(roles, dict):
+        for key in ("subagents", "main"):
+            candidate = roles.get(key)
+            if isinstance(candidate, dict):
+                pin = candidate
+                break
+    if isinstance(pin, dict):
+        provider = pin.get("provider")
+        model_id = pin.get("modelId")
+    else:
+        provider = spec.get("provider")
+        model_id = spec.get("modelId")
     if not isinstance(provider, str) or not isinstance(model_id, str):
         return None
-    thinking = spec.get("thinkingLevel")
+    thinking = (pin or spec).get("thinkingLevel")
     if thinking is not None and not isinstance(thinking, str):
         thinking = None
     return {

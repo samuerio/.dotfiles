@@ -16,11 +16,7 @@ import type {
     ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { BorderedLoader } from "@earendil-works/pi-coding-agent";
-import {
-    loadRushModeSpec,
-    RUSH_MODE,
-    rushComplete,
-} from "./lib/rush.ts";
+import { loadRushModeSpec, rushComplete } from "./lib/rush.ts";
 import {
     type Component,
     Editor,
@@ -470,7 +466,10 @@ export default function (pi: ExtensionAPI) {
         // Resolve the rush model from modes.json (project, then global)
         const rushSpec = loadRushModeSpec(ctx.cwd);
         if (!rushSpec) {
-            ctx.ui.notify(`No '${RUSH_MODE}' mode in modes.json`, "error");
+            ctx.ui.notify(
+                "No subagent model routing in modes.json (modes[currentMode].roles.subagents)",
+                "error",
+            );
             return;
         }
         const model = ctx.modelRegistry.find(
@@ -479,7 +478,7 @@ export default function (pi: ExtensionAPI) {
         );
         if (!model) {
             ctx.ui.notify(
-                `Mode '${RUSH_MODE}' references unknown model ${rushSpec.provider}/${rushSpec.modelId}`,
+                `Active mode references unknown model ${rushSpec.provider}/${rushSpec.modelId}`,
                 "error",
             );
             return;

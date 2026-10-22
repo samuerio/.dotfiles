@@ -1,10 +1,13 @@
 /**
- * Shared "rush" mode resolution.
+ * Shared worker-model resolution for one-shot LLM calls.
  *
- * Reads provider/model/thinking-level bindings from modes.json
- * (project `.pi/modes.json` first, then global agent `modes.json`).
- * Consumed by extensions that run one-shot LLM requests with the rush
- * model (answer.ts, handoff.ts).
+ * Reads the model routing of the *currently active* mode from modes.json
+ * (project `.pi/modes.json` first, then global agent `modes.json`):
+ * `modes[currentMode].roles.subagents` — a one-shot worker call is
+ * semantically a subagent. Falls back to the legacy "rush" mode's top-level
+ * provider/modelId/thinkingLevel fields for unmigrated files.
+ * Consumed by extensions that run one-shot LLM requests (answer.ts,
+ * handoff.ts, inline.ts, goal.ts, compact-rush.ts).
  *
  * This directory intentionally has no index.ts: pi only auto-loads
  * `extensions/*.ts` files and subdirectories with index.ts/package.json.
@@ -28,6 +31,7 @@ export type ModeSpec = {
 	thinkingLevel?: ThinkingLevel;
 };
 
+/** Legacy hardcoded mode kept only for the unmigrated-file fallback. */
 export const RUSH_MODE = "rush";
 
 const THINKING_LEVELS: readonly ThinkingLevel[] = [
@@ -47,9 +51,35 @@ function getGlobalModesPath(): string {
 	return join(getAgentDir(), "modes.json");
 }
 
+function normalizeThinkingLevel(level: unknown): ThinkingLevel | undefined {
+	return THINKING_LEVELS.includes(level as ThinkingLevel)
+		? (level as ThinkingLevel)
+		: undefined;
+}
+
+/** Extract `{provider, modelId, thinkingLevel}` from a roles pin. */
+function pinToSpec(pin: Record<string, unknown>): ModeSpec & { provider: string; modelId: string } | null {
+	const provider = typeof pin.provider === "string" ? pin.provider : undefined;
+	const modelId = typeof pin.modelId === "string" ? pin.modelId : undefined;
+	const thinkingLevel = normalizeThinkingLevel(pin.thinkingLevel);
+	if (!provider || !modelId) return null;
+	return { provider, modelId, thinkingLevel };
+}
+
+/** Extract the binding from the legacy top-level mode fields. */
+function legacySpec(spec: Record<string, unknown>): ModeSpec & { provider: string; modelId: string } | null {
+	const provider = typeof spec.provider === "string" ? spec.provider : undefined;
+	const modelId = typeof spec.modelId === "string" ? spec.modelId : undefined;
+	const thinkingLevel = normalizeThinkingLevel(spec.thinkingLevel);
+	if (!provider || !modelId) return null;
+	return { provider, modelId, thinkingLevel };
+}
+
 /**
- * Returns a resolved mode spec with provider/modelId guaranteed non-empty
- * (the loader skips candidates lacking either), or null when no binding.
+ * Returns the active mode's subagent routing as a resolved spec with
+ * provider/modelId guaranteed non-empty, or null when no binding.
+ * Resolution: modes[currentMode].roles.subagents → legacy "rush" mode's
+ * top-level fields (unmigrated files).
  */
 export function loadRushModeSpec(cwd: string): ModeSpec & { provider: string; modelId: string } | null {
 	const candidates = [getProjectModesPath(cwd), getGlobalModesPath()];
@@ -61,25 +91,29 @@ export function loadRushModeSpec(cwd: string): ModeSpec & { provider: string; mo
 		} catch {
 			continue;
 		}
-		const modes =
-			parsed && typeof parsed === "object"
-				? (parsed as { modes?: unknown }).modes
-				: undefined;
+		const obj = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : undefined;
+		if (!obj) continue;
+		const modes = obj.modes;
 		if (!modes || typeof modes !== "object") continue;
-		const spec = (modes as Record<string, unknown>)[RUSH_MODE];
+		const currentMode =
+			typeof obj.currentMode === "string" ? obj.currentMode : undefined;
+		if (!currentMode) continue;
+		const spec = (modes as Record<string, unknown>)[currentMode];
 		if (!spec || typeof spec !== "object") continue;
-		const obj = spec as Record<string, unknown>;
-		const provider =
-			typeof obj.provider === "string" ? obj.provider : undefined;
-		const modelId =
-			typeof obj.modelId === "string" ? obj.modelId : undefined;
-		const thinkingLevel = THINKING_LEVELS.includes(
-			obj.thinkingLevel as ThinkingLevel,
-		)
-			? (obj.thinkingLevel as ThinkingLevel)
-			: undefined;
-		if (!provider || !modelId) continue;
-		return { provider, modelId, thinkingLevel };
+		const roles = (spec as Record<string, unknown>).roles;
+		if (roles && typeof roles === "object") {
+			const pin = (roles as Record<string, unknown>).subagents;
+			if (pin && typeof pin === "object") {
+				const resolved = pinToSpec(pin as Record<string, unknown>);
+				if (resolved) return resolved;
+			}
+		}
+		// Not a roles-shaped spec (or pin incomplete): only useful if this
+		// happens to be the legacy hardcoded mode with top-level fields.
+		if (currentMode === RUSH_MODE) {
+			const legacy = legacySpec(spec as Record<string, unknown>);
+			if (legacy) return legacy;
+		}
 	}
 	return null;
 }
@@ -173,13 +207,16 @@ export function resolveRushModel(
 ): ResolvedRushModel {
 	const spec = loadRushModeSpec(cwd);
 	if (!spec) {
-		return { ok: false, error: `No '${RUSH_MODE}' mode in modes.json` };
+		return {
+			ok: false,
+			error: "No subagent model routing in modes.json (modes[currentMode].roles.subagents)",
+		};
 	}
 	const model = modelRegistry.find(spec.provider, spec.modelId);
 	if (!model) {
 		return {
 			ok: false,
-			error: `Mode '${RUSH_MODE}' references unknown model ${spec.provider}/${spec.modelId}`,
+			error: `Active mode references unknown model ${spec.provider}/${spec.modelId}`,
 		};
 	}
 	if (!modelRegistry.hasConfiguredAuth(model)) {

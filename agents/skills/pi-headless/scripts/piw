@@ -2,7 +2,8 @@
 # piw: wrapper around `pi` for skill-driven runs.
 #
 # Injects the model/thinking resolved at run time from pi's
-# `rush` mode in modes.json (project <cwd>/.pi/modes.json takes precedence,
+# active mode's subagent routing in modes.json (project <cwd>/.pi/modes.json
+# takes precedence,
 # then global ~/.pi/agent/modes.json). The caller never picks a model.
 #
 # Temporary audit trail: by default each run persists its session to
@@ -12,7 +13,7 @@
 # passing their own --session/--session-id/--session-dir keep full control.
 # /tmp is tmpfs: the audit trail is cleared on reboot by design.
 #
-# Fails fast when no `rush` mode is configured instead of falling back to pi
+# Fails fast when no subagent routing is configured instead of falling back to pi
 # defaults, so the caller always knows which model a run used.
 #
 # Usage: piw [pi flags and prompt...]
@@ -29,8 +30,8 @@ model="${cfg[0]:-}"
 thinking="${cfg[1]:-}"
 
 if [[ -z "$model" ]]; then
-  echo "piw: error: no 'rush' mode resolved from modes.json" >&2
-  echo "Configure modes.rush with provider and modelId in one of:" >&2
+  echo "piw: error: no subagent model routing resolved from modes.json" >&2
+  echo "Configure modes[currentMode].roles.subagents with provider/modelId/thinkingLevel in one of:" >&2
   echo "  <cwd>/.pi/modes.json   (project, takes precedence)" >&2
   echo "  ~/.pi/agent/modes.json (global)" >&2
   echo "List available models with: pi --list-models" >&2

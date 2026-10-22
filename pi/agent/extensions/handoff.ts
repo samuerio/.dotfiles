@@ -14,7 +14,7 @@
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { type UserMessage } from "@earendil-works/pi-ai/compat";
-import { loadRushModeSpec, RUSH_MODE, rushComplete } from "./lib/rush.ts";
+import { loadRushModeSpec, rushComplete } from "./lib/rush.ts";
 import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { BorderedLoader, convertToLlm, serializeConversation } from "@earendil-works/pi-coding-agent";
 
@@ -92,13 +92,16 @@ export default function (pi: ExtensionAPI) {
 			// thinking level, independent of the current session model.
 			const rushSpec = loadRushModeSpec(ctx.cwd);
 			if (!rushSpec) {
-				ctx.ui.notify(`No '${RUSH_MODE}' mode in modes.json`, "error");
+				ctx.ui.notify(
+					"No subagent model routing in modes.json (modes[currentMode].roles.subagents)",
+					"error",
+				);
 				return;
 			}
 			const model = ctx.modelRegistry.find(rushSpec.provider!, rushSpec.modelId!);
 			if (!model) {
 				ctx.ui.notify(
-					`Mode '${RUSH_MODE}' references unknown model ${rushSpec.provider}/${rushSpec.modelId}`,
+					`Active mode references unknown model ${rushSpec.provider}/${rushSpec.modelId}`,
 					"error",
 				);
 				return;

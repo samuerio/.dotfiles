@@ -44,7 +44,7 @@
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { compact } from "@earendil-works/pi-coding-agent";
 import { uuidv7 } from "@earendil-works/pi-ai";
-import { loadRushModeSpec, RUSH_MODE, sessionHeaders } from "./lib/rush.ts";
+import { loadRushModeSpec, sessionHeaders } from "./lib/rush.ts";
 
 type ResolvedRequestAuth = Awaited<ReturnType<ExtensionContext["modelRegistry"]["getApiKeyAndHeaders"]>>;
 type ResolvedAuthOk = Extract<ResolvedRequestAuth, { ok: true }>;
@@ -103,7 +103,10 @@ export default function (pi: ExtensionAPI) {
 		// ------------------------------------------------------------------
 		const spec = loadRushModeSpec(ctx.cwd);
 		if (!spec) {
-			warnOnce(ctx, `no '${RUSH_MODE}' mode in modes.json, falling back to default compaction`);
+			warnOnce(
+				ctx,
+				"no subagent model routing in modes.json, falling back to default compaction",
+			);
 			return undefined;
 		}
 		const baseModel = ctx.modelRegistry.find(spec.provider, spec.modelId);
