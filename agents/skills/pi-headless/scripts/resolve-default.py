@@ -5,6 +5,10 @@ Reads the `rush` mode from pi's modes.json and prints two lines:
   line 1: model as `provider/modelId`
   line 2: thinkingLevel (may be empty)
 
+A headless run is a one-shot worker, semantically a subagent, so the model
+resolves from `roles.subagents` first; `roles.main` and the legacy top-level
+provider/modelId fields serve as fallbacks.
+
 Project-level `.pi/modes.json` (relative to cwd) takes precedence, then the
 global `~/.pi/agent/modes.json` (honoring PI_CODING_AGENT_DIR). If `rush` is
 absent or malformed, both lines are empty so the caller can fall back to pi's
@@ -51,11 +55,26 @@ def read_spec(path: Path) -> dict | None:
     spec = modes.get(MODE_NAME)
     if not isinstance(spec, dict):
         return None
-    provider = spec.get("provider")
-    model_id = spec.get("modelId")
+    # New schema: routing lives in roles. Headless runs are worker/subagent
+    # class, so resolve from roles.subagents first; roles.main and the legacy
+    # top-level provider/modelId/thinkingLevel fields are fallbacks.
+    roles = spec.get("roles")
+    pin = None
+    if isinstance(roles, dict):
+        for key in ("subagents", "main"):
+            candidate = roles.get(key)
+            if isinstance(candidate, dict):
+                pin = candidate
+                break
+    if isinstance(pin, dict):
+        provider = pin.get("provider")
+        model_id = pin.get("modelId")
+    else:
+        provider = spec.get("provider")
+        model_id = spec.get("modelId")
     if not isinstance(provider, str) or not isinstance(model_id, str):
         return None
-    thinking = spec.get("thinkingLevel")
+    thinking = (pin or spec).get("thinkingLevel")
     if thinking is not None and not isinstance(thinking, str):
         thinking = None
     return {

@@ -1,26 +1,63 @@
 {
-  "version": 1,
-  "currentMode": "smart",
-  "modes": {
-    "default": {
-      "provider": "opencode-go",
-      "modelId": "muse-spark-1.2-contributor",
-      "thinkingLevel": "medium"
-    },
-    "rush": {
-      "provider": "opencode-go",
-      "modelId": "glm-5.3-flash",
-      "thinkingLevel": "medium"
-    },
-    "smart": {
-      "provider": "opencode-go",
-      "modelId": "step-5-preview",
-      "thinkingLevel": "high"
-    },
-    "deep": {
-      "provider": "opencode-go",
-      "modelId": "qwen3.7-max",
-      "thinkingLevel": "xhigh"
+    "version": 1,
+    "currentMode": "rush",
+    "modes": {
+        "default": {
+            "roles": {
+                "main": {
+                    "provider": "opencode-go",
+                    "modelId": "muse-spark-1.2-contributor",
+                    "thinkingLevel": "medium"
+                },
+                "oracle": {
+                    "provider": "opencode-go",
+                    "modelId": "hy4-preview",
+                    "thinkingLevel": "high"
+                },
+                "subagents": {
+                    "provider": "opencode-go",
+                    "modelId": "space-bunny",
+                    "thinkingLevel": "medium"
+                }
+            }
+        },
+        "rush": {
+            "roles": {
+                "main": {
+                    "provider": "engy",
+                    "modelId": "glm-5.3-flash",
+                    "thinkingLevel": "high"
+                },
+                "oracle": {
+                    "provider": "engy",
+                    "modelId": "qwen3.8-27b",
+                    "thinkingLevel": "high"
+                },
+                "subagents": {
+                    "provider": "engy",
+                    "modelId": "deepseek-v4.1-flash",
+                    "thinkingLevel": "high"
+                }
+            }
+        },
+        "smart": {
+            "roles": {
+                "main": {
+                    "provider": "opencode-go",
+                    "modelId": "step-5-preview",
+                    "thinkingLevel": "high"
+                },
+                "oracle": {
+                    "provider": "opencode-go",
+                    "modelId": "hy4-preview",
+                    "thinkingLevel": "high"
+                },
+                "subagents": {
+                    "provider": "opencode-go",
+                    "modelId": "space-bunny",
+                    "thinkingLevel": "medium"
+                }
+            }
+        }
     }
-  }
 }

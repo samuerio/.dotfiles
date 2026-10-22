@@ -11,6 +11,59 @@ import {
 	type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
+
+/**
+ * Resolve a subagent role's model routing from the active mode in modes.json
+ * (same file the prompt-editor extension manages). Every role is explicitly
+ * pinned — `roles.oracle` serves the oracle subagent, `roles.subagents`
+ * serves everything else — and a missing/malformed pin is a hard error
+ * (fail fast): the dispatch is aborted with an error naming the file and
+ * the missing piece. There is no fallback to the spec's baked-in model.
+ */
+function resolveRoleRouting(cwd: string, specName: string): { model: string; thinking: string } {
+	const role = specName === "oracle" ? "oracle" : "subagents";
+
+	// Mirror prompt-editor's path resolution: project `.pi/modes.json` wins
+	// over the global `~/.pi/agent/modes.json`.
+	const globalPath = path.join(getAgentDir(), "modes.json");
+	let modesPath = globalPath;
+	try {
+		const projectPath = path.join(cwd, ".pi", "modes.json");
+		if (fs.statSync(projectPath).isFile()) modesPath = projectPath;
+	} catch {
+		/* no project override; use the global file */
+	}
+
+	let parsed: any;
+	try {
+		parsed = JSON.parse(fs.readFileSync(modesPath, "utf-8"));
+	} catch (err) {
+		throw new Error(`modes.json: failed to read/parse ${modesPath}: ${(err as Error).message}`);
+	}
+
+	const currentMode = parsed?.currentMode;
+	if (typeof currentMode !== "string" || !currentMode) {
+		throw new Error(`modes.json: "currentMode" must be a non-empty string in ${modesPath}`);
+	}
+	const modeSpec = parsed?.modes?.[currentMode];
+	if (!modeSpec || typeof modeSpec !== "object") {
+		throw new Error(`modes.json: modes["${currentMode}"] is missing in ${modesPath}`);
+	}
+	const pin = modeSpec.roles?.[role];
+	if (!pin || typeof pin !== "object") {
+		throw new Error(
+			`modes.json: modes["${currentMode}"].roles.${role} is required (subagent "${specName}" dispatches need an explicit pin) in ${modesPath}`,
+		);
+	}
+	for (const field of ["provider", "modelId", "thinkingLevel"] as const) {
+		if (typeof pin[field] !== "string" || !pin[field]) {
+			throw new Error(
+				`modes.json: modes["${currentMode}"].roles.${role}.${field} must be a non-empty string in ${modesPath}`,
+			);
+		}
+	}
+	return { model: `${pin.provider}/${pin.modelId}`, thinking: pin.thinkingLevel };
+}
 import { Type } from "typebox";
 
 const COLLAPSED_ITEM_COUNT = 10;
@@ -365,8 +418,12 @@ export class Subagent {
 		}
 
 		const args: string[] = ["--mode", "json", "-p", "--session-dir", sessionDir];
-		if (spec.model) args.push("--model", spec.model);
-		if (spec.thinking) args.push("--thinking", spec.thinking);
+		// Model routing goes through the active mode's roles in modes.json (fail
+		// fast): every subagent role is explicitly pinned there. The spec's own
+		// model/thinking serve only as documentation; dispatch always uses the mode.
+		const resolved = resolveRoleRouting(cwd, spec.name);
+		args.push("--model", resolved.model);
+		args.push("--thinking", resolved.thinking);
 		if (spec.tools && spec.tools.length > 0) args.push("--tools", spec.tools.join(","));
 		else args.push("--no-tools");
 		// Discovery off; `--no-skills` does not suppress explicitly passed
@@ -384,8 +441,8 @@ export class Subagent {
 			messages: [],
 			stderr: "",
 			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
-			model: spec.model,
-			thinking: spec.thinking,
+			model: resolved.model,
+			thinking: resolved.thinking,
 		};
 
 		/** Resolve the child's persisted session JSONL (single file in our run dir). Idempotent. */

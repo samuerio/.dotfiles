@@ -61,8 +61,8 @@
                     }
                 },
                 {
-                    "id": "deepseek-v4-flash-0731",
-                    "name": "deepseek-v4-flash-0731",
+                    "id": "deepseek-v4.1-flash",
+                    "name": "deepseek-v4.1-flash",
                     "reasoning": true,
                     "input": ["text"],
                     "contextWindow": 256000,

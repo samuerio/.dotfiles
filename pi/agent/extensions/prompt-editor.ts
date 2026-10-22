@@ -26,16 +26,77 @@ type ThinkingLevel =
     | "xhigh"
     | "max";
 
+/**
+ * Explicit model routing for one role. All three roles (main / oracle /
+ * subagents) share this shape; subagent dispatch reads oracle/subagents from
+ * here and fails fast when a pin is missing or malformed.
+ */
+type RolePin = {
+    provider: string;
+    modelId: string;
+    thinkingLevel: ThinkingLevel;
+};
+
+type ModeRoles = {
+    main?: RolePin;
+    oracle?: RolePin;
+    subagents?: RolePin;
+};
+
 type ModeSpec = {
-    provider?: string;
-    modelId?: string;
-    thinkingLevel?: ThinkingLevel;
+    /**
+     * Explicit model routing for every role. `main` is the agent's own model,
+     * `oracle`/`subagents` route the subagents. Modes without complete roles
+     * still switch the main model but abort subagent dispatch (fail fast).
+     */
+    roles?: ModeRoles;
     /**
      * Optional theme color token to use for the editor border.
      * If unset, the border color is derived from the (current) thinking level.
      */
     color?: string;
 };
+
+const ROLE_KEYS = ["main", "oracle", "subagents"] as const;
+
+function sanitizeRolePin(pin: unknown): RolePin | undefined {
+    const obj = (pin && typeof pin === "object" ? pin : {}) as Record<string, unknown>;
+    const provider = typeof obj.provider === "string" ? obj.provider : undefined;
+    const modelId = typeof obj.modelId === "string" ? obj.modelId : undefined;
+    const thinkingLevel = normalizeThinkingLevel(obj.thinkingLevel);
+    if (!provider || !modelId || !thinkingLevel) return undefined;
+    return { provider, modelId, thinkingLevel };
+}
+
+function sanitizeRoles(roles: unknown): ModeRoles | undefined {
+    const obj = (roles && typeof roles === "object" ? roles : {}) as Record<string, unknown>;
+    const out: ModeRoles = {};
+    let any = false;
+    for (const key of ROLE_KEYS) {
+        const pin = sanitizeRolePin(obj[key]);
+        if (pin) {
+            out[key] = pin;
+            any = true;
+        }
+    }
+    return any ? out : undefined;
+}
+
+function cloneRoles(roles: ModeRoles | undefined): ModeRoles | undefined {
+    return roles ? (JSON.parse(JSON.stringify(roles)) as ModeRoles) : undefined;
+}
+
+function formatRolePin(pin: RolePin | undefined): string {
+    return pin ? `${pin.modelId}/${pin.thinkingLevel}` : "(not pinned)";
+}
+
+function describeRoles(roles: ModeRoles | undefined): string {
+    const parts: string[] = [];
+    if (roles?.main) parts.push(`main: ${formatRolePin(roles.main)}`);
+    if (roles?.oracle) parts.push(`oracle: ${formatRolePin(roles.oracle)}`);
+    if (roles?.subagents) parts.push(`subagents: ${formatRolePin(roles.subagents)}`);
+    return parts.join(" · ");
+}
 
 type ModesFile = {
     version: 1;
@@ -190,9 +251,7 @@ function cloneModesFile(file: ModesFile): ModesFile {
 }
 
 type ModeSpecPatch = {
-    provider?: string | null;
-    modelId?: string | null;
-    thinkingLevel?: ThinkingLevel | null;
+    roles?: ModeRoles | null;
     color?: string | null;
 };
 
@@ -232,10 +291,11 @@ function computeModesPatch(
         }
 
         const diff: ModeSpecPatch = {};
+        // `roles` is compared deep (JSON) because the editor mutates pins in place.
+        if (JSON.stringify(a.roles ?? null) !== JSON.stringify(b.roles ?? null)) {
+            diff.roles = b.roles === undefined ? null : b.roles;
+        }
         const fields: (keyof ModeSpec)[] = [
-            "provider",
-            "modelId",
-            "thinkingLevel",
             "color",
         ];
         for (const f of fields) {
@@ -276,7 +336,9 @@ function applyModesPatch(target: ModesFile, patch: ModesPatch): void {
             if (v === null || v === undefined) {
                 delete targetSpec[k];
             } else {
-                targetSpec[k] = v;
+                // Deep-copy nested values (roles) so the target does not alias
+                // the patch source object.
+                targetSpec[k] = typeof v === "object" ? JSON.parse(JSON.stringify(v)) : v;
             }
         }
     }
@@ -303,12 +365,12 @@ function sanitizeModeSpec(spec: unknown): ModeSpec {
         string,
         unknown
     >;
-    return {
-        provider: typeof obj.provider === "string" ? obj.provider : undefined,
-        modelId: typeof obj.modelId === "string" ? obj.modelId : undefined,
-        thinkingLevel: normalizeThinkingLevel(obj.thinkingLevel),
+    const out: ModeSpec = {
         color: typeof obj.color === "string" ? obj.color : undefined,
     };
+    const roles = sanitizeRoles(obj.roles);
+    if (roles) out.roles = roles;
+    return out;
 }
 
 function createDefaultModes(
@@ -318,20 +380,25 @@ function createDefaultModes(
     const currentModel = ctx.model;
     const currentThinking = pi.getThinkingLevel();
 
-    const base: ModeSpec = {
-        provider: currentModel?.provider,
-        modelId: currentModel?.id,
-        thinkingLevel: currentThinking,
-    };
+    const main =
+        currentModel?.provider && currentModel?.id
+            ? {
+                  provider: currentModel.provider,
+                  modelId: currentModel.id,
+                  thinkingLevel: currentThinking,
+              }
+            : undefined;
 
     return {
         version: 1,
         currentMode: "default",
         modes: {
             // Forced default mode
-            default: { ...base },
+            default: main ? { roles: { main } } : {},
             // Convenience mode (user can delete/rename)
-            fast: { ...base, thinkingLevel: "off" },
+            fast: main
+                ? { roles: { main: { ...main, thinkingLevel: "off" as const } } }
+                : {},
         },
     };
 }
@@ -464,9 +531,11 @@ function inferModeFromSelection(
         for (const name of names) {
             const spec = data.modes[name];
             if (!spec) continue;
-            if (spec.provider !== provider || spec.modelId !== modelId)
+            const main = spec.roles?.main;
+            if (!main) continue;
+            if (main.provider !== provider || main.modelId !== modelId)
                 continue;
-            if ((spec.thinkingLevel ?? undefined) !== thinkingLevel) continue;
+            if ((main.thinkingLevel ?? undefined) !== thinkingLevel) continue;
             return name;
         }
         return null;
@@ -478,7 +547,9 @@ function inferModeFromSelection(
     for (const name of names) {
         const spec = data.modes[name];
         if (!spec) continue;
-        if (spec.provider !== provider || spec.modelId !== modelId) continue;
+        const main = spec.roles?.main;
+        if (!main) continue;
+        if (main.provider !== provider || main.modelId !== modelId) continue;
         candidates.push(name);
     }
     if (candidates.length === 0) return null;
@@ -487,14 +558,15 @@ function inferModeFromSelection(
     for (const name of candidates) {
         const spec = data.modes[name];
         if (!spec) continue;
-        if ((spec.thinkingLevel ?? "off") === thinkingLevel) return name;
+        const main = spec.roles?.main;
+        if ((main?.thinkingLevel ?? "off") === thinkingLevel) return name;
     }
 
     // Next prefer a candidate with no thinkingLevel configured.
     for (const name of candidates) {
         const spec = data.modes[name];
         if (!spec) continue;
-        if (!spec.thinkingLevel) return name;
+        if (!spec.roles?.main?.thinkingLevel) return name;
     }
 
     return candidates[0] ?? null;
@@ -621,11 +693,19 @@ function getCurrentSelectionSpec(
     pi: ExtensionAPI,
     _ctx: ExtensionContext,
 ): ModeSpec {
-    return {
-        provider: lastObservedModel.provider,
-        modelId: lastObservedModel.modelId,
-        thinkingLevel: pi.getThinkingLevel(),
-    };
+    const provider = lastObservedModel.provider;
+    const modelId = lastObservedModel.modelId;
+    const spec: ModeSpec = {};
+    if (provider && modelId) {
+        spec.roles = {
+            main: {
+                provider,
+                modelId,
+                thinkingLevel: pi.getThinkingLevel(),
+            },
+        };
+    }
+    return spec;
 }
 
 async function storeSelectionIntoMode(
@@ -640,14 +720,13 @@ async function storeSelectionIntoMode(
     await ensureRuntime(pi, ctx);
 
     const existingTarget = runtime.data.modes[mode] ?? {};
-    const next: ModeSpec = { ...existingTarget };
+    const next: ModeSpec = { ...existingTarget, roles: cloneRoles(existingTarget.roles) ?? {} };
 
-    // Only overwrite fields that we can actually observe.
-    if (selection.provider && selection.modelId) {
-        next.provider = selection.provider;
-        next.modelId = selection.modelId;
+    // Only overwrite fields that we can actually observe. Storing an overlay
+    // replaces roles.main only, so oracle/subagents pins survive the store.
+    if (selection.roles?.main) {
+        next.roles = { ...next.roles, main: selection.roles.main };
     }
-    if (selection.thinkingLevel) next.thinkingLevel = selection.thinkingLevel;
 
     runtime.data.modes[mode] = next;
     await persistRuntime(pi, ctx);
@@ -684,14 +763,15 @@ async function applyMode(
     let modelAppliedOk = true;
     try {
         // Apply model
-        if (spec.provider && spec.modelId) {
-            const m = ctx.modelRegistry.find(spec.provider, spec.modelId);
+        const main = spec.roles?.main;
+        if (main) {
+            const m = ctx.modelRegistry.find(main.provider, main.modelId);
             if (m) {
                 const ok = await pi.setModel(m);
                 modelAppliedOk = ok;
                 if (!ok && ctx.hasUI) {
                     ctx.ui.notify(
-                        `No API key available for ${spec.provider}/${spec.modelId}`,
+                        `No API key available for ${main.provider}/${main.modelId}`,
                         "warning",
                     );
                 }
@@ -699,16 +779,16 @@ async function applyMode(
                 modelAppliedOk = false;
                 if (ctx.hasUI) {
                     ctx.ui.notify(
-                        `Mode "${mode}" references unknown model ${spec.provider}/${spec.modelId}`,
+                        `Mode "${mode}" references unknown model ${main.provider}/${main.modelId}`,
                         "warning",
                     );
                 }
             }
         }
 
-        // Apply thinking level
-        if (spec.thinkingLevel) {
-            pi.setThinkingLevel(spec.thinkingLevel);
+        // Apply thinking level (main pin carries the mode's effort level)
+        if (main?.thinkingLevel) {
+            pi.setThinkingLevel(main.thinkingLevel);
         }
     } finally {
         runtime.applying = false;
@@ -885,16 +965,77 @@ async function addModeUI(
             continue;
         }
 
-        // Default new modes to the current selection so they behave as expected immediately.
+        // Default new modes to the current selection so they behave as expected
+        // immediately. Inherit the current mode's full roles (oracle/subagents
+        // pins) so a fresh mode does not break subagent dispatch (fail fast).
         const selection = customOverlay ?? getCurrentSelectionSpec(pi, ctx);
+        const baseModeName =
+            runtime.currentMode === CUSTOM_MODE_NAME ? runtime.lastRealMode : runtime.currentMode;
+        const inheritedRoles = cloneRoles(runtime.data.modes[baseModeName]?.roles) ?? {};
         runtime.data.modes[name] = {
-            provider: selection.provider,
-            modelId: selection.modelId,
-            thinkingLevel: selection.thinkingLevel,
+            roles: { ...inheritedRoles, main: selection.roles?.main ?? inheritedRoles.main },
         };
         await persistRuntime(pi, ctx);
         ctx.ui.notify(`Added mode \"${name}\"`, "info");
         return name;
+    }
+}
+
+function roleFromAction(action: string): keyof ModeRoles {
+    return action === "Change main"
+        ? "main"
+        : action === "Change oracle"
+          ? "oracle"
+          : "subagents";
+}
+
+/**
+ * Edit one role pin end to end: pick a model (ModelSelector), then pick the
+ * thinking level. Writes back through the standard persist path; applying the
+ * mode afterwards is main-specific (oracle/subagents take effect on the next
+ * subagent dispatch, which reads modes.json fresh every time).
+ */
+async function editRoleUI(
+    pi: ExtensionAPI,
+    ctx: ExtensionContext,
+    modeName: string,
+    role: keyof ModeRoles,
+): Promise<void> {
+    if (!ctx.hasUI) return;
+    await ensureRuntime(pi, ctx);
+    const spec = runtime.data.modes[modeName];
+    if (!spec) return;
+
+    // Seed the picker from the role's current pin; fall back to the live
+    // selection so a fresh role starts from something sensible.
+    const currentPin = spec.roles?.[role];
+    const seed = currentPin ?? spec.roles?.main;
+
+    const selected = await pickModelForModeUI(ctx, {
+        roles: { [role]: seed } as ModeRoles,
+    });
+    if (!selected) return;
+
+    const level = await pickThinkingLevelForModeUI(ctx, seed?.thinkingLevel);
+    if (level === undefined) return;
+
+    spec.roles = {
+        ...spec.roles,
+        [role]: {
+            provider: selected.provider,
+            modelId: selected.modelId,
+            // RolePin.thinkingLevel is required; "unset" maps to "off".
+            thinkingLevel: level ?? "off",
+        },
+    };
+    runtime.data.modes[modeName] = spec;
+    await persistRuntime(pi, ctx);
+    ctx.ui.notify(`Updated ${role} for \"${modeName}\"`, "info");
+
+    // Only main affects the running session immediately; oracle/subagents pins
+    // are read fresh from modes.json on each subagent dispatch.
+    if (role === "main" && runtime.currentMode === modeName) {
+        await applyMode(pi, ctx, modeName);
     }
 }
 
@@ -912,22 +1053,23 @@ async function editModeUI(
         const spec = runtime.data.modes[modeName];
         if (!spec) return;
 
-        const modelLabel =
-            spec.provider && spec.modelId
-                ? `${spec.provider}/${spec.modelId}`
-                : "(no model)";
-        const thinkingLabel = spec.thinkingLevel ?? THINKING_UNSET_LABEL;
+        const main = spec.roles?.main;
+        const modelLabel = main ? `${main.provider}/${main.modelId}` : "(no model)";
+        const thinkingLabel = main?.thinkingLevel ?? THINKING_UNSET_LABEL;
+        const rolesSummary = describeRoles(spec.roles);
 
         const actions = [
             "Change name",
-            "Change model",
-            "Change thinking level",
+            "Change main",
+            "Change oracle",
+            "Change subagents",
         ];
         if (!isDefaultModeName(modeName)) actions.push("Delete mode");
         actions.push(MODE_UI_BACK);
 
         const action = await ctx.ui.select(
-            `Edit mode \"${modeName}\"  model: ${modelLabel}  thinking: ${thinkingLabel}`,
+            `Edit mode \"${modeName}\"  model: ${modelLabel}  thinking: ${thinkingLabel}` +
+                (rolesSummary ? `  |  ${rolesSummary}` : ""),
             actions,
         );
         if (!action || action === MODE_UI_BACK) return;
@@ -938,41 +1080,8 @@ async function editModeUI(
             continue;
         }
 
-        if (action === "Change model") {
-            const selected = await pickModelForModeUI(ctx, spec);
-            if (!selected) continue;
-            spec.provider = selected.provider;
-            spec.modelId = selected.modelId;
-            runtime.data.modes[modeName] = spec;
-            await persistRuntime(pi, ctx);
-            ctx.ui.notify(`Updated model for \"${modeName}\"`, "info");
-
-            if (runtime.currentMode === modeName) {
-                await applyMode(pi, ctx, modeName);
-            }
-            continue;
-        }
-
-        if (action === "Change thinking level") {
-            const level = await pickThinkingLevelForModeUI(
-                ctx,
-                spec.thinkingLevel,
-            );
-            if (level === undefined) continue;
-
-            if (level === null) {
-                delete spec.thinkingLevel;
-            } else {
-                spec.thinkingLevel = level;
-            }
-
-            runtime.data.modes[modeName] = spec;
-            await persistRuntime(pi, ctx);
-            ctx.ui.notify(`Updated thinking level for \"${modeName}\"`, "info");
-
-            if (runtime.currentMode === modeName) {
-                await applyMode(pi, ctx, modeName);
-            }
+        if (action === "Change main" || action === "Change oracle" || action === "Change subagents") {
+            await editRoleUI(pi, ctx, modeName, roleFromAction(action));
             continue;
         }
 
@@ -1086,10 +1195,10 @@ async function pickModelForModeUI(
 ): Promise<{ provider: string; modelId: string } | undefined> {
     if (!ctx.hasUI) return undefined;
 
-    const currentModel =
-        spec.provider && spec.modelId
-            ? ctx.modelRegistry.find(spec.provider, spec.modelId)
-            : ctx.model;
+    const main = spec.roles?.main;
+    const currentModel = main
+        ? ctx.modelRegistry.find(main.provider, main.modelId)
+        : ctx.model;
 
     const scopedModels: Array<{ model: any; thinkingLevel: string }> = [];
 
@@ -1634,9 +1743,13 @@ export default function (pi: ExtensionAPI) {
         runtime.currentMode = CUSTOM_MODE_NAME;
 
         customOverlay = {
-            provider: event.model.provider,
-            modelId: event.model.id,
-            thinkingLevel: pi.getThinkingLevel(),
+            roles: {
+                main: {
+                    provider: event.model.provider,
+                    modelId: event.model.id,
+                    thinkingLevel: pi.getThinkingLevel(),
+                },
+            },
         };
 
         // Do not persist/select custom.

@@ -263,13 +263,18 @@
     "editor.parameterHints.enabled": false,
     "editor.fontFamily": "Monaco",
     "editor.fontSize": 18,
-    "java.jdt.ls.java.home": "/usr/lib/jvm/java-8-openjdk",
-    "java.jdt.ls.vmargs": "-javaagent:/home/zhe/github/.dotfiles/lombok/lombok-1.18.32.jar",
+    "java.jdt.ls.java.home": "/usr/lib/jvm/java-27-openjdk",
+    "java.jdt.ls.vmargs": "-javaagent:/home/zhe/workspace/.dotfiles/lombok/lombok-1.18.32.jar",
     "java.jdt.ls.lombokSupport.enabled": false,
     "java.configuration.runtimes": [
         {
             "name": "JavaSE-1.8",
             "path": "/usr/lib/jvm/java-8-openjdk"
+        },
+        {
+            "name": "JavaSE-21",
+            "path": "/usr/lib/jvm/java-21-openjdk",
+            "default": true
         }
     ],
     "python.analysis.extraPaths": [".venv"],
@@ -277,5 +282,6 @@
     "terminal.integrated.fontSize": 14,
     "files.eol": "\n",
     "git.openRepositoryInParentFolders": "never",
-    "diffEditor.hideUnchangedRegions.enabled": true
+    "diffEditor.hideUnchangedRegions.enabled": true,
+    "redhat.telemetry.enabled": false
 }
