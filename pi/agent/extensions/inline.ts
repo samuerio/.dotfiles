@@ -14,9 +14,9 @@ import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-    loadRushModeSpec,
-    rushComplete,
-} from "./lib/rush.ts";
+    resolveWorkerModel,
+    workerComplete,
+} from "./lib/worker.ts";
 
 type ExtensionUI = ExtensionCommandContext["ui"];
 
@@ -321,26 +321,12 @@ export default function (pi: ExtensionAPI) {
         const hasScanPaths = scanScope !== null;
 
         // Resolve model/auth (needed for describe in regenerate case)
-        const rushSpec = loadRushModeSpec(ctx.cwd);
-        if (!rushSpec) {
-            return fail(
-                "No subagent model routing in modes.json (modes[currentMode].roles.subagents)",
-            );
+        const resolved = resolveWorkerModel(ctx.cwd, ctx.modelRegistry);
+        if (!resolved.ok) {
+            return fail(resolved.error);
         }
-        const model = ctx.modelRegistry.find(
-            rushSpec.provider!,
-            rushSpec.modelId!,
-        );
-        if (!model) {
-            return fail(
-                `Active mode references unknown model ${rushSpec.provider}/${rushSpec.modelId}`,
-            );
-        }
-        if (!ctx.modelRegistry.hasConfiguredAuth(model)) {
-            return fail(
-                `No auth configured for ${rushSpec.provider}/${rushSpec.modelId}`,
-            );
-        }
+        const model = resolved.model;
+        const workerSpec = resolved.spec;
         const sessionId = ctx.sessionManager.getSessionId();
 
         const describe = async (
@@ -352,9 +338,9 @@ export default function (pi: ExtensionAPI) {
                 content: [{ type: "text", text: scan }],
                 timestamp: Date.now(),
             };
-            // One-shot rush call through the shared helper (mechanism notes
-            // live on rushComplete in lib/rush.ts).
-            const response = await rushComplete(
+            // One-shot worker call through the shared helper (mechanism notes
+            // live on workerComplete in lib/worker.ts).
+            const response = await workerComplete(
                 model,
                 ctx.modelRegistry,
                 sessionId,

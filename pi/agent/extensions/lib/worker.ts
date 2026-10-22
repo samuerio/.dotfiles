@@ -4,10 +4,8 @@
  * Reads the model routing of the *currently active* mode from modes.json
  * (project `.pi/modes.json` first, then global agent `modes.json`):
  * `modes[currentMode].roles.subagents` — a one-shot worker call is
- * semantically a subagent. Falls back to the legacy "rush" mode's top-level
- * provider/modelId/thinkingLevel fields for unmigrated files.
- * Consumed by extensions that run one-shot LLM requests (answer.ts,
- * handoff.ts, inline.ts, goal.ts, compact-rush.ts).
+ * semantically a subagent. Consumed by extensions that run one-shot LLM
+ * requests (answer.ts, handoff.ts, inline.ts, goal.ts, compact-worker.ts).
  *
  * This directory intentionally has no index.ts: pi only auto-loads
  * `extensions/*.ts` files and subdirectories with index.ts/package.json.
@@ -26,13 +24,10 @@ import { join } from "node:path";
 export type ThinkingLevel = "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 export type ModeSpec = {
-	provider?: string;
-	modelId?: string;
+	provider: string;
+	modelId: string;
 	thinkingLevel?: ThinkingLevel;
 };
-
-/** Legacy hardcoded mode kept only for the unmigrated-file fallback. */
-export const RUSH_MODE = "rush";
 
 const THINKING_LEVELS: readonly ThinkingLevel[] = [
 	"minimal",
@@ -58,7 +53,7 @@ function normalizeThinkingLevel(level: unknown): ThinkingLevel | undefined {
 }
 
 /** Extract `{provider, modelId, thinkingLevel}` from a roles pin. */
-function pinToSpec(pin: Record<string, unknown>): ModeSpec & { provider: string; modelId: string } | null {
+function pinToSpec(pin: Record<string, unknown>): ModeSpec | null {
 	const provider = typeof pin.provider === "string" ? pin.provider : undefined;
 	const modelId = typeof pin.modelId === "string" ? pin.modelId : undefined;
 	const thinkingLevel = normalizeThinkingLevel(pin.thinkingLevel);
@@ -66,22 +61,12 @@ function pinToSpec(pin: Record<string, unknown>): ModeSpec & { provider: string;
 	return { provider, modelId, thinkingLevel };
 }
 
-/** Extract the binding from the legacy top-level mode fields. */
-function legacySpec(spec: Record<string, unknown>): ModeSpec & { provider: string; modelId: string } | null {
-	const provider = typeof spec.provider === "string" ? spec.provider : undefined;
-	const modelId = typeof spec.modelId === "string" ? spec.modelId : undefined;
-	const thinkingLevel = normalizeThinkingLevel(spec.thinkingLevel);
-	if (!provider || !modelId) return null;
-	return { provider, modelId, thinkingLevel };
-}
-
 /**
  * Returns the active mode's subagent routing as a resolved spec with
  * provider/modelId guaranteed non-empty, or null when no binding.
- * Resolution: modes[currentMode].roles.subagents → legacy "rush" mode's
- * top-level fields (unmigrated files).
+ * Resolution: modes[currentMode].roles.subagents.
  */
-export function loadRushModeSpec(cwd: string): ModeSpec & { provider: string; modelId: string } | null {
+export function loadWorkerModeSpec(cwd: string): ModeSpec | null {
 	const candidates = [getProjectModesPath(cwd), getGlobalModesPath()];
 	for (const p of candidates) {
 		if (!existsSync(p)) continue;
@@ -107,12 +92,6 @@ export function loadRushModeSpec(cwd: string): ModeSpec & { provider: string; mo
 				const resolved = pinToSpec(pin as Record<string, unknown>);
 				if (resolved) return resolved;
 			}
-		}
-		// Not a roles-shaped spec (or pin incomplete): only useful if this
-		// happens to be the legacy hardcoded mode with top-level fields.
-		if (currentMode === RUSH_MODE) {
-			const legacy = legacySpec(spec as Record<string, unknown>);
-			if (legacy) return legacy;
 		}
 	}
 	return null;
@@ -143,7 +122,7 @@ export function sessionHeaders(
 	return { "x-opencode-session": sessionId, "x-opencode-client": "pi" };
 }
 
-export interface RushCompleteOptions {
+export interface WorkerCompleteOptions {
 	signal?: AbortSignal;
 	/**
 	 * API-level reasoning effort passed straight through to
@@ -165,12 +144,12 @@ export interface RushCompleteOptions {
  * the official transformHeaders hook. Session headers go first so caller
  * headers win on conflict, matching pi core's attribution merge order.
  */
-export async function rushComplete(
+export async function workerComplete(
 	model: Model<Api>,
 	registry: ModelRegistry,
 	sessionId: string | undefined,
 	context: Context,
-	options?: RushCompleteOptions,
+	options?: WorkerCompleteOptions,
 ): Promise<AssistantMessage> {
 	return registry.complete(model, context, {
 		signal: options?.signal,
@@ -185,27 +164,27 @@ export async function rushComplete(
 }
 
 // ---------------------------------------------------------------------------
-// Shared consumer helpers (rush-mode resolution + response text handling)
+// Shared consumer helpers (worker-model resolution + response text handling)
 // ---------------------------------------------------------------------------
 
-export type ResolvedRushModel =
+export type ResolvedWorkerModel =
 	| {
 			ok: true;
 			model: Model<Api>;
-			spec: ModeSpec & { provider: string; modelId: string };
+			spec: ModeSpec;
 	  }
 	| { ok: false; error: string };
 
 /**
- * One-stop rush-model resolution for one-shot callers: modes.json binding,
+ * One-stop worker-model resolution for one-shot callers: modes.json binding,
  * registry lookup, and auth check. Callers keep their own error surface;
  * the returned error strings are already user-ready.
  */
-export function resolveRushModel(
+export function resolveWorkerModel(
 	cwd: string,
 	modelRegistry: ModelRegistry,
-): ResolvedRushModel {
-	const spec = loadRushModeSpec(cwd);
+): ResolvedWorkerModel {
+	const spec = loadWorkerModeSpec(cwd);
 	if (!spec) {
 		return {
 			ok: false,
@@ -228,7 +207,7 @@ export function resolveRushModel(
 	return { ok: true, model, spec };
 }
 
-/** Full text of a rush response: text blocks joined with newlines. */
+/** Full text of a worker response: text blocks joined with newlines. */
 export function extractText(response: {
 	content: { type: string; text?: string }[];
 }): string {

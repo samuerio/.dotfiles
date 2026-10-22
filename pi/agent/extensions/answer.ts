@@ -16,7 +16,7 @@ import type {
     ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { BorderedLoader } from "@earendil-works/pi-coding-agent";
-import { loadRushModeSpec, rushComplete } from "./lib/rush.ts";
+import { resolveWorkerModel, workerComplete } from "./lib/worker.ts";
 import {
     type Component,
     Editor,
@@ -463,26 +463,14 @@ export default function (pi: ExtensionAPI) {
             return;
         }
 
-        // Resolve the rush model from modes.json (project, then global)
-        const rushSpec = loadRushModeSpec(ctx.cwd);
-        if (!rushSpec) {
-            ctx.ui.notify(
-                "No subagent model routing in modes.json (modes[currentMode].roles.subagents)",
-                "error",
-            );
+        // Resolve the worker model from modes.json (project, then global)
+        const resolved = resolveWorkerModel(ctx.cwd, ctx.modelRegistry);
+        if (!resolved.ok) {
+            ctx.ui.notify(resolved.error, "error");
             return;
         }
-        const model = ctx.modelRegistry.find(
-            rushSpec.provider!,
-            rushSpec.modelId!,
-        );
-        if (!model) {
-            ctx.ui.notify(
-                `Active mode references unknown model ${rushSpec.provider}/${rushSpec.modelId}`,
-                "error",
-            );
-            return;
-        }
+        const model = resolved.model;
+        const workerSpec = resolved.spec;
         const sessionId = ctx.sessionManager.getSessionId?.();
 
         // Find the last assistant message on the current branch
@@ -531,20 +519,15 @@ export default function (pi: ExtensionAPI) {
                 loader.onAbort = () => done(null);
 
                 const doExtract = async () => {
-                    if (!ctx.modelRegistry.hasConfiguredAuth(model)) {
-                        throw new Error(
-                            `No auth configured for ${rushSpec.provider}/${rushSpec.modelId}`,
-                        );
-                    }
                     const userMessage: UserMessage = {
                         role: "user",
                         content: [{ type: "text", text: lastAssistantText! }],
                         timestamp: Date.now(),
                     };
 
-                    // One-shot rush call through the shared helper
-                    // (mechanism notes live on rushComplete in lib/rush.ts).
-                    const response = await rushComplete(
+                    // One-shot worker call through the shared helper
+                    // (mechanism notes live on workerComplete in lib/worker.ts).
+                    const response = await workerComplete(
                         model,
                         ctx.modelRegistry,
                         sessionId,
@@ -554,7 +537,7 @@ export default function (pi: ExtensionAPI) {
                         },
                         {
                             signal: loader.signal,
-                            reasoningEffort: rushSpec.thinkingLevel,
+                            reasoningEffort: workerSpec.thinkingLevel,
                         },
                     );
 

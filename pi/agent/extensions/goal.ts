@@ -17,7 +17,7 @@
  *   auto-compaction retry, and queued follow-ups drain), including after
  *   aborts - so we latch stopReason "aborted" via message_end and convert it
  *   to a pause at the next settle.
- * - Each settle runs a verifier: a tool-less one-shot rush-model call over
+ * - Each settle runs a verifier: a tool-less one-shot worker-model call over
  *   the serialized session transcript, returning structured JSON
  *   {passed, reason, nextAction}. Fail-closed: unparseable output and request
  *   failures are retried once, then the goal pauses with the raw evidence -
@@ -61,9 +61,9 @@ import {
 import {
 	extractJsonObject,
 	extractText,
-	resolveRushModel,
-	rushComplete,
-} from "./lib/rush.ts";
+	resolveWorkerModel,
+	workerComplete,
+} from "./lib/worker.ts";
 import { Text, truncateToWidth } from "@earendil-works/pi-tui";
 
 const MAX_ITERATIONS = 25;
@@ -97,7 +97,7 @@ let recheckNeeded = false;
 let userAbortedSinceLastSettle = false;
 
 // Cumulative verifier spend for the current goal. The verifier's nested
-// rushComplete call never enters pi's session usage accounting, so the
+// workerComplete call never enters pi's session usage accounting, so the
 // footer carries it explicitly. Reset per goal (set/replace); not persisted
 // across restarts.
 let verifyTotals = { tokens: 0, cost: 0 };
@@ -312,19 +312,19 @@ function sendContinuation(pi: ExtensionAPI, content: string): void {
 }
 
 // ---------------------------------------------------------------------------
-// Verifier (one-shot rush-model call, tools: none, fail-closed)
+// Verifier (one-shot worker-model call, tools: none, fail-closed)
 // ---------------------------------------------------------------------------
 
 async function runVerifier(
 	ctx: ExtensionContext,
 	objective: string,
 ): Promise<VerifierResult> {
-	const resolved = resolveRushModel(ctx.cwd, ctx.modelRegistry);
+	const resolved = resolveWorkerModel(ctx.cwd, ctx.modelRegistry);
 	if (!resolved.ok) return { kind: "failed", error: resolved.error };
 	const model = resolved.model;
 
 	// Transcript = active branch with compaction applied. Serialize the
-	// conversation to text so the tool-less rush call never has to carry
+	// conversation to text so the tool-less worker call never has to carry
 	// tool_use/tool_result blocks (a tools:[] request cannot carry them).
 	const messages = ctx.sessionManager
 		.buildContextEntries()
@@ -348,7 +348,7 @@ async function runVerifier(
 	for (let attempt = 1; attempt <= 2; attempt++) {
 		let response;
 		try {
-			response = await rushComplete(
+			response = await workerComplete(
 				model,
 				ctx.modelRegistry,
 				ctx.sessionManager.getSessionId?.(),

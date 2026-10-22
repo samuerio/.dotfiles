@@ -1,19 +1,20 @@
 /**
- * Compact-rush extension - compaction with the rush-mode model
+ * Compact-worker extension - compaction with the worker model
  *
  * Replaces pi's default compaction model choice: instead of the current
  * session model, compaction (/compact, auto-threshold, overflow recovery)
- * summarizes with the model bound to the "rush" mode in modes.json
- * (shared infra: ./lib/rush.ts). Falls back to the default compaction
+ * summarizes with the worker model, i.e. the active mode's
+ * `roles.subagents` pin in modes.json (shared infra: ./lib/worker.ts).
+ * Falls back to the default compaction
  * path (current session model) on any failure - never cancels, because
  * compaction is often on the overflow-recovery critical path.
  *
  * Design (spec: .pi/spec/20261009-172936-compact-rush-model/):
- * - Calls the OFFICIALLY EXPORTED compact() with the rush model, so
+ * - Calls the OFFICIALLY EXPORTED compact() with the worker model, so
  *   summary prompts, failure gates (length/error/toolCall), maxTokens
  *   budgeting, split-turn merge, fileOps tracking and retry wrapping all
  *   stay in sync with the installed pi release. This extension only
- *   supplies what compact() cannot know: rush auth resolution, opencode
+ *   supplies what compact() cannot know: worker auth resolution, opencode
  *   session routing headers, and the fileOps chain repair.
  * - fileOps chain repair: pi's prepareCompaction only relays the previous
  *   compaction's file details when that entry was pi-generated
@@ -29,13 +30,13 @@
  *   override / env). ResolvedRequestAuth is a discriminated union.
  * - opencode headers: pi-ai's completeSimple never injects the
  *   x-opencode-session routing header (only pi core's agent-loop streamFn
- *   does), so we merge lib/rush.ts sessionHeaders() ourselves, with a
+ *   does), so we merge lib/worker.ts sessionHeaders() ourselves, with a
  *   fresh routing session id (one-off request semantics, matching pi
  *   core). Session headers go first so auth headers win on conflict.
  * - Context-window precheck: gate on preparation.tokensBefore vs 90% of
- *   the rush model's context window. Conservative: serialized prompts are
+ *   the worker model's context window. Conservative: serialized prompts are
  *   much smaller than the raw context (tool results are truncated), so
- *   this may occasionally fall back when rush would have fit - correct
+ *   this may occasionally fall back when a worker model would have fit - correct
  *   tradeoff, compaction must not fail loudly.
  * - UI: pi injects a no-op UI context when no UI exists (runner.js), so
  *   unguarded ctx.ui.notify/setStatus calls are always safe.
@@ -44,7 +45,7 @@
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { compact } from "@earendil-works/pi-coding-agent";
 import { uuidv7 } from "@earendil-works/pi-ai";
-import { loadRushModeSpec, sessionHeaders } from "./lib/rush.ts";
+import { loadWorkerModeSpec, sessionHeaders } from "./lib/worker.ts";
 
 type ResolvedRequestAuth = Awaited<ReturnType<ExtensionContext["modelRegistry"]["getApiKeyAndHeaders"]>>;
 type ResolvedAuthOk = Extract<ResolvedRequestAuth, { ok: true }>;
@@ -64,7 +65,7 @@ const warnedMessages = new Set<string>();
 function warnOnce(ctx: ExtensionContext, message: string): void {
 	if (warnedMessages.has(message)) return;
 	warnedMessages.add(message);
-	ctx.ui.notify(`rush compaction unavailable: ${message}`, "warning");
+	ctx.ui.notify(`worker compaction unavailable: ${message}`, "warning");
 }
 
 /** merge last compaction entry's details into preparation.fileOps */
@@ -99,9 +100,9 @@ export default function (pi: ExtensionAPI) {
 		const { preparation, branchEntries, customInstructions, signal } = event;
 
 		// ------------------------------------------------------------------
-		// Rush model resolution (config-class failures: warn keyed by message)
+		// Worker model resolution (config-class failures: warn keyed by message)
 		// ------------------------------------------------------------------
-		const spec = loadRushModeSpec(ctx.cwd);
+		const spec = loadWorkerModeSpec(ctx.cwd);
 		if (!spec) {
 			warnOnce(
 				ctx,
@@ -123,7 +124,7 @@ export default function (pi: ExtensionAPI) {
 		const contextWindow = baseModel.contextWindow || 128000;
 		if (preparation.tokensBefore > contextWindow * 0.9) {
 			ctx.ui.notify(
-				`rush compaction skipped: serialized context ~${preparation.tokensBefore.toLocaleString()} tok exceeds 90% of ${baseModel.id} window (${contextWindow.toLocaleString()}), falling back`,
+				`worker compaction skipped: serialized context ~${preparation.tokensBefore.toLocaleString()} tok exceeds 90% of ${baseModel.id} window (${contextWindow.toLocaleString()}), falling back`,
 				"warning",
 			);
 			return undefined;
@@ -151,7 +152,7 @@ export default function (pi: ExtensionAPI) {
 		const routingSessionId = uuidv7();
 		const headers = mergeHeaders(auth, routingSessionId, requestModel);
 
-		ctx.ui.setStatus("compact-rush", `compacting with ${requestModel.id}`);
+		ctx.ui.setStatus("compact-worker", `compacting with ${requestModel.id}`);
 
 		try {
 			const result = await compact(
@@ -170,7 +171,7 @@ export default function (pi: ExtensionAPI) {
 			);
 
 			ctx.ui.notify(
-				`Compacted with rush model ${requestModel.id}${result.usage ? ` (${result.usage.totalTokens.toLocaleString()} tok)` : ""}`,
+				`Compacted with worker model ${requestModel.id}${result.usage ? ` (${result.usage.totalTokens.toLocaleString()} tok)` : ""}`,
 				"info",
 			);
 			return {
@@ -185,12 +186,12 @@ export default function (pi: ExtensionAPI) {
 		} catch (err) {
 			if (signal.aborted) return undefined; // caller re-checks the same signal; no notify spam
 			ctx.ui.notify(
-				`rush compaction failed: ${err instanceof Error ? err.message : String(err)}, falling back to default compaction`,
+				`worker compaction failed: ${err instanceof Error ? err.message : String(err)}, falling back to default compaction`,
 				"warning",
 			);
 			return undefined; // fallback: default compaction (session model)
 		} finally {
-			ctx.ui.setStatus("compact-rush", undefined);
+			ctx.ui.setStatus("compact-worker", undefined);
 		}
 	});
 }
