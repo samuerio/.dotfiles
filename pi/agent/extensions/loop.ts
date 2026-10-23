@@ -9,9 +9,10 @@
  *
  * Scheduling truth is intervalMs, not cron: nextFireAt = lastFiredAt +
  * intervalMs. Cron strings are display/validation only, so there is no grid
- * and no boundary double-fire. Creation records lastFiredAt = createdAt and
- * /loop dispatches the first run immediately (that dispatch IS the first
- * fire); loop_create never dispatches immediately.
+ * and no boundary double-fire. Creation records lastFiredAt = createdAt, so
+ * the first fire happens one interval after creation (both /loop and
+ * loop_create are tick-driven; /loop <id> run injects a one-off into the
+ * current session without touching the schedule).
  *
  * Multi-session arbitration: .pi/loop-tasks.lock beside the task file, held
  * only across the ms-scale claim/finalize sections (never across dispatch),
@@ -98,6 +99,10 @@ interface LoopTask {
     recurring: boolean;
     /** Consecutive dispatch failures; reaching MAX_FAILURES disables the job. */
     failureCount?: number;
+    /** Most recent dispatch error message; cleared on the next successful fire. */
+    lastError?: string;
+    /** Paused via /loop <id> pause: skipped by the scheduler until resumed. */
+    paused?: boolean;
 }
 
 interface LoopFile {
@@ -138,9 +143,6 @@ let lockHeld = false;
 let capBlocked = false;
 /** Dedupe: notify a task-file read error once per broken-file episode. */
 let readErrorNotified = false;
-/** Dedupe: notify a task's dispatch failure only when the error changes. */
-const failureNotes = new Map<string, string>();
-
 // ─── Small helpers ────────────────────────────────────────────────
 
 function messageOf(error: unknown): string {
@@ -161,12 +163,21 @@ function hhmmss(): string {
     return `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
 }
 
+/** MAX_INTERVAL_MS caps user-requested intervals: anything beyond a year is
+ * almost certainly an id-like token (see randomId) or a typo, never intent. */
+const MAX_INTERVAL_MS = 366 * 24 * 3_600_000;
+
 function randomId(): string {
-    return randomBytes(4).toString("hex");
+    const id = randomBytes(4).toString("hex");
+    // First char forced to a hex letter so an id can never match the
+    // interval token regex ^(\d+)([smhd])$: without this, an id like
+    // "1234567d" would make "/loop <id> run" parse as a 3400-year interval.
+    return "abcdef"[randomBytes(1)[0] % 6] + id.slice(1);
 }
 
-function previewPrompt(prompt: string): string {
-    const flat = prompt.replace(/\s+/g, " ").trim();
+/** Flatten whitespace and truncate to one display line. */
+function previewText(text: string): string {
+    const flat = text.replace(/\s+/g, " ").trim();
     return flat.length > 60 ? `${flat.slice(0, 60)}...` : flat;
 }
 
@@ -294,6 +305,13 @@ const USAGE =
     "Usage: /loop [interval] <prompt>\n" +
     "  interval: 5m, 2h, 1d, every 20m, every 5 minutes (minimum 1m, defaults to 10m)";
 
+/** Reserved /loop first tokens (subcommand verbs; never treated as prompt text). */
+/** Manage verbs operate on an existing job id; "list" is reserved but takes
+ * no id. Single source of truth for parsing, dispatch, and typing. */
+const MANAGE_VERBS = ["delete", "run", "pause", "resume"] as const;
+type ManageVerb = (typeof MANAGE_VERBS)[number];
+const SUBCOMMAND_WORDS = new Set<string>([...MANAGE_VERBS, "list"]);
+
 /**
  * Three rules (Claude Code parity): leading `<N><unit>` token wins; else a
  * trailing `every <N><unit|unit-word>` is stripped from the prompt; else
@@ -343,7 +361,11 @@ function intervalFor(
     if (n < 1 || (unit === "s" && n < 60)) {
         return { prompt, error: `interval must be at least 1m (got ${n}${unit})` };
     }
-    return { interval: normalizeInterval(n, unit), prompt };
+    const interval = normalizeInterval(n, unit);
+    if (interval.intervalMs > MAX_INTERVAL_MS) {
+        return { prompt, error: `interval must be at most 366d (got ${n}${unit})` };
+    }
+    return { interval, prompt };
 }
 
 // ─── Cron subset (loop_create validation) ─────────────────────────
@@ -365,7 +387,8 @@ function cronToIntervalMs(cron: string): number | undefined {
     const everyDays = /^0 0 \*\/(\d+) \* \*$/.exec(cron);
     if (everyDays) {
         const n = Number(everyDays[1]);
-        if (n >= 1) return n * 86_400_000;
+        // Same 366d cap /loop enforces, so both creation paths agree.
+        if (n >= 1 && n * 86_400_000 <= MAX_INTERVAL_MS) return n * 86_400_000;
         return undefined;
     }
     return undefined;
@@ -391,13 +414,21 @@ function isValidTask(value: unknown): value is LoopTask {
         typeof task.lastFiredAt === "number" &&
         typeof task.recurring === "boolean" &&
         (task.failureCount === undefined ||
-            (typeof task.failureCount === "number" && task.failureCount >= 0))
+            (typeof task.failureCount === "number" && task.failureCount >= 0)) &&
+        (task.lastError === undefined || typeof task.lastError === "string") &&
+        (task.paused === undefined || typeof task.paused === "boolean")
     );
 }
 
 /** Jobs at MAX_FAILURES consecutive dispatch failures stop firing. */
 function isDisabled(task: LoopTask): boolean {
     return (task.failureCount ?? 0) >= MAX_FAILURES;
+}
+
+/** Scheduler eligibility: not disabled and not paused. Used by BOTH the due
+ * filter and the claim loop (the claim loop is the second line of defense). */
+function isSchedulable(task: LoopTask): boolean {
+    return !isDisabled(task) && !task.paused;
 }
 
 /**
@@ -581,7 +612,7 @@ async function dispatchJob(
     ctx: ExtensionContext,
 ): Promise<DispatchOutcome> {
     const alias = `loop-${task.id}-${hhmmss()}`;
-    const description = `loop ${task.cron}: ${previewPrompt(task.prompt)}`;
+    const description = `loop ${task.cron}: ${previewText(task.prompt)}`;
     try {
         await dispatchBackgroundTask(api!, {
             alias,
@@ -647,7 +678,7 @@ async function tickBody(): Promise<void> {
     let due: LoopTask[];
     try {
         due = (await readTasks()).filter(
-            (task) => !isDisabled(task) && task.lastFiredAt + task.intervalMs <= now,
+            (task) => isSchedulable(task) && task.lastFiredAt + task.intervalMs <= now,
         );
     } catch (error) {
         // The file broke after mount: keep the tick chain alive so a fixed
@@ -689,7 +720,7 @@ async function tickBody(): Promise<void> {
     const previousFired = new Map<string, number>();
     const acquired = await mutateTasks((tasks) => {
         for (const task of tasks) {
-            if (isDisabled(task)) continue;
+            if (!isSchedulable(task)) continue;
             if (task.lastFiredAt + task.intervalMs <= now) {
                 previousFired.set(task.id, task.lastFiredAt);
                 task.lastFiredAt = now;
@@ -706,23 +737,35 @@ async function tickBody(): Promise<void> {
     for (const task of claimed) {
         const outcome = await dispatchJob(task, cachedCtx!);
         if (outcome.ok) {
-            fired.push(`${previewPrompt(task.prompt)} (${outcome.alias})`);
+            fired.push(`${previewText(task.prompt)} (${outcome.alias})`);
         } else {
             failures.set(task.id, outcome.error);
         }
     }
 
     // Finalize: under the lock, re-read and patch by id, touching ONLY this
-    // tick's claimed tasks. Recurring successes just reset failureCount
-    // (nextFireAt is derived); one-shots are deleted; failed dispatches bump
-    // failureCount and restore lastFiredAt, and at MAX_FAILURES the job is
-    // left disabled so a deterministic failure cannot leak a fresh run dir
-    // and tmux session every 30s until the cap halts the scheduler.
+    // tick's claimed tasks. Recurring successes reset failureCount and clear
+    // lastError (nextFireAt is derived); one-shots are deleted; failed
+    // dispatches bump failureCount, record lastError and restore lastFiredAt;
+    // at MAX_FAILURES the job is left disabled so a deterministic failure
+    // cannot leak a fresh run dir and tmux session every 30s until the cap
+    // halts the scheduler.
+    //
+    // The lastFiredAt guards below are defensive, cross-session only: this
+    // process never writes lastFiredAt between claim and finalize, but a
+    // second session's tick can claim the same job again if its interval
+    // elapsed while our dispatch was running. The success path keeps the
+    // newer value; the failure path restores the pre-claim value only when
+    // no newer claim superseded it. A false finalize return means the lock
+    // budget expired and nothing was written back: on disk the job is
+    // merely delayed one cycle, never double-triggered.
     await mutateTasks((tasks) => {
         for (const task of tasks) {
             if (!previousFired.has(task.id)) continue;
             const error = failures.get(task.id);
             if (error === undefined) {
+                task.lastFiredAt = Math.max(task.lastFiredAt, now);
+                delete task.lastError;
                 if (task.failureCount) task.failureCount = 0;
                 if (!task.recurring) {
                     const index = tasks.indexOf(task);
@@ -730,32 +773,33 @@ async function tickBody(): Promise<void> {
                 }
                 continue;
             }
+            task.lastError = error;
             const consecutive = (task.failureCount ?? 0) + 1;
             task.failureCount = consecutive;
             if (consecutive >= MAX_FAILURES) continue;
             const previous = previousFired.get(task.id);
-            if (previous !== undefined) task.lastFiredAt = previous;
+            if (previous !== undefined && task.lastFiredAt === now) {
+                task.lastFiredAt = previous;
+            }
         }
     });
 
     for (const task of claimed) {
         const error = failures.get(task.id);
-        if (error === undefined) {
-            failureNotes.delete(task.id);
-            continue;
-        }
+        if (error === undefined) continue;
         const consecutive = (task.failureCount ?? 0) + 1;
         if (consecutive >= MAX_FAILURES) {
             safeNotify(
                 cachedCtx,
                 `[loop] job ${task.id} disabled after ${MAX_FAILURES} failed dispatches ` +
-                    `(last error: ${error}); cancel with loop_delete or re-create once fixed`,
+                    `(last error: ${error}); delete with loop_delete or re-create once fixed`,
                 "error",
             );
             continue;
         }
-        if (failureNotes.get(task.id) !== error) {
-            failureNotes.set(task.id, error);
+        // claimed snapshots predate finalize, so task.lastError is the
+        // previously persisted error: notify only when the error changed.
+        if (task.lastError !== error) {
             safeNotify(
                 cachedCtx,
                 `[loop] job ${task.id} dispatch failed (will retry next tick): ${error}`,
@@ -793,19 +837,181 @@ async function sweepZombieOneShots(): Promise<void> {
 
 // ─── Confirmation message ─────────────────────────────────────────
 
-function confirmationLines(
-    task: LoopTask,
-    extra: string[] = [],
-): string[] {
-    const lines = [
-        `[loop] scheduled: ${previewPrompt(task.prompt)}`,
-        `  cron: ${task.cron} · next fire in ${formatDelay(task.intervalMs)}`,
-        `  Job id: ${task.id} (cancel: loop_delete tool, or just tell me)`,
-        `  Runs forever until cancelled.`,
-        `  Each run is a context-free child session (it sees only the prompt, not this conversation).`,
-        `  Runs stay in /background-tasks until you Close them.`,
-    ];
-    return lines.concat(extra);
+/** Static pointers, shown after USAGE when /loop has no jobs to list. */
+const EDUCATION =
+    "Runs forever until cancelled.\n" +
+    "Each run is a context-free child session (it sees only the prompt, not this conversation).\n" +
+    "Runs stay in /background-tasks until you Close them.";
+
+/**
+ * One line: the schedule line (with the rounding note folded in when the
+ * requested interval was not evenly expressible). Creation never dispatches
+ * immediately; the first fire happens one interval after creation.
+ */
+function confirmationLine(task: LoopTask, roundedFrom?: string): string {
+    const delay = formatDelay(task.intervalMs);
+    let line =
+        `[loop] scheduled ${task.id}: ${previewText(task.prompt)}` +
+        ` · cron ${task.cron} · next fire in ${delay}`;
+    if (roundedFrom) line += ` (${roundedFrom} → ${delay})`;
+    return line;
+}
+
+// ─── /loop listing and per-job subcommands ────────────────────────
+
+/** One line per job, plus an indented lastError line when present. */
+function jobListLines(tasks: LoopTask[], now: number): string[] {
+    return tasks.map((task) => {
+        const state = isDisabled(task)
+            ? `disabled (${MAX_FAILURES}+ failed dispatches)`
+            : task.paused
+              ? "paused"
+              : `next fire in ${formatDelay(task.lastFiredAt + task.intervalMs - now)}`;
+        const lastError = task.lastError
+            ? `\n      last error: ${previewText(task.lastError)}`
+            : "";
+        return (
+            `  ${task.id}  ${task.cron}  ${task.recurring ? "recurring" : "one-shot"}  ` +
+            `${state}  ${previewText(task.prompt)}${lastError}`
+        );
+    });
+}
+
+/** "/loop" with no args: job listing, or USAGE + pointers when empty. */
+async function listJobsNotify(ctx: ExtensionContext): Promise<void> {
+    const tasks = await readTasksOrNotify(ctx);
+    if (!tasks) return;
+    if (tasks.length === 0) {
+        safeNotify(ctx, `${USAGE}\n\n${EDUCATION}`, "info");
+        return;
+    }
+    safeNotify(
+        ctx,
+        `[loop] ${tasks.length} job(s):\n${jobListLines(tasks, Date.now()).join("\n")}\n` +
+            "Manage: /loop <id> delete|run|pause|resume",
+        "info",
+    );
+}
+
+/** Read the task file for a UI command; notify and return undefined on
+ * failure (the command boundary is the right place to surface it). */
+async function readTasksOrNotify(ctx: ExtensionContext): Promise<LoopTask[] | undefined> {
+    try {
+        return await readTasks();
+    } catch (error) {
+        safeNotify(ctx, `[loop] task file error: ${messageOf(error)}`, "error");
+        return undefined;
+    }
+}
+
+/** Exact-match miss: never prefix-guess; show the current ids instead.
+ * Pass a snapshot when the caller has one (avoids a second read); undefined
+ * makes the helper read the file itself. */
+async function notifyUnknownJob(
+    id: string,
+    tasks: LoopTask[] | undefined,
+    ctx: ExtensionContext,
+): Promise<void> {
+    tasks ??= await readTasksOrNotify(ctx);
+    if (!tasks) return;
+    if (tasks.length === 0) {
+        safeNotify(ctx, `[loop] no job with id "${id}" (no jobs exist)`, "warning");
+        return;
+    }
+    safeNotify(
+        ctx,
+        `[loop] no job with id "${id}". Current job ids:\n` +
+            jobListLines(tasks, Date.now()).join("\n"),
+        "warning",
+    );
+}
+
+/** Shared skeleton for the delete/pause/resume verbs: exact-id mutation via
+ * mutateTasks, with busy/missing reporting folded in. The mutator returns
+ * the success message. */
+async function mutateJob(
+    id: string,
+    ctx: ExtensionContext,
+    mutator: (task: LoopTask, tasks: LoopTask[]) => string,
+): Promise<void> {
+    let found = false;
+    let success = "";
+    const written = await mutateTasks((tasks) => {
+        const task = tasks.find((entry) => entry.id === id);
+        if (!task) return;
+        found = true;
+        success = mutator(task, tasks);
+    });
+    if (!written) {
+        safeNotify(ctx, "[loop] task file busy (lock timeout); retry", "warning");
+        return;
+    }
+    if (!found) {
+        await notifyUnknownJob(id, undefined, ctx);
+        return;
+    }
+    safeNotify(ctx, success);
+}
+
+/** "/loop <id> delete|run|pause|resume": dispatch to the verb handlers. */
+async function handleJobCommand(
+    id: string,
+    verb: ManageVerb,
+    ctx: ExtensionContext,
+): Promise<void> {
+    if (verb === "delete") {
+        await mutateJob(id, ctx, (task, tasks) => {
+            tasks.splice(tasks.indexOf(task), 1);
+            return `[loop] deleted job ${id}`;
+        });
+        return;
+    }
+
+    if (verb === "pause" || verb === "resume") {
+        await mutateJob(id, ctx, (task) => {
+            if (verb === "pause") {
+                task.paused = true;
+                return `[loop] job ${id} paused; resume with /loop ${id} resume`;
+            }
+            delete task.paused;
+            // Resume is also the revival path for a disabled job.
+            task.failureCount = 0;
+            return `[loop] job ${id} resumed; if it is overdue it fires on the next tick`;
+        });
+        return;
+    }
+
+    // run: fire the prompt ONCE here in the current session via sendMessage
+    // (triggerTurn). No scheduler involvement, no task-file mutation: no
+    // backdating race and no zombie-sweep interaction.
+    // Unlike scheduled runs (context-free child sessions), this injected run
+    // carries the current conversation context, which is the point of a
+    // manual test fire. Reviving a disabled job is resume's job (it clears
+    // failureCount), not run's.
+    if (!ctx.isIdle()) {
+        safeNotify(
+            ctx,
+            "[loop] agent is busy; wait for the current run to finish, then retry",
+            "warning",
+        );
+        return;
+    }
+    const tasks = await readTasksOrNotify(ctx);
+    if (!tasks) return;
+    const prompt = tasks.find((task) => task.id === id)?.prompt;
+    if (prompt === undefined) {
+        await notifyUnknownJob(id, tasks, ctx);
+        return;
+    }
+    api!.sendMessage(
+        {
+            customType: "loop-run",
+            content: `[loop] manual run of job ${id} — execute this prompt now:\n\n${prompt}`,
+            display: true,
+        },
+        { triggerTurn: true },
+    );
+    safeNotify(ctx, `[loop] job ${id} fired in this session`);
 }
 
 // ─── Extension registration ───────────────────────────────────────
@@ -829,28 +1035,64 @@ export default function (pi: ExtensionAPI) {
                 return;
             }
 
+            const raw = args.trim();
+            if (!raw) {
+                // No args: list jobs (USAGE + pointers when nothing is scheduled).
+                await listJobsNotify(ctx);
+                return;
+            }
+
+            // Interval syntax is checked before id interpretation: a leading
+            // <N><unit> token is a creation form, never a job id.
+            const tokens = raw.split(/\s+/);
+            if (!INTERVAL_TOKEN.test(tokens[0])) {
+                const first = tokens[0].toLowerCase();
+                if (SUBCOMMAND_WORDS.has(first)) {
+                    // Reserved verb with no id in front: unambiguous usage error.
+                    if (first === "list") {
+                        await listJobsNotify(ctx);
+                        return;
+                    }
+                    ctx.ui.notify(
+                        `[loop] usage: /loop <id> ${first} (ids: /loop or loop_list). ` +
+                            `To schedule a prompt starting with "${first}", add an interval: /loop 10m ${first} ...`,
+                        "warning",
+                    );
+                    return;
+                }
+                if (tokens.length === 2) {
+                    // "<id> <verb>" with nothing after the verb: exact-id
+                    // subcommand. Longer inputs stay prompt text.
+                    const verb = tokens[1].toLowerCase();
+                    if ((MANAGE_VERBS as readonly string[]).includes(verb)) {
+                        await handleJobCommand(tokens[0], verb as ManageVerb, ctx);
+                        return;
+                    }
+                    if (SUBCOMMAND_WORDS.has(verb)) {
+                        // "<id> list" (or any reserved non-manage verb): an
+                        // error beats silently creating a junk task.
+                        ctx.ui.notify(
+                            `[loop] usage: /loop <id> delete|run|pause|resume (ids: /loop or loop_list)`,
+                            "warning",
+                        );
+                        return;
+                    }
+                }
+            }
+
             const parsed = parseLoopArgs(args);
             if (parsed.error) {
                 ctx.ui.notify(`[loop] ${parsed.error}`, "warning");
                 return;
             }
             if (!parsed.prompt) {
+                // Interval with no prompt (e.g. "/loop 5m").
                 ctx.ui.notify(USAGE, "warning");
                 return;
             }
             const interval =
                 parsed.interval ??
                 normalizeInterval(DEFAULT_INTERVAL.n, DEFAULT_INTERVAL.unit);
-            if (interval.roundedFrom) {
-                ctx.ui.notify(
-                    `${interval.roundedFrom} isn't evenly expressible; scheduled every ${formatDelay(interval.intervalMs)} instead`,
-                    "warning",
-                );
-            }
-
-            // Cap check before writing: a blocked immediate dispatch is a
-            // deferral (first fire at +intervalMs), never a creation failure.
-            const deferred = (await countLiveRuns()) >= MAX_RUNS;
 
             const now = Date.now();
             const task: LoopTask = {
@@ -879,41 +1121,11 @@ export default function (pi: ExtensionAPI) {
                 return;
             }
             if (overLimit) {
-                ctx.ui.notify(`[loop] max ${MAX_JOBS} jobs; cancel one first`, "warning");
+                ctx.ui.notify(`[loop] max ${MAX_JOBS} jobs; delete one first`, "warning");
                 return;
             }
 
-            const deferralNote = deferred
-                ? [
-                      `  Run cap reached (${MAX_RUNS} live runs); first run deferred to +${formatDelay(task.intervalMs)}.`,
-                  ]
-                : [];
-
-            if (deferred) {
-                ctx.ui.notify(confirmationLines(task, deferralNote).join("\n"), "info");
-                return;
-            }
-
-            // Immediate dispatch IS the first fire; failure rolls the entry
-            // back so the first fire is never silently lost.
-            const outcome = await dispatchJob(task, ctx);
-            if (!outcome.ok) {
-                await mutateTasks((tasks) => {
-                    const index = tasks.findIndex((entry) => entry.id === task.id);
-                    if (index >= 0) tasks.splice(index, 1);
-                });
-                ctx.ui.notify(
-                    `[loop] dispatch failed, task not created: ${outcome.error}`,
-                    "error",
-                );
-                return;
-            }
-            ctx.ui.notify(
-                confirmationLines(task, [
-                    `  First run dispatched: ${outcome.alias}`,
-                ]).join("\n"),
-                "info",
-            );
+            ctx.ui.notify(confirmationLine(task, interval.roundedFrom), "info");
         },
     });
 
@@ -975,7 +1187,7 @@ export default function (pi: ExtensionAPI) {
                 tasks.push(task);
             });
             if (!written) throw new Error("loop task file busy (lock timeout); retry");
-            if (overLimit) throw new Error(`max ${MAX_JOBS} jobs; cancel one first`);
+            if (overLimit) throw new Error(`max ${MAX_JOBS} jobs; delete one first`);
 
             return {
                 content: [
@@ -997,7 +1209,8 @@ export default function (pi: ExtensionAPI) {
         name: "loop_list",
         label: "List Loop Jobs",
         description:
-            "List all scheduled loop jobs with cron, recurrence, and time until the next fire. Read-only.",
+            "List all scheduled loop jobs with cron, recurrence, time until the next fire, " +
+            "disabled state, and last dispatch error. Read-only.",
         parameters: Type.Object({}),
         annotations: { readOnlyHint: true },
         async execute() {
@@ -1011,16 +1224,7 @@ export default function (pi: ExtensionAPI) {
                     details: undefined,
                 };
             }
-            const now = Date.now();
-            const lines = tasks.map((task) => {
-                const state = isDisabled(task)
-                    ? `disabled (${MAX_FAILURES}+ failed dispatches)`
-                    : `next fire in ${formatDelay(task.lastFiredAt + task.intervalMs - now)}`;
-                return (
-                    `  ${task.id}  ${task.cron}  ${task.recurring ? "recurring" : "one-shot"}  ` +
-                    `${state}  ${previewPrompt(task.prompt)}`
-                );
-            });
+            const lines = jobListLines(tasks, Date.now());
             return {
                 content: [
                     { type: "text", text: `${tasks.length} loop job(s):\n${lines.join("\n")}` },
