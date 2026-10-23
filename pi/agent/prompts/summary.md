@@ -2,6 +2,4 @@
 description: summary
 ---
 
-$ARGUMENTS
-
-Please organize what we discussed into a document.
+$ARGUMENTS; Please organize what we discussed into a document.

@@ -2,6 +2,4 @@
 description: Use Subagents
 ---
 
-$ARGUMENTS
-
-use tasks.
+$ARGUMENTS; use tasks.
