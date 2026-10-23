@@ -32,7 +32,7 @@ import {
     type TUI,
 } from "@earendil-works/pi-tui";
 import { copyToClipboard } from "./lib/clipboard.ts";
-import { pickSession } from "./pick-session.ts";
+import { pickSession } from "./lib/session-picker.ts";
 import {
     previewSessionFile,
     sessionDisplayLabel,

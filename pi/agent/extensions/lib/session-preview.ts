@@ -15,7 +15,6 @@ import {
 	visibleWidth,
 	type TUI,
 } from "@earendil-works/pi-tui";
-import { readFile } from "node:fs/promises";
 
 // ─── Session Label ───────────────────────────────────────────────
 
@@ -111,14 +110,15 @@ function formatSessionPreview(messages: PreviewMessages): string {
 }
 
 /**
- * Load a session JSONL file and resolve its active-branch transcript
- * (parse → migrate → buildSessionContext). Strictly read-only:
- * SessionManager.open() is never touched (its migration may rewrite the
- * file); entries are filtered to drop the session header entry.
+ * Load a session JSONL file and resolve its active-branch transcript as
+ * compact read_session-style text (## user / → toolCall / ## toolResult stubs
+ * / ## bash blocks). Strictly read-only: SessionManager.open() is never
+ * touched (its migration may rewrite the file).
  */
-async function loadPreviewSessionMessages(sessionFile: string): Promise<PreviewMessages> {
+export function loadSessionTranscript(sessionFile: string): string {
 	const { entries } = loadSessionEntries(sessionFile);
-	return buildSessionContext(entries, undefined).messages;
+	const messages = buildSessionContext(entries, undefined).messages;
+	return formatSessionPreview(messages) || "(no messages)";
 }
 
 // ─── Session Preview Overlay ──────────────────────────────────────
@@ -314,13 +314,12 @@ export async function previewSessionFile(
 		ctx.ui.notify("Session preview requires interactive mode", "error");
 		return;
 	}
-	let messages: PreviewMessages;
+	let text: string;
 	try {
-		messages = await loadPreviewSessionMessages(sessionFile);
+		text = loadSessionTranscript(sessionFile);
 	} catch (error) {
 		ctx.ui.notify(`Failed to read session: ${error instanceof Error ? error.message : String(error)}`, "error");
 		return;
 	}
-	const text = formatSessionPreview(messages) || "(no messages)";
 	await openSessionPreview(ctx, title, sessionFile, text);
 }

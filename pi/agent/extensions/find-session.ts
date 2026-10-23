@@ -34,39 +34,49 @@
  * ─ Command flow (human path) ─
  * `/search-sessions` opens ONE persistent panel: a query Input on top,
  * results below, hint line at the bottom. It writes NOTHING to the session
- * unless the human explicitly picks a hit. Esc while scanning aborts the
- * scan (back to the previous results — `results` only ever changes on a
- * successful scan); Esc while idle closes the panel, a pure search. Each
- * scan owns a CancellableLoader (ctx.signal is only live while the agent
- * streams) and a generation counter that makes stale settlements no-ops.
- * Without a UI (print/json modes) the command degrades to the historical
- * behavior: inject the full result set.
+ * unless the human explicitly picks a hit or appends a session ref. Esc
+ * while scanning aborts the scan (back to the previous results — `results`
+ * only ever changes on a successful scan); Esc while idle closes the
+ * panel, a pure search. Each scan owns a CancellableLoader (ctx.signal is
+ * only live while the agent streams) and a generation counter that makes
+ * stale settlements no-ops. Without a UI (print/json modes) the command
+ * degrades to the historical behavior: inject the full result set.
  *
- * Key contract (settled, do not re-litigate): Enter is state-sensitive by
- * design. It re-scans when the box differs from the last scanned query (or
- * nothing has been scanned yet, or the last scan was empty) and injects the
- * selected hit when the box is unchanged and hits are visible. Tab is
- * deliberately NOT the send key: it is the TUI's reserved
- * autocomplete/focus key, and Enter=confirm is the repo-wide picker
- * convention. The hint line always states Enter's current meaning; a
- * mistaken Enter costs at most a redundant re-scan, never a wrong
- * injection. The old two-phase flow (command args → loader → picker with a
- * local filter box) is gone: the filter box could only narrow the already
- * truncated result set, and re-searching cost a full command retype. A
- * query written on the command line is still honored — it prefills the box
- * and runs the first scan immediately.
+ * Browse mode (absorbs /pick-session): the panel's INITIAL state — empty
+ * box, nothing scanned yet — lists every session of the requested scope
+ * (SessionManager.list / listAll, mtime desc, current session marked).
+ * Browse rows are the initial data source ONLY: clearing the box never
+ * returns to browse; close and reopen the panel for that.
+ *
+ * Key contract (Enter is state-sensitive by design):
+ *   - browse state (initial, empty box): Enter and ctrl+e append
+ *     `read session <id>` to the editor (the former /pick-session
+ *     semantics; the id form resolves for every listed session because
+ *     the scan excludes subagent trees, the only sessions outside
+ *     resolveSessionRef's id-lookup coverage).
+ *   - after a scan: Enter injects the selected representative hit;
+ *     ctrl+e appends the selected hit's session ref.
+ *   - box differs from the last scanned query: Enter re-scans.
+ * ctrl+o previews the selected session's FULL transcript (plain text,
+ * query keywords highlighted once a scan is active). Tab is deliberately
+ * NOT the send key: it is the TUI's reserved autocomplete/focus key, and
+ * Enter=confirm is the repo-wide picker convention. The hint line always
+ * states Enter's current meaning; a mistaken Enter costs at most a
+ * redundant re-scan, never a wrong injection. Session rename/delete
+ * (built-in picker features) are intentionally NOT offered here. A query
+ * written on the command line is still honored — it prefills the box and
+ * runs the first scan immediately (skipping browse mode).
  *
  * Picking a hit injects it as a framed custom_message (formatSingleHit:
  * custom_message converts to a USER-role message downstream, so bare refs
  * would read as instructions).
  *
- * ctrl+o in the picker opens a preview of the selected hit: the picked
- * message's FULL text (picker rows only ever show a 100-char slice) plus the
- * session's other matching messages (the `more=N` hits the grouped output
- * never shows), re-scanned from that one file through the same
- * collectEntryHits matching. The preview is a second render mode of the
- * picker component, not a nested overlay; it reads one file and writes
- * nothing.
+ * ctrl+o opens a preview of the selected row's session: the FULL transcript
+ * through the same loadSessionTranscript formatter the overlay preview uses,
+ * rendered as plain text with the active query's keywords highlighted (only
+ * when a scan is active; browse mode has no query). The preview is a second
+ * render mode of the picker component, not a nested overlay; it reads one
+ * file and writes nothing.
  *
  * ─ Output contract ─
  * No fourth read tool. Each hit emits both a session path and a session id,
@@ -120,9 +130,11 @@ import {
     buildContextEntries,
     DynamicBorder,
     type ExtensionAPI,
+    type ExtensionCommandContext,
     getAgentDir,
     keyHint,
     SessionManager,
+    type SessionInfo,
     type SessionEntry,
     sessionEntryToContextMessages,
 } from "@earendil-works/pi-coding-agent";
@@ -146,6 +158,10 @@ import {
     readSessionText,
     textOf,
 } from "./lib/session-common.ts";
+import {
+    loadSessionTranscript,
+    sessionDisplayLabel,
+} from "./lib/session-preview.ts";
 
 const SNIPPET_BEFORE = 120;
 const SNIPPET_AFTER = 240;
@@ -1290,87 +1306,6 @@ export function formatSingleHit(hit: SearchHit, query: string): string {
 // Picker preview (ctrl+o)
 // ============================================================================
 
-/**
- * Re-scan ONE session file with the original query and return its full hit
- * list (representative + the `more=N` hits the grouped scan output never
- * shows), each with the untruncated message text. The matching is
- * collectEntryHits — byte-identical to the scan's — so what the human
- * previewed is exactly what the scan matched. Cost is one file read + parse
- * (the scan already paid it); a file deleted since the scan surfaces as a
- * thrown error the picker renders.
- */
-function loadSessionPreview(
-    sessionPath: string,
-    query: string,
-    options: SearchSessionsOptions,
-): Array<{ hit: SearchHit; rank: HitRank; fullText: string }> {
-    const { entries, header } = parseSessionText(readSessionText(sessionPath));
-    if (!header) throw new Error("not a pi session file (no header)");
-    const sinceMs =
-        options.since !== undefined ? Date.parse(options.since) : undefined;
-    const untilMs =
-        options.until !== undefined ? Date.parse(options.until) : undefined;
-    const matched = collectEntryHits(
-        entries,
-        {
-            re: compileQuery(query),
-            regexQuery: isRegexQuery(query),
-            normalizedQuery: normalizeForTier(query),
-            sinceMs,
-            untilMs,
-            includeToolCalls: options.includeToolCalls === true,
-        },
-        { sessionPath, sessionId: header.id ?? "" },
-        { withFullText: true },
-    );
-    return matched.map((record) => ({
-        hit: record.hit,
-        rank: record.rank,
-        fullText: record.fullText ?? "",
-    }));
-}
-
-/**
- * Preview panel content: the picked hit's FULL text first (the picker row
- * only ever shows a 100-char slice), then the session's other matching
- * messages in scan order, so the human can see what a narrower query would
- * have to target. Ordered by the same rank key the scan uses.
- */
-function buildPreviewContent(
-    hit: SearchHit,
-    previewHits: Array<{ hit: SearchHit; rank: HitRank; fullText: string }>,
-): string {
-    const ordered = [...previewHits].sort((a, b) => compareRank(a.rank, b.rank));
-    const picked = ordered.find((item) => item.hit.entryId === hit.entryId);
-    const others = ordered.filter((item) => item.hit.entryId !== hit.entryId);
-    const lines: string[] = [];
-    lines.push(
-        `  session=${shortenPath(hit.sessionPath)} id=${hit.sessionId}`,
-    );
-    lines.push("");
-    lines.push(
-        `  ── picked hit · ${hit.role} · ${hit.timestamp} · entry=${hit.entryId} ──`,
-    );
-    lines.push(...indentBlock(picked?.fullText || hit.snippet));
-    if (others.length > 0) {
-        lines.push("");
-        lines.push(
-            `  ── other hits in this session (${others.length}) ──`,
-        );
-        for (const item of others) {
-            lines.push("");
-            lines.push(
-                `  ▸ ${item.hit.timestamp} · ${item.hit.role} · entry=${item.hit.entryId}`,
-            );
-            lines.push(...indentBlock(item.fullText || item.hit.snippet));
-        }
-    } else {
-        lines.push("");
-        lines.push("  (no other hits in this session)");
-    }
-    return lines.join("\n");
-}
-
 /** Indent a (possibly multi-line) block by two spaces. */
 function indentBlock(text: string): string[] {
     return text
@@ -1382,8 +1317,10 @@ function indentBlock(text: string): string[] {
  * Windowed plain-text viewer for the preview panel (the scroll pattern from
  * lib/session-preview.ts, minus markdown): wraps once per width, keeps its
  * own scroll offset, and clamps it to the content. Height is budgeted from
- * the terminal so the panel never claims the whole screen — the picker's
- * list viewport is the reference size.
+ * the terminal so the panel never claims the whole screen. Sized for FULL
+ * transcript previews (it replaced the picked-hit-only view), so the cap is
+ * generous; highlight (optional) runs BEFORE wrapping — wrapTextWithAnsi is
+ * ANSI-aware, and highlightLine colors segments without nesting spans.
  */
 class PreviewText {
     private wrapped: string[] | undefined;
@@ -1394,16 +1331,29 @@ class PreviewText {
     constructor(
         private readonly tui: TUI,
         private readonly text: string,
+        private readonly highlight?: { re: RegExp; theme: any },
     ) {}
 
     render(width: number): string[] {
         const rows = this.tui.terminal.rows || 24;
         const contentHeight = Math.max(
-            4,
-            Math.min(12, Math.floor(rows * 0.4)),
+            10,
+            Math.min(24, Math.floor(rows * 0.55)),
         );
         if (this.wrapped === undefined || this.wrappedWidth !== width) {
-            this.wrapped = wrapTextWithAnsi(this.text, Math.max(10, width));
+            const source = this.highlight
+                ? this.text
+                      .split("\n")
+                      .map((line) =>
+                          highlightLine(
+                              line,
+                              this.highlight!.re,
+                              this.highlight!.theme,
+                          ),
+                      )
+                      .join("\n")
+                : this.text;
+            this.wrapped = wrapTextWithAnsi(source, Math.max(10, width));
             this.wrappedWidth = width;
         }
         this.viewHeight = contentHeight;
@@ -1681,465 +1631,650 @@ export default function (pi: ExtensionAPI) {
     //
     // Without a UI (print/json modes) the command degrades to the historical
     // behavior: inject the full result set.
-    pi.registerCommand("search-sessions", {
-        description:
-            "Search pi sessions interactively (opens a search panel; --all for every project)",
-        handler: async (args, ctx) => {
-            const parsed = parseSearchArgs(args);
-            const options: SearchSessionsOptions = {
-                query: parsed.query,
-                since: parsed.since,
-                until: parsed.until,
-                maxResults: parsed.maxResults,
-                includeToolCalls: parsed.includeToolCalls,
-                scope: parsed.all ? "all" : "project",
-                currentSessionFile:
-                    ctx.sessionManager.getSessionFile() ?? undefined,
-                sessionDir: ctx.sessionManager.getSessionDir(),
-                cwd: ctx.cwd,
-            };
+    // ── /search-sessions & /pick-session ───────────────────────────────
+    // ONE persistent panel (the no-arg invocation is the primary human
+    // path): a query Input on top, results below, hint line at the bottom.
+    // NOTHING is written to the session unless the human explicitly picks
+    // a hit or appends a session ref. Esc while scanning aborts the scan
+    // (back to the previous results); Esc while idle closes the panel
+    // writing nothing — a pure search.
+    //
+    // Enter is state-sensitive: browse state (initial, empty box) appends
+    // the selected session ref; a dirty box re-scans; a clean post-scan
+    // box injects the selected hit. See the file header for the contract.
+    //
+    // /pick-session is a deprecated forwarding stub: its capabilities
+    // (session browse + editor append + ctrl+o preview) are browse mode
+    // here. Kept for muscle memory; remove after a grace period.
+    const runPanel = async (
+        rawArgs: string,
+        ctx: ExtensionCommandContext,
+        forceBrowse: boolean,
+    ) => {
+        const parsed = parseSearchArgs(forceBrowse ? "" : rawArgs);
+        const options: SearchSessionsOptions = {
+            query: parsed.query,
+            since: parsed.since,
+            until: parsed.until,
+            maxResults: parsed.maxResults,
+            includeToolCalls: parsed.includeToolCalls,
+            scope: parsed.all ? "all" : "project",
+            currentSessionFile:
+                ctx.sessionManager.getSessionFile() ?? undefined,
+            sessionDir: ctx.sessionManager.getSessionDir(),
+            cwd: ctx.cwd,
+        };
 
-            if (!ctx.hasUI) {
-                const result = await searchSessions(options);
-                await pi.sendMessage(
-                    {
-                        customType: "search-sessions",
-                        content: formatHits(result, parsed.query),
-                        display: true,
-                    },
-                    { triggerTurn: false },
+        if (!ctx.hasUI) {
+            // The /pick-session stub has no degraded form: without a UI there
+            // is nothing to browse and nothing to append to. An empty query
+            // would also degenerate the search (an empty regex matches every
+            // haystack), so both cases fail loudly instead.
+            if (!parsed.query) {
+                ctx.ui.notify(
+                    "requires interactive mode (or a query argument)",
+                    "error",
                 );
                 return;
             }
+            const result = await searchSessions(options);
+            await pi.sendMessage(
+                {
+                    customType: "search-sessions",
+                    content: formatHits(result, parsed.query),
+                    display: true,
+                },
+                { triggerTurn: false },
+            );
+            return;
+        }
 
-            const picked = await ctx.ui.custom<{
-                hit: SearchHit;
-                query: string;
-            } | null>((tui, theme, keybindings, done) => {
-                const accent = (str: string) => theme.fg("accent", str);
-                const dim = (str: string) => theme.fg("dim", str);
+        const picked = await ctx.ui.custom<
+            | { kind: "hit"; hit: SearchHit; query: string }
+            | { kind: "append"; id: string }
+            | null
+        >((tui, theme, keybindings, done) => {
+            const accent = (str: string) => theme.fg("accent", str);
+            const dim = (str: string) => theme.fg("dim", str);
 
-                // ── state ──
-                // `results` only ever changes on a SUCCESSFUL scan, so an
-                // aborted scan restores the previous results by construction.
-                let results: SearchSessionsResult | null = null;
-                let lastScannedQuery = "";
-                let scanError: string | null = null;
-                let scanGen = 0;
-                let loader: CancellableLoader | null = null;
-                let mode: "list" | "preview" = "list";
-                let previewText: PreviewText | null = null;
-                let selectList: SelectList | null = null;
+            // ── state ──
+            // `results` only ever changes on a SUCCESSFUL scan, so an
+            // aborted scan restores the previous results by construction.
+            let results: SearchSessionsResult | null = null;
+            let lastScannedQuery = "";
+            let scanError: string | null = null;
+            let scanGen = 0;
+            let loader: CancellableLoader | null = null;
+            let mode: "list" | "preview" = "list";
+            let previewText: PreviewText | null = null;
+            let selectList: SelectList | null = null;
+            // Browse mode (the initial state): every session of the
+            // requested scope, before the first scan. `results` (hit
+            // rows) takes precedence once a scan has settled.
+            let browseSessions: SessionInfo[] | null = null;
+            // Live-session marker for browse rows: search EXCLUDES the
+            // live session, browse lists and marks it instead.
+            const currentAbs = options.currentSessionFile
+                ? path.resolve(options.currentSessionFile)
+                : undefined;
 
-                // ── static chrome (header) ──
-                const root = new Container();
-                const header = new Container();
-                header.addChild(new DynamicBorder(accent));
-                const scopeLabel = parsed.all ? "all projects" : "this project";
-                const bounds = [
-                    parsed.since ? `since ${parsed.since}` : "",
-                    parsed.until ? `until ${parsed.until}` : "",
-                    parsed.maxResults !== undefined
-                        ? `max ${parsed.maxResults}`
-                        : "",
-                ]
-                    .filter(Boolean)
-                    .join(" · ");
-                header.addChild(
+            // ── static chrome (header) ──
+            const root = new Container();
+            const header = new Container();
+            header.addChild(new DynamicBorder(accent));
+            const scopeLabel = parsed.all ? "all projects" : "this project";
+            const bounds = [
+                parsed.since ? `since ${parsed.since}` : "",
+                parsed.until ? `until ${parsed.until}` : "",
+                parsed.maxResults !== undefined
+                    ? `max ${parsed.maxResults}`
+                    : "",
+            ]
+                .filter(Boolean)
+                .join(" · ");
+            header.addChild(
+                new Text(
+                    accent(
+                        theme.bold(
+                            ` Search sessions (${scopeLabel})${bounds ? ` — ${bounds}` : ""}`,
+                        ),
+                    ),
+                    0,
+                    0,
+                ),
+            );
+            const queryInput = new Input();
+            header.addChild(queryInput);
+            header.addChild(new Spacer(1));
+
+            const listArea = new Container();
+            const footer = new Container();
+            // Persistent chrome lines: the hint must track every
+            // keystroke (its whole job is stating what Enter will do
+            // right now), and rebuilding the footer per keypress would
+            // reset the list selection.
+            const envelopeLineText = new Text("", 0, 0);
+            const hintLine = new Text("", 0, 0);
+            footer.addChild(envelopeLineText);
+            footer.addChild(hintLine);
+            footer.addChild(new DynamicBorder(accent));
+            root.addChild(header);
+            root.addChild(listArea);
+            root.addChild(footer);
+
+            // ── rendering ──
+            const buildItems = (): SelectItem[] => {
+                if (results) {
+                    return results.hits.map((hit, index) => ({
+                        value: String(index),
+                        label:
+                            `${shortenPath(hit.sessionPath)}  ${hit.timestamp}  ${hit.role}` +
+                            (hit.more && hit.more > 0
+                                ? `  (+${hit.more})`
+                                : ""),
+                        description: preview(hit.snippet, 100),
+                    }));
+                }
+                // Browse rows: pick-session-style session granularity.
+                return (browseSessions ?? []).map((info, index) => ({
+                    value: String(index),
+                    label:
+                        sessionDisplayLabel(info) +
+                        (currentAbs !== undefined &&
+                        path.resolve(info.path) === currentAbs
+                            ? "  (current)"
+                            : ""),
+                    description: `${info.modified.toISOString().slice(0, 16).replace("T", " ")} · ${shortenPath(info.path)} · ${info.messageCount} msgs`,
+                }));
+            };
+
+            /**
+             * The scan envelope, visible in the panel: re-scanning is the
+             * primary narrowing lever now, so a maxResults-truncated result
+             * the human cannot see would send them in circles.
+             */
+            const envelopeLine = (): string | null => {
+                if (!results) {
+                    // Browse rows: the envelope reports the list size.
+                    if (!browseSessions) return null;
+                    return `${browseSessions.length} session${browseSessions.length === 1 ? "" : "s"} (browse)`;
+                }
+                const parts = [
+                    `${results.hits.length} hit${results.hits.length === 1 ? "" : "s"}`,
+                    `scanned ${results.scanned} of ${results.listed} files`,
+                ];
+                if (results.truncated)
+                    parts.push(`truncated=${results.truncated}`);
+                if (results.allDegraded)
+                    parts.push("scope degraded to this project");
+                if (results.unreadable.length)
+                    parts.push(`unreadable=${results.unreadable.length}`);
+                return parts.join(" · ");
+            };
+
+            /** Dynamic hint: always states what Enter will do right now. */
+            const hintText = (): string => {
+                if (loader)
+                    return "searching… · esc: abort (keeps previous results)";
+                if (scanError) return "enter: retry · esc: close";
+                if (!results) {
+                    if (browseSessions)
+                        return '↑↓ select · enter: append "read session <id>" · ctrl+o: preview · type a query · enter: search · esc: close';
+                    return "type a query · enter: search · esc: close (nothing is written)";
+                }
+                if (results.hits.length === 0)
+                    return "no matches · enter: re-search · esc: close";
+                const box = queryInput.getValue().trim();
+                if (box !== lastScannedQuery)
+                    return `↑↓ select · enter: re-search "${box}" · the list is results for "${lastScannedQuery}" · esc: close`;
+                return "↑↓ select · enter: send hit into session · ctrl+e: append session ref · ctrl+o: preview · esc: close";
+            };
+
+            /** Repaint the two footer lines from current state. */
+            const updateChrome = () => {
+                const envelope = envelopeLine();
+                envelopeLineText.setText(envelope ? dim(` ${envelope}`) : "");
+                hintLine.setText(dim(` ${hintText()}`));
+            };
+
+            const render = () => {
+                if (mode !== "list") return;
+                listArea.clear();
+                envelopeLineText.setText("");
+                selectList = null;
+                if (loader) {
+                    listArea.addChild(loader);
+                } else if (scanError) {
+                    listArea.addChild(
+                        new Text(theme.fg("error", ` ${scanError}`), 0, 0),
+                    );
+                } else if (!results && !browseSessions) {
+                    listArea.addChild(
+                        new Text(
+                            dim(" (no sessions loaded — type a query above)"),
+                            0,
+                            0,
+                        ),
+                    );
+                } else if (!results && browseSessions!.length === 0) {
+                    listArea.addChild(
+                        new Text(
+                            theme.fg("warning", " No sessions found"),
+                            0,
+                            0,
+                        ),
+                    );
+                } else if (results && results.hits.length === 0) {
+                    listArea.addChild(
+                        new Text(
+                            theme.fg("warning", " No matching hits"),
+                            0,
+                            0,
+                        ),
+                    );
+                } else {
+                    const items = buildItems();
+                    selectList = new SelectList(
+                        items,
+                        Math.min(items.length, 12),
+                        {
+                            selectedPrefix: (text) => accent(text),
+                            selectedText: (text) => accent(text),
+                            description: (text) => theme.fg("muted", text),
+                            scrollInfo: (text) => dim(text),
+                            noMatch: (text) => theme.fg("warning", text),
+                        },
+                    );
+                    listArea.addChild(selectList);
+                }
+                updateChrome();
+                // The scan settles asynchronously (and disposes its
+                // loader, which owned the repaint loop): without an
+                // explicit request the screen freezes on the last painted
+                // frame — the loader.
+                tui.requestRender();
+            };
+
+            const showList = () => {
+                mode = "list";
+                previewText = null;
+                root.clear();
+                root.addChild(header);
+                root.addChild(listArea);
+                root.addChild(footer);
+            };
+
+            // Preview is the picker's second render mode (not a nested
+            // overlay). It shows the selected session's FULL transcript
+            // (browse rows and hit rows alike); query keywords are
+            // highlighted only when a scan is active — lastScannedQuery,
+            // the query the visible results actually came from, never
+            // the half-edited box content.
+            const showPreview = () => {
+                const item = selectList?.getSelectedItem();
+                if (!item) return;
+                let sessionPath: string | undefined;
+                let title: string;
+                if (results) {
+                    const hit = results.hits[Number(item.value)];
+                    if (!hit) return;
+                    sessionPath = hit.sessionPath;
+                    title = `Preview: "${lastScannedQuery}" — ${shortenPath(hit.sessionPath)}`;
+                } else if (browseSessions) {
+                    const info = browseSessions[Number(item.value)];
+                    if (!info) return;
+                    sessionPath = info.path;
+                    title = `Preview: ${sessionDisplayLabel(info)}`;
+                } else {
+                    return;
+                }
+                const previewView = new Container();
+                previewView.addChild(new DynamicBorder(accent));
+                previewView.addChild(
+                    new Text(accent(theme.bold(` ${title}`)), 0, 0),
+                );
+                let content: string;
+                try {
+                    content = loadSessionTranscript(sessionPath);
+                } catch (error) {
+                    content = `  (preview failed: ${error instanceof Error ? error.message : String(error)})`;
+                }
+                const re =
+                    lastScannedQuery !== ""
+                        ? highlightRegex(lastScannedQuery)
+                        : undefined;
+                previewText = new PreviewText(
+                    tui,
+                    content,
+                    re ? { re, theme } : undefined,
+                );
+                previewView.addChild(previewText);
+                previewView.addChild(
                     new Text(
-                        accent(
-                            theme.bold(
-                                ` Search sessions (${scopeLabel})${bounds ? ` — ${bounds}` : ""}`,
-                            ),
+                        dim(
+                            " esc/o: back to the list • ↑/↓ or j/k: scroll • ctrl+d/u: half page",
                         ),
                         0,
                         0,
                     ),
                 );
-                const queryInput = new Input();
-                header.addChild(queryInput);
-                header.addChild(new Spacer(1));
+                previewView.addChild(new DynamicBorder(accent));
+                mode = "preview";
+                root.clear();
+                root.addChild(previewView);
+            };
 
-                const listArea = new Container();
-                const footer = new Container();
-                // Persistent chrome lines: the hint must track every
-                // keystroke (its whole job is stating what Enter will do
-                // right now), and rebuilding the footer per keypress would
-                // reset the list selection.
-                const envelopeLineText = new Text("", 0, 0);
-                const hintLine = new Text("", 0, 0);
-                footer.addChild(envelopeLineText);
-                footer.addChild(hintLine);
-                footer.addChild(new DynamicBorder(accent));
-                root.addChild(header);
-                root.addChild(listArea);
-                root.addChild(footer);
-
-                // ── rendering ──
-                const buildItems = (): SelectItem[] =>
-                    (results?.hits ?? []).map((hit, index) => ({
-                        value: String(index),
-                        label:
-                            `${shortenPath(hit.sessionPath)}  ${hit.timestamp}  ${hit.role}` +
-                            (hit.more && hit.more > 0 ? `  (+${hit.more})` : ""),
-                        description: preview(hit.snippet, 100),
-                    }));
-
-                /**
-                 * The scan envelope, visible in the panel: re-scanning is the
-                 * primary narrowing lever now, so a maxResults-truncated result
-                 * the human cannot see would send them in circles.
-                 */
-                const envelopeLine = (): string | null => {
-                    if (!results) return null;
-                    const parts = [
-                        `${results.hits.length} hit${results.hits.length === 1 ? "" : "s"}`,
-                        `scanned ${results.scanned} of ${results.listed} files`,
-                    ];
-                    if (results.truncated)
-                        parts.push(`truncated=${results.truncated}`);
-                    if (results.allDegraded)
-                        parts.push("scope degraded to this project");
-                    if (results.unreadable.length)
-                        parts.push(`unreadable=${results.unreadable.length}`);
-                    return parts.join(" · ");
-                };
-
-                /** Dynamic hint: always states what Enter will do right now. */
-                const hintText = (): string => {
-                    if (loader)
-                        return "searching… · esc: abort (keeps previous results)";
-                    if (scanError) return "enter: retry · esc: close";
-                    if (!results)
-                        return "type a query · enter: search · esc: close (nothing is written)";
-                    if (results.hits.length === 0)
-                        return "no matches · enter: re-search · esc: close";
-                    const box = queryInput.getValue().trim();
-                    if (box !== lastScannedQuery)
-                        return `↑↓ select · enter: re-search "${box}" · the list is results for "${lastScannedQuery}" · esc: close`;
-                    return "↑↓ select · enter: send hit into session · ctrl+o: preview · esc: close";
-                };
-
-                /** Repaint the two footer lines from current state. */
-                const updateChrome = () => {
-                    const envelope = envelopeLine();
-                    envelopeLineText.setText(envelope ? dim(` ${envelope}`) : "");
-                    hintLine.setText(dim(` ${hintText()}`));
-                };
-
-                const render = () => {
-                    if (mode !== "list") return;
-                    listArea.clear();
-                    envelopeLineText.setText("");
-                    selectList = null;
-                    if (loader) {
-                        listArea.addChild(loader);
-                    } else if (scanError) {
-                        listArea.addChild(
-                            new Text(theme.fg("error", ` ${scanError}`), 0, 0),
-                        );
-                    } else if (!results) {
-                        listArea.addChild(
-                            new Text(
-                                dim(" (no search yet — type a query above)"),
-                                0,
-                                0,
-                            ),
-                        );
-                    } else if (results.hits.length === 0) {
-                        listArea.addChild(
-                            new Text(
-                                theme.fg("warning", " No matching hits"),
-                                0,
-                                0,
-                            ),
-                        );
-                    } else {
-                        const items = buildItems();
-                        selectList = new SelectList(
-                            items,
-                            Math.min(items.length, 12),
-                            {
-                                selectedPrefix: (text) => accent(text),
-                                selectedText: (text) => accent(text),
-                                description: (text) => theme.fg("muted", text),
-                                scrollInfo: (text) => dim(text),
-                                noMatch: (text) => theme.fg("warning", text),
-                            },
-                        );
-                        listArea.addChild(selectList);
-                    }
-                    updateChrome();
-                    // The scan settles asynchronously (and disposes its
-                    // loader, which owned the repaint loop): without an
-                    // explicit request the screen freezes on the last painted
-                    // frame — the loader.
-                    tui.requestRender();
-                };
-
-                const showList = () => {
-                    mode = "list";
-                    previewText = null;
-                    root.clear();
-                    root.addChild(header);
-                    root.addChild(listArea);
-                    root.addChild(footer);
-                };
-
-                // Preview is the picker's second render mode (not a nested
-                // overlay). It re-scans the ONE session file with
-                // lastScannedQuery — the query the visible results actually
-                // came from, never the half-edited box content.
-                const showPreview = () => {
-                    const item = selectList?.getSelectedItem();
-                    if (!item || !results) return;
-                    const hit = results.hits[Number(item.value)];
-                    if (!hit) return;
-                    const previewView = new Container();
-                    previewView.addChild(new DynamicBorder(accent));
-                    previewView.addChild(
-                        new Text(
-                            accent(
-                                theme.bold(
-                                    ` Preview: "${lastScannedQuery}" — ${hit.role} · ${hit.timestamp}`,
-                                ),
-                            ),
-                            0,
-                            0,
-                        ),
-                    );
-                    let content: string;
-                    try {
-                        content = buildPreviewContent(
-                            hit,
-                            loadSessionPreview(
-                                hit.sessionPath,
-                                lastScannedQuery,
-                                options,
-                            ),
-                        );
-                    } catch (error) {
-                        content = `  (preview failed: ${error instanceof Error ? error.message : String(error)})`;
-                    }
-                    previewText = new PreviewText(tui, content);
-                    previewView.addChild(previewText);
-                    previewView.addChild(
-                        new Text(
-                            dim(
-                                " esc/o: back to the list • ↑/↓ or j/k: scroll • ctrl+d/u: half page",
-                            ),
-                            0,
-                            0,
-                        ),
-                    );
-                    previewView.addChild(new DynamicBorder(accent));
-                    mode = "preview";
-                    root.clear();
-                    root.addChild(previewView);
-                };
-
-                // ── scan runner ──
-                // One generation counter guards against stale results: a newer
-                // scan (or an abort) makes older settlements no-ops. Each scan
-                // owns its loader and disposes the previous one.
-                const startScan = (query: string) => {
+            // ── browse loader (initial state) ──
+            // Same generation-counter pattern as the scan runner: the
+            // settled list becomes the initial rows only if no newer
+            // load/scan superseded it.
+            const startBrowse = () => {
+                loader?.dispose();
+                const gen = ++scanGen;
+                scanError = null;
+                const next = new CancellableLoader(
+                    tui,
+                    accent,
+                    dim,
+                    "loading sessions...",
+                );
+                loader = next;
+                next.onAbort = () => {
+                    if (gen !== scanGen) return;
+                    scanGen++;
                     loader?.dispose();
-                    const gen = ++scanGen;
-                    scanError = null;
-                    const next = new CancellableLoader(
-                        tui,
-                        accent,
-                        dim,
-                        `searching "${query}"...`,
-                    );
-                    loader = next;
-                    next.onAbort = () => {
+                    loader = null;
+                    render();
+                };
+                next.start();
+                const sessionDir = ctx.sessionManager.getSessionDir();
+                // Same loaders /pick-session used: explicit dir bypasses
+                // cwd filtering for non-default --session-dir setups.
+                const load = parsed.all
+                    ? (onProgress?: (loaded: number, total: number) => void) =>
+                            SessionManager.listAll(sessionDir, onProgress)
+                    : (onProgress?: (loaded: number, total: number) => void) =>
+                            SessionManager.list(ctx.cwd, sessionDir, onProgress);
+                load()
+                    .then((sessions) => {
                         if (gen !== scanGen) return;
-                        // Invalidate the pending settlement: an aborted scan
-                        // still RESOLVES (with a partial result and
-                        // truncated=aborted), and without the bump it would
-                        // overwrite the previous results the hint just
-                        // promised to keep.
-                        scanGen++;
                         loader?.dispose();
                         loader = null;
-                        render(); // back to the previous results (or empty)
-                    };
-                    next.start();
-                    searchSessions({ ...options, query, signal: next.signal })
-                        .then((result) => {
-                            if (gen !== scanGen) return;
-                            loader?.dispose();
-                            loader = null;
-                            results = result;
-                            lastScannedQuery = query;
-                            render();
-                        })
-                        .catch((error) => {
-                            if (gen !== scanGen) return;
-                            loader?.dispose();
-                            loader = null;
-                            scanError =
-                                error instanceof Error
-                                    ? error.message
-                                    : String(error);
-                            render();
-                        });
-                    render();
-                };
+                        sessions.sort(
+                            (a, b) => b.modified.getTime() - a.modified.getTime(),
+                        );
+                        browseSessions = sessions;
+                        render();
+                    })
+                    .catch((error) => {
+                        if (gen !== scanGen) return;
+                        loader?.dispose();
+                        loader = null;
+                        scanError =
+                            error instanceof Error
+                                ? error.message
+                                : String(error);
+                        render();
+                    });
+                render();
+            };
 
-                // Enter commit: re-scan when the box is dirty (or nothing has
-                // been scanned, or the last scan came back empty — a retry is
-                // the only sensible action), otherwise inject the picked hit.
-                // Typing DURING a scan is allowed (keystrokes are never
-                // swallowed) but Enter is a no-op until the scan settles.
-                queryInput.onSubmit = (value) => {
-                    const query = value.trim();
-                    if (!query || loader) return;
-                    if (
-                        !results ||
-                        results.hits.length === 0 ||
-                        query !== lastScannedQuery
-                    ) {
-                        startScan(query);
-                        return;
+            // ── scan runner ──
+            // One generation counter guards against stale results: a newer
+            // scan (or an abort) makes older settlements no-ops. Each scan
+            // owns its loader and disposes the previous one.
+            const startScan = (query: string) => {
+                loader?.dispose();
+                const gen = ++scanGen;
+                scanError = null;
+                const next = new CancellableLoader(
+                    tui,
+                    accent,
+                    dim,
+                    `searching "${query}"...`,
+                );
+                loader = next;
+                next.onAbort = () => {
+                    if (gen !== scanGen) return;
+                    // Invalidate the pending settlement: an aborted scan
+                    // still RESOLVES (with a partial result and
+                    // truncated=aborted), and without the bump it would
+                    // overwrite the previous results the hint just
+                    // promised to keep.
+                    scanGen++;
+                    loader?.dispose();
+                    loader = null;
+                    render(); // back to the previous results (or empty)
+                };
+                next.start();
+                searchSessions({ ...options, query, signal: next.signal })
+                    .then((result) => {
+                        if (gen !== scanGen) return;
+                        loader?.dispose();
+                        loader = null;
+                        results = result;
+                        lastScannedQuery = query;
+                        render();
+                    })
+                    .catch((error) => {
+                        if (gen !== scanGen) return;
+                        loader?.dispose();
+                        loader = null;
+                        scanError =
+                            error instanceof Error
+                                ? error.message
+                                : String(error);
+                        render();
+                    });
+                render();
+            };
+
+            // Enter commit, three states: empty box in browse state
+            // appends the selected session ref (pick-session semantics);
+            // a dirty box re-scans; a clean post-scan box injects the
+            // picked hit. Typing DURING a scan is allowed (keystrokes
+            // are never swallowed) but Enter is a no-op until the scan
+            // settles.
+            queryInput.onSubmit = (value) => {
+                const query = value.trim();
+                if (loader) return;
+                if (!query) {
+                    // Browse state: Enter appends the selected session.
+                    if (!results && browseSessions) {
+                        const item = selectList?.getSelectedItem();
+                        if (!item) return;
+                        const info = browseSessions[Number(item.value)];
+                        if (info) done({ kind: "append", id: info.id });
                     }
-                    const item = selectList?.getSelectedItem();
-                    if (!item) return;
-                    const hit = results.hits[Number(item.value)];
-                    if (!hit) return;
-                    done({ hit, query: lastScannedQuery });
-                };
-
-                if (parsed.query) {
-                    // Old muscle memory (/search-sessions goal): prefill the box
-                    // and run the first scan immediately.
-                    queryInput.setValue(parsed.query);
-                    startScan(parsed.query);
-                } else {
-                    render();
+                    return;
                 }
+                if (
+                    !results ||
+                    results.hits.length === 0 ||
+                    query !== lastScannedQuery
+                ) {
+                    startScan(query);
+                    return;
+                }
+                const item = selectList?.getSelectedItem();
+                if (!item) return;
+                const hit = results.hits[Number(item.value)];
+                if (!hit) return;
+                done({ kind: "hit", hit, query: lastScannedQuery });
+            };
 
-                return {
-                    render: (width: number) => root.render(width),
-                    invalidate: () => root.invalidate(),
-                    handleInput: (data: string) => {
-                        if (mode === "preview") {
-                            if (
-                                keybindings.matches(data, "tui.select.cancel") ||
-                                keybindings.matches(data, "tui.select.confirm") ||
-                                matchesKey(data, "o") ||
-                                matchesKey(data, Key.ctrl("o"))
-                            ) {
-                                showList();
-                                tui.requestRender();
-                                return;
-                            }
-                            if (
-                                keybindings.matches(data, "tui.select.up") ||
-                                matchesKey(data, "k")
-                            ) {
-                                previewText?.scrollBy(-1);
-                                tui.requestRender();
-                                return;
-                            }
-                            if (
-                                keybindings.matches(data, "tui.select.down") ||
-                                matchesKey(data, "j")
-                            ) {
-                                previewText?.scrollBy(1);
-                                tui.requestRender();
-                                return;
-                            }
-                            if (matchesKey(data, Key.ctrl("d"))) {
-                                previewText?.scrollBy(
-                                    Math.floor(
-                                        (previewText?.viewport ?? 12) / 2,
-                                    ),
-                                );
-                                tui.requestRender();
-                                return;
-                            }
-                            if (matchesKey(data, Key.ctrl("u"))) {
-                                previewText?.scrollBy(
-                                    -Math.floor(
-                                        (previewText?.viewport ?? 12) / 2,
-                                    ),
-                                );
-                                tui.requestRender();
-                                return;
-                            }
-                            if (
-                                keybindings.matches(data, "tui.select.pageUp") ||
-                                matchesKey(data, Key.left)
-                            ) {
-                                previewText?.scrollBy(
-                                    -(previewText?.viewport ?? 12),
-                                );
-                                tui.requestRender();
-                                return;
-                            }
-                            if (
-                                keybindings.matches(data, "tui.select.pageDown") ||
-                                matchesKey(data, Key.right)
-                            ) {
-                                previewText?.scrollBy(
-                                    previewText?.viewport ?? 12,
-                                );
-                                tui.requestRender();
-                                return;
-                            }
-                            // Swallow everything else: typing must not reach
-                            // the (hidden) query box.
-                            return;
-                        }
-                        // Esc: scanning aborts the scan; idle closes the panel.
-                        if (keybindings.matches(data, "tui.select.cancel")) {
-                            if (loader) {
-                                loader.handleInput(data); // → onAbort
-                            } else {
-                                done(null);
-                            }
-                            tui.requestRender();
-                            return;
-                        }
-                        if (matchesKey(data, Key.ctrl("o"))) {
-                            showPreview();
+            if (parsed.query) {
+                // Old muscle memory (/search-sessions goal): prefill the box
+                // and run the first scan immediately (browse mode skipped).
+                queryInput.setValue(parsed.query);
+                startScan(parsed.query);
+            } else {
+                startBrowse();
+            }
+
+            return {
+                render: (width: number) => root.render(width),
+                invalidate: () => root.invalidate(),
+                handleInput: (data: string) => {
+                    if (mode === "preview") {
+                        if (
+                            keybindings.matches(data, "tui.select.cancel") ||
+                            keybindings.matches(data, "tui.select.confirm") ||
+                            matchesKey(data, "o") ||
+                            matchesKey(data, Key.ctrl("o"))
+                        ) {
+                            showList();
                             tui.requestRender();
                             return;
                         }
                         if (
                             keybindings.matches(data, "tui.select.up") ||
-                            keybindings.matches(data, "tui.select.down")
+                            matchesKey(data, "k")
                         ) {
-                            selectList?.handleInput(data);
+                            previewText?.scrollBy(-1);
                             tui.requestRender();
                             return;
                         }
-                        // Everything else is typing (Enter reaches the Input's
-                        // onSubmit — it is deliberately NOT intercepted here,
-                        // and it never goes to the list).
-                        queryInput.handleInput(data);
-                        // The hint states Enter's CURRENT meaning, so it has
-                        // to track every keystroke, not just state changes.
-                        updateChrome();
+                        if (
+                            keybindings.matches(data, "tui.select.down") ||
+                            matchesKey(data, "j")
+                        ) {
+                            previewText?.scrollBy(1);
+                            tui.requestRender();
+                            return;
+                        }
+                        if (matchesKey(data, Key.ctrl("d"))) {
+                            previewText?.scrollBy(
+                                Math.floor(
+                                    (previewText?.viewport ?? 12) / 2,
+                                ),
+                            );
+                            tui.requestRender();
+                            return;
+                        }
+                        if (matchesKey(data, Key.ctrl("u"))) {
+                            previewText?.scrollBy(
+                                -Math.floor(
+                                    (previewText?.viewport ?? 12) / 2,
+                                ),
+                            );
+                            tui.requestRender();
+                            return;
+                        }
+                        if (
+                            keybindings.matches(data, "tui.select.pageUp") ||
+                            matchesKey(data, Key.left)
+                        ) {
+                            previewText?.scrollBy(
+                                -(previewText?.viewport ?? 12),
+                            );
+                            tui.requestRender();
+                            return;
+                        }
+                        if (
+                            keybindings.matches(data, "tui.select.pageDown") ||
+                            matchesKey(data, Key.right)
+                        ) {
+                            previewText?.scrollBy(
+                                previewText?.viewport ?? 12,
+                            );
+                            tui.requestRender();
+                            return;
+                        }
+                        // Swallow everything else: typing must not reach
+                        // the (hidden) query box.
+                        return;
+                    }
+                    // Esc: scanning aborts the scan; idle closes the panel.
+                    if (keybindings.matches(data, "tui.select.cancel")) {
+                        if (loader) {
+                            loader.handleInput(data); // → onAbort
+                        } else {
+                            done(null);
+                        }
                         tui.requestRender();
-                    },
-                };
-            });
-
-            if (!picked) return; // Esc: nothing written
-            // Injected as a display-only custom message; no new turn. The
-            // customType stays in SELF_EXCLUDED_CUSTOM_TYPES so neither this
-            // injection nor the historical full-result ones self-amplify.
-            await pi.sendMessage(
-                {
-                    customType: "search-sessions",
-                    content: formatSingleHit(picked.hit, picked.query),
-                    display: true,
+                        return;
+                    }
+                    if (matchesKey(data, Key.ctrl("o"))) {
+                        showPreview();
+                        tui.requestRender();
+                        return;
+                    }
+                    // ctrl+e: append the selected session ref to the
+                    // editor, in either list mode (browse rows append
+                    // their session; hit rows append the hit's session).
+                    if (matchesKey(data, Key.ctrl("e"))) {
+                        const item = selectList?.getSelectedItem();
+                        if (!item) return;
+                        if (results) {
+                            const hit = results.hits[Number(item.value)];
+                            if (hit) done({ kind: "append", id: hit.sessionId });
+                        } else if (browseSessions) {
+                            const info = browseSessions[Number(item.value)];
+                            if (info) done({ kind: "append", id: info.id });
+                        }
+                        return;
+                    }
+                    if (
+                        keybindings.matches(data, "tui.select.up") ||
+                        keybindings.matches(data, "tui.select.down")
+                    ) {
+                        selectList?.handleInput(data);
+                        tui.requestRender();
+                        return;
+                    }
+                    // Everything else is typing (Enter reaches the Input's
+                    // onSubmit — it is deliberately NOT intercepted here,
+                    // and it never goes to the list).
+                    queryInput.handleInput(data);
+                    // The hint states Enter's CURRENT meaning, so it has
+                    // to track every keystroke, not just state changes.
+                    updateChrome();
+                    tui.requestRender();
                 },
-                { triggerTurn: false },
+            };
+        });
+
+        if (!picked) return; // Esc: nothing written
+        if (picked.kind === "append") {
+            // The former /pick-session editor-append semantics. The id form
+            // resolves: resolveSessionRef falls back to listAll() across
+            // projects, and subagent trees (outside its coverage) are never
+            // listed here.
+            const current = ctx.ui.getEditorText();
+            const separator = current && !current.endsWith(" ") ? " " : "";
+            ctx.ui.setEditorText(
+                `${current}${separator}read session ${picked.id}`,
             );
-        },
+            ctx.ui.notify(
+                `Added read session ${picked.id.slice(0, 8)}… to prompt`,
+                "info",
+            );
+            return;
+        }
+        // Injected as a display-only custom message; no new turn. The
+        // customType stays in SELF_EXCLUDED_CUSTOM_TYPES so neither this
+        // injection nor the historical full-result ones self-amplify.
+        await pi.sendMessage(
+            {
+                customType: "search-sessions",
+                content: formatSingleHit(picked.hit, picked.query),
+                display: true,
+            },
+            { triggerTurn: false },
+        );
+    };
+
+    pi.registerCommand("search-sessions", {
+        description:
+            "Search pi sessions interactively (opens a search panel; --all for every project)",
+        handler: (args, ctx) => runPanel(args, ctx, false),
+    });
+
+    // Deprecated forwarding stub (absorbed into /search-sessions browse mode).
+    pi.registerCommand("pick-session", {
+        description:
+            "Deprecated alias of /search-sessions (opens the session browse panel)",
+        handler: (_args, ctx) => runPanel("", ctx, true),
     });
 }

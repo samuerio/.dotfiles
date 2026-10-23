@@ -1,13 +1,12 @@
 import {
 	SessionManager,
 	SessionSelectorComponent,
-	type ExtensionAPI,
 	type ExtensionCommandContext,
 	type SessionInfo,
 	type Theme,
 } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
-import { previewSessionFile, sessionDisplayLabel } from "./lib/session-preview.ts";
+import { previewSessionFile, sessionDisplayLabel } from "./session-preview.ts";
 
 /** Lazy session loader (SessionListProgress-compatible). */
 export type SessionLoader = (
@@ -154,54 +153,5 @@ export async function pickSession(
 			options.currentSessionFile,
 		);
 		return selector;
-	});
-}
-
-/**
- * Mention appended to the editor: "read session <session-id>". The id form is
- * resolved by lib/session-common.ts's resolveSessionRef (pi CLI's
- * `--session <path|id>` semantics) — the same resolver the read_session tool
- * trio accepts, so the mention stays valid wherever it lands.
- */
-function mention(id: string): string {
-	return `read session ${id}`;
-}
-
-/**
- * /pick-session: pick a session with the built-in /resume picker and append
- * "read session <session-id>" to the prompt. ctrl+o previews the highlighted
- * session in an overlay while the picker stays open.
- *
- * Only the default session dir is listed, so the id form resolves: the
- * read_session tool's id lookup covers ~/.pi/agent/sessions/<project>/ only.
- */
-export default function (pi: ExtensionAPI): void {
-	pi.registerCommand("pick-session", {
-		description: "Pick a session and append \"read session <session-id>\" to the prompt (ctrl+o: preview)",
-		handler: async (_args, ctx) => {
-			if (!ctx.hasUI) {
-				ctx.ui.notify("pick-session requires interactive mode", "error");
-				return;
-			}
-
-			const sessionDir = ctx.sessionManager.getSessionDir();
-			const info = await pickSession(ctx, {
-				// Current Folder: explicit dir bypasses cwd filtering for
-				// non-default --session-dir setups.
-				current: (onProgress) => SessionManager.list(ctx.cwd, sessionDir, onProgress),
-				all: (onProgress) => SessionManager.listAll(sessionDir, onProgress),
-				currentSessionFile: ctx.sessionManager.getSessionFile(),
-				onPreview: (sessionFile, label) => previewSessionFile(ctx, label, sessionFile),
-			});
-			if (!info) return;
-
-			// Append to the editor like background-task's addSessionToPrompt
-			// (space-separated), then confirm with a notify.
-			const current = ctx.ui.getEditorText();
-			const separator = current && !current.endsWith(" ") ? " " : "";
-			const text = `${current}${separator}${mention(info.id)}`;
-			ctx.ui.setEditorText(text);
-			ctx.ui.notify(`Added ${mention(info.id)} to prompt`, "info");
-		},
 	});
 }

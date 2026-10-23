@@ -16,7 +16,9 @@ IDE 级编辑能力，集成 `telescope`/`fzf` 搜索与 `opencode.nvim` AI 工�
 ### `pi/agent/extensions/`
 
 pi coding agent 的自定义 TypeScript 扩展集，仓库中除 `nvim/` 外最活跃的子系统。按职责分组：
-会话编排与交接（`continue`、`pick-session`、`handoff`、`session-breakdown`、`background-task`（后台任务派发：
+会话编排与交接（`continue`、`find-session`（search_sessions 工具 + /search-sessions 面板：browse 模式列出
+全部会话、Enter 注入代表命中、ctrl+e 追加会话引用、ctrl+o 全文预览高亮关键词；`/pick-session` 为其
+废弃转发 stub）、`handoff`、`session-breakdown`、`background-task`（后台任务派发：
 可选 git worktree + tmux 子会话 + `.pi/background-tasks/tasks/` 任务注册表 + 结果回报）、`tmux-split-fork`、
 `goal`（目标驱动自动迭代：`/goal` 命令族 + agent_settled 续跑循环 + worker 模型无工具 verifier 判定完成）、
 `loop`（定时任务：`/loop [interval] <prompt>` 命令 + loop_create/loop_list/loop_delete 模型工具，
@@ -42,8 +44,11 @@ Enter 上下文敏感：词干净时注入选中命中、词改动时重扫，Es
 verifier 发起一次性 LLM 请求时使用；`lib/subagent.ts`：Subagent
 机制库；`lib/session-common.ts`：session JSONL 解析管线（读/解析分离：readSessionText 供预滤、
 parseSessionText 供解析），供 `read-session` 与 `find-session` 共用；
-`lib/session-preview.ts`：会话预览 overlay + read_session 风格转录格式化，供 `pick-session`（ctrl+o 预览快捷键）
-与 `background-task`（preview 动作）共用；`lib/review-target.ts`：ReviewTarget 模型 + git 基础设施
+`lib/session-preview.ts`：会话预览 overlay + read_session 风格转录格式化，供 `find-session`（ctrl+o 全文预览）
+与 `background-task`（preview 动作）共用；`lib/session-picker.ts`：内置 /resume 选择器的
+ctrl+o 预览子类封装（pickSession），供 `background-task` 挑选会话，`/pick-session` 已废弃为
+`/search-sessions` 的转发 stub（browse 模式吸收了其列表/预览/追加编辑器能力）；
+`lib/review-target.ts`：ReviewTarget 模型 + git 基础设施
 （merge base、分支/提交列表、PR checkout）+ preset 选择器（可选附加项）+ 直参解析 + 后台 prompt
 派发 helper，供 `review` 与 `security-review` 共用，两命令各自持有 rubric 与会话机制）。
 pi 只把 `extensions/*.ts` 顶层文件与含 `index.ts` 的子目录
