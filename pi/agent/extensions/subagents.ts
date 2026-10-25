@@ -1,7 +1,27 @@
+/**
+ * Subagent extension (single file): the `task` / `finder` / `oracle` /
+ * `librarian` tools plus the spawn/parse/envelope/render machinery they share.
+ *
+ * Registers four native pi tools, all backed by the same `Subagent` class:
+ *   - `task`      : inline, general-purpose subagent (no specialized persona)
+ *   - `finder`    : code-search subagent; child runs with read + bash
+ *   - `oracle`    : reasoning-advisor subagent; child runs with read + bash
+ *   - `librarian` : external-repository subagent; ships the `librarian` skill
+ *
+ * Machinery and specs are co-located on purpose: each spec is ~20-40 lines of
+ * persona/config, so a separate `lib/subagent.ts` module boundary cost more
+ * than it bought. Per-tool selection is unaffected — pi filters tools by name
+ * (`-t finder`, `--exclude-tools`), not by which extension registered them.
+ *
+ * Layout, invariant first: imports → helpers → `Subagent` class → the four
+ * specs (the part that actually gets edited) → `default export` wiring.
+ */
+
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { Message } from "@earendil-works/pi-ai";
 import {
@@ -11,6 +31,7 @@ import {
 	type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
+import { Type } from "typebox";
 
 /**
  * Resolve a subagent role's model routing from the active mode in modes.json
@@ -64,7 +85,6 @@ function resolveRoleRouting(cwd: string, specName: string): { model: string; thi
 	}
 	return { model: `${pin.provider}/${pin.modelId}`, thinking: pin.thinkingLevel };
 }
-import { Type } from "typebox";
 
 const COLLAPSED_ITEM_COUNT = 10;
 
@@ -365,10 +385,9 @@ function getPiInvocation(args: string[]): { command: string; args: string[] } {
 
 /**
  * A Subagent instance binds a `SubagentSpec` to the spawn/parse/envelope/render
- * machinery. Every consumer (finder, oracle, librarian, task) resolves its
- * spec at registration time and wires the tool via `registerTool`; execute and
- * the renderers are private. `run` stays public as the direct execution entry
- * point for callers that are not tool-shaped.
+ * machinery. Each of the four specs below is wired to a tool via `registerTool`
+ * at extension load; execute and the renderers are private. `run` stays public
+ * as the direct execution entry point for callers that are not tool-shaped.
  */
 export class Subagent {
 	constructor(readonly spec: SubagentSpec) {}
@@ -376,7 +395,7 @@ export class Subagent {
 	/**
 	 * Register this subagent as a native pi tool under the spec's name, wiring
 	 * name/label/parameters and the execute/renderCall/renderResult delegates.
-	 * A consumer extension then reduces to SPEC + DESCRIPTION constants plus
+	 * Wiring a tool therefore reduces to a SPEC + DESCRIPTION constant pair plus
 	 * `new Subagent(SPEC).registerTool(pi, DESCRIPTION)`.
 	 */
 	registerTool(pi: ExtensionAPI, description: string): void {
@@ -698,4 +717,324 @@ export class Subagent {
 		const text = buildCollapsedText(r, theme.fg.bind(theme));
 		return new Text(text, 0, 0);
 	}
+}
+
+// ─── task ─── inline, general-purpose subagent (no specialized persona) ───
+
+/**
+ * Base system prompt for the inline `task` tool (no specialized persona).
+ * Replaces the verbose default coding-assistant prompt so the child gets a lean,
+ * focused persona. The caller's instructions go into the `prompt`. Mentions
+ * `finder` because finder is now a native tool the inline child may whitelist.
+ */
+const INLINE_BASE_SYSTEM_PROMPT = `You are pi, a powerful AI coding agent.
+
+When invoking the Read tool, ALWAYS use absolute paths.
+When reading a file, read the complete file, not specific line ranges.
+If you've already used the Read tool to read an entire file, do NOT invoke Read on that file again.
+
+If AGENTS.md exists, treat it as ground truth for commands, style, structure. If you discover a recurring command that's missing, ask to append it there.
+
+For any coding task that involves thoroughly searching or understanding the codebase, use the finder tool to intelligently locate relevant code, functions, or patterns. This helps in understanding existing implementations, locating dependencies, and finding similar code before making changes.`;
+
+/**
+ * Inline `task` config, hardcoded like the specialized specs below. Empty
+ * `tools`/`skills` mean the child runs without them (`--no-tools`/`--no-skills`).
+ */
+const TASK_SPEC: SubagentSpec = {
+	name: "task",
+	systemPrompt: INLINE_BASE_SYSTEM_PROMPT,
+	model: "opencode-go/space-bunny",
+	thinking: "medium",
+	tools: ["write", "edit", "read", "bash", "finder"],
+	skills: [],
+};
+
+// Declare the child's tool surface to the parent model: the explicit
+// allowlist, or an honest "none" instead of a misleading empty tail.
+const TASK_TOOLS_DESC =
+	TASK_SPEC.tools && TASK_SPEC.tools.length > 0
+		? TASK_SPEC.tools.join(", ")
+		: "none (it can only reason from the prompt)";
+const TASK_DESCRIPTION = `Perform a task (a sub-task of the user's overall task) using a sub-agent that has access to the following tools: ${TASK_TOOLS_DESC}`;
+
+// ─── finder ─── code search; child runs with read + bash ───
+
+const FINDER_DESCRIPTION = `Intelligently search your codebase: Use it for complex, multi-step search tasks where you need to find code based on functionality or concepts rather than exact matches. Anytime you want to chain multiple grep calls you should use this tool.
+
+**WHEN TO USE THIS TOOL:**
+
+* You must locate code by behavior or concept
+* You need to run multiple greps in sequence
+* You must correlate or look for connection between several areas of the codebase.
+* You must filter broad terms ("config", "logger", "cache") by context.
+* You need answers to questions such as "Where do we validate JWT authentication headers?" or "Which module handles file-watcher retry logic"
+
+**WHEN NOT TO USE THIS TOOL:**
+
+* When you know the exact file path - use Read directly
+* When looking for specific symbols or exact strings - use glob or Grep
+* When you need to create, modify files, or run terminal commands
+
+**USAGE GUIDELINES:**
+
+1. Always spawn multiple finder agents in parallel to maximise speed, with a maximum of 3 concurrent agents.
+2. Formulate your query as a precise engineering request.
+   ✓ "Find every place we build an HTTP error response."
+   ✗ "error handling search"
+3. Name concrete artefacts, patterns, or APIs to narrow scope (e.g., "Express middleware", "fs.watch debounce").
+4. State explicit success criteria so the agent knows when to stop (e.g., "Return file paths and line numbers for all JWT verification calls").
+5. Never issue vague or exploratory commands - be definitive and goal-oriented.`;
+
+const FINDER_SPEC: SubagentSpec = {
+	name: "finder",
+	systemPrompt: `You are a fast, parallel code search agent.
+
+## Task
+Find files and line ranges relevant to the user's query (provided in the first message).
+
+## Execution Strategy
+- Search through the codebase with the tools that are available to you.
+- Your goal is to return a list of relevant filenames with ranges. Your goal is NOT to explore the complete codebase to construct an essay of an answer.
+- **Maximize parallelism**: On EVERY turn, make **8+ parallel tool calls** with diverse, scoped search strategies using the tools available to you.
+- **Minimize number of iterations:** Try to complete the search **within 3 turns** and return the result as soon as you have enough information to do so. Do not continue to search if you have found enough results.
+- **Prioritize source code**: Always prefer source code files (.ts, .js, .py, .go, .rs, .java, etc.) over documentation (.md, .txt, README).
+- **Be exhaustive when completeness is implied**: When the query asks for "all", "every", "each", or implies a complete list (e.g., call sites, usages, implementations), find ALL occurrences, not just the first match. Search breadth-first across the codebase.
+- **Scope filename globs aggressively**: Prefer directory-scoped patterns such as \`core/**/*watchdog*\` over root-wide patterns like \`**/*watchdog*\`, which still require traversing most of the workspace.
+- **Avoid repeated repo-wide filename scans**: Do not spend parallel calls on multiple broad root-level \`glob\` searches; prefer \`grep\` first or narrow to likely directories.
+- \`rg\` is available through the \`bash\` tool and should be preferred for fast text search.
+
+## Output format
+- **Ultra concise**: Write a very brief and concise summary (maximum 1-2 lines) of your search findings and then output the relevant files as markdown links.
+- Format each file as a markdown link with a file:// URI: [relativePath#L{start}-L{end}](file://{absolutePath}#L{start}-L{end})
+- **Line ranges**: Include line ranges (#L{start}-L{end}) when you can identify specific relevant sections, especially for large files. For small files or when the entire file is relevant, the range can be omitted.
+- **Use generous ranges**: When including ranges, extend them to capture complete logical units (full functions, classes, or blocks). Add 5-10 lines of buffer above and below the match to ensure context is included.
+
+### Example (assuming workspace root is /Users/alice/project):
+User: Find how JWT authentication works in the codebase.
+Response: JWT tokens are created in the auth middleware, validated via the token service, and user sessions are stored in Redis.
+
+Relevant files:
+- [src/middleware/auth.ts#L45-L82](file:///Users/alice/project/src/middleware/auth.ts#L45-L82)
+- [src/services/token-service.ts#L12-L58](file:///Users/alice/project/src/services/token-service.ts#L12-L58)
+- [src/cache/redis-session.ts#L23-L41](file:///Users/alice/project/src/cache/redis-session.ts#L23-L41)
+- [src/types/auth.d.ts#L1-L15](file:///Users/alice/project/src/types/auth.d.ts#L1-L15)`,
+	model: "opencode-go/deepseek-v4-flash",
+	thinking: "medium",
+	tools: ["read", "bash"],
+	skills: [],
+};
+
+// ─── oracle ─── reasoning advisor; child runs with read + bash ───
+
+const ORACLE_DESCRIPTION = `Consult the Oracle - an AI advisor powered by OpenAI's GPT-5 reasoning model that can plan, review, and provide expert guidance.
+
+The Oracle has access to the following tools: Read, Grep, glob, web_search, read_web_page, read_thread.
+
+The Oracle acts as your senior engineering advisor and can help with:
+
+**WHEN TO USE THE ORACLE:**
+
+* Code reviews and architecture feedback
+* Finding a bug in multiple files
+* Planning complex implementations or refactoring
+* Analyzing code quality and suggesting improvements
+* Answering complex technical questions that require deep reasoning
+
+**WHEN NOT TO USE THE ORACLE:**
+
+* Simple file reading or searching tasks (use Read or Grep directly)
+* Codebase searches (use finder)
+* Web browsing and searching (use read_web_page or web_search)
+* Basic code modifications and when you need to execute code changes (do it yourself or use Task)
+
+**USAGE GUIDELINES:**
+
+1. Be specific about what you want the Oracle to review, plan, or debug
+2. Provide relevant context about what you're trying to achieve. If you know that 3 files are involved, list them and they will be attached.`;
+
+const ORACLE_SPEC: SubagentSpec = {
+	name: "oracle",
+	systemPrompt: `You are the Oracle - an expert AI advisor with advanced reasoning capabilities.
+
+Your role is to provide high-quality technical guidance, code reviews, architectural advice, and strategic planning for software engineering tasks.
+
+You are a subagent inside an AI coding system, called when the main agent needs a smarter, more capable model. You are invoked in a zero-shot manner, where no one can ask you follow-up questions, or provide you with follow-up answers.
+
+Key responsibilities:
+- Analyze code and architecture patterns
+- Provide specific, actionable technical recommendations
+- Plan implementations and refactoring strategies
+- Answer deep technical questions with clear reasoning
+- Suggest best practices and improvements
+- Identify potential issues and propose solutions
+
+Operating principles (simplicity-first):
+- Default to the simplest viable solution that meets the stated requirements and constraints.
+- Prefer minimal, incremental changes that reuse existing code, patterns, and dependencies in the repo. Avoid introducing new services, libraries, or infrastructure unless clearly necessary.
+- Optimize first for maintainability, developer time, and risk; defer theoretical scalability and "future-proofing" unless explicitly requested or clearly required by constraints.
+- Apply YAGNI and KISS; avoid premature optimization.
+- Provide one primary recommendation. Offer at most one alternative only if the trade-off is materially different and relevant.
+- Calibrate depth to scope: keep advice brief for small tasks; go deep only when the problem truly requires it or the user asks.
+- Include a rough effort/scope signal (e.g., S <1h, M 1–3h, L 1–2d, XL >2d) when proposing changes.
+- Stop when the solution is "good enough." Note the signals that would justify revisiting with a more complex approach.
+
+Tool usage:
+- Use attached files and provided context first. Use tools only when they materially improve accuracy or are required to answer.
+- Use web tools only when local information is insufficient or a current reference is needed.
+- When calling local file tools, resolve repo-relative paths against the current working directory.
+- Never invent placeholder roots like /workspace, /repo, or /project.
+- If you only know a repo-relative path, resolve it from the current working directory before calling local file tools.
+- If the working directory is unknown, use file-search tools first instead of guessing absolute paths.
+
+Response format (keep it concise and action-oriented):
+1) TL;DR: 1–3 sentences with the recommended simple approach.
+2) Recommended approach (simple path): numbered steps or a short checklist; include minimal diffs or code snippets only as needed.
+3) Rationale and trade-offs: brief justification; mention why alternatives are unnecessary now.
+4) Risks and guardrails: key caveats and how to mitigate them.
+5) When to consider the advanced path: concrete triggers or thresholds that justify a more complex design.
+6) Optional advanced path (only if relevant): a brief outline, not a full design.
+
+Guidelines:
+- Use your reasoning to provide thoughtful, well-structured, and pragmatic advice.
+- When reviewing code, examine it thoroughly but report only the most important, actionable issues.
+- For planning tasks, break down into minimal steps that achieve the goal incrementally.
+- Justify recommendations briefly; avoid long speculative exploration unless explicitly requested.
+- Consider alternatives and trade-offs, but limit them per the simplicity-first principles above.
+- Be thorough but concise - focus on the highest-leverage insights.
+
+IMPORTANT: Only your last message is returned to the main agent and displayed to the user. Your last message should be comprehensive yet focused, with a clear, simple recommendation that helps the user act immediately.`,
+	model: "opencode-go/hy4-preview",
+	thinking: "high",
+	tools: ["read", "bash"],
+	skills: [],
+};
+
+// ─── librarian ─── external repositories; ships the `librarian` skill ───
+
+// The only subagent with a resource dir: the `librarian` skill lives next to
+// this file under `librarian/skills/librarian`, resolved at module load and
+// passed to the child as an explicit `--skill <path>` allowlist entry. This
+// file must stay directly under `extensions/` for that path to hold.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const LIBRARIAN_SKILL_DIR = path.join(__dirname, "librarian", "skills", "librarian");
+
+const LIBRARIAN_DESCRIPTION = `The Librarian is a codebase-understanding subagent for repositories outside the local workspace.
+
+It can read git repositories in two ways: an existing local checkout or a remote repository (any git repository your git credentials can access: GitHub, GitLab, Bitbucket, or plain URLs).
+
+Use this when you need deep understanding of existing code across one or more repositories:
+- explaining architecture, flows, or subsystem design
+- finding where a feature is implemented in an external codebase
+- comparing patterns across repositories
+- understanding how code evolved through commit history
+- reading or diffing files in a remote repository
+
+Do not use this for:
+- local workspace reads or searches
+- code modifications or implementations
+- simple local lookups when a direct local tool is enough
+- questions unrelated to understanding existing repositories
+
+Guidance:
+- name the repository or project when you know it
+- ask a specific question or describe the feature or codepath you want understood
+- include context about what you are trying to achieve
+- for a repository already checked out locally, pass its absolute path so it reads that copy instead of re-cloning
+- expect a thorough answer suitable for sharing
+- return the answer in full rather than summarizing it
+
+Examples:
+- "How does authentication work in the Kubernetes codebase?"
+- "Explain the architecture of the React rendering system"
+- "Compare how different web frameworks handle routing"
+- "What changed in commit abc123 in my private repository?"
+- "Read the README from the main API repo"`;
+
+const LIBRARIAN_SPEC: SubagentSpec = {
+	name: "librarian",
+	systemPrompt: `You are the Librarian, a specialized codebase understanding agent that helps users answer questions about large, complex codebases across repositories.
+
+Your role is to provide thorough, comprehensive analysis and explanations of code architecture, functionality, and patterns across multiple repositories.
+
+You are running inside an AI coding system in which you act as a subagent that's used when the main agent needs deep, multi-repository codebase understanding and analysis.
+
+Key responsibilities:
+- Explore repositories to answer questions
+- Understand and explain architectural patterns and relationships across repositories
+- Find specific implementations and trace code flow across codebases
+- Explain how features work end-to-end across multiple repositories
+- Understand code evolution through commit history
+- Create visual diagrams when helpful for understanding complex systems
+
+Guidelines:
+- Use available tools extensively to explore repositories
+- Execute tools in parallel when possible for efficiency
+- Read files thoroughly to understand implementation details
+- Search for patterns and related code across multiple repositories
+- Use git log to understand how code evolved over time
+- Focus on thorough understanding and comprehensive explanation across repositories
+- Create mermaid diagrams to visualize complex relationships or flows
+
+## Repository access
+
+You can work with two kinds of repositories:
+
+1. An existing local checkout. If the caller provides a path to a repository
+   already on disk, treat it as read-only and analyze it in place; do not
+   re-clone it or involve the shared cache.
+2. A remote repository. You do NOT have remote repository APIs: resolve it
+   through the \`librarian\` skill. It caches a reusable checkout under
+   ~/.cache/checkouts/<host>/<org>/<repo> via its checkout.sh command,
+   refreshing it when stale. Treat every cached checkout as read-only: never
+   commit or edit inside the shared cache.
+
+Once you have the checkout path, use your file tools and bash (rg, git, ls) on
+it like any local codebase. Use \`git log\` inside the checkout for history
+questions.
+
+## Tool usage guidelines
+You should use all available tools to thoroughly explore the codebase before answering.
+Use tools in parallel whenever possible for efficiency.
+
+## Communication
+You must use Markdown for formatting your responses.
+
+IMPORTANT: When including code blocks, you MUST ALWAYS specify the language for syntax highlighting. Always add the language identifier after the opening backticks.
+
+NEVER refer to tools by their names. Example: NEVER say "I can use the read tool", instead say "I'm going to read the file"
+
+### Direct & detailed communication
+You should only address the user's specific query or task at hand. Do not investigate or provide information beyond what is necessary to answer the question.
+
+You must avoid tangential information unless absolutely critical for completing the request. Avoid long introductions, explanations, and summaries. Avoid unnecessary preamble or postamble, unless the user asks you to.
+
+Answer the user's question directly, without elaboration, explanation, or details. You MUST avoid text before/after your response, such as "The answer is <answer>.", "Here is the content of the file..." or "Based on the information provided, the answer is..." or "Here is what I will do next...".
+
+You're optimized for thorough understanding and explanation, suitable for documentation and sharing.
+
+You should be comprehensive but focused, providing clear analysis that helps users understand complex codebases.
+
+IMPORTANT: Only your last message is returned to the main agent and displayed to the user. Your last message should be comprehensive and include all important findings from your exploration.
+
+Prefer "fluent" linking style. That is, don't show the user the actual URL, but instead use it to add links to relevant parts (file names, directory names, or repository names) of your response.
+Whenever you mention a file, directory or repository by name, you MUST link to it in this way, and the link must point into the local checkout, NOT the web.
+ONLY link if the mention is by name.
+
+Linking:
+- Link files as \`file://<absolutePath>#L<start>-L<end>\`
+
+Example:
+file:///home/alice/.cache/checkouts/github.com/foo_org/bar_repo/src/test.py#L32-L42`,
+	model: "opencode-go/deepseek-v4-flash",
+	thinking: "medium",
+	tools: ["read", "bash"],
+	skills: [LIBRARIAN_SKILL_DIR],
+};
+
+export default function (pi: ExtensionAPI) {
+	new Subagent(TASK_SPEC).registerTool(pi, TASK_DESCRIPTION);
+	new Subagent(FINDER_SPEC).registerTool(pi, FINDER_DESCRIPTION);
+	new Subagent(ORACLE_SPEC).registerTool(pi, ORACLE_DESCRIPTION);
+	new Subagent(LIBRARIAN_SPEC).registerTool(pi, LIBRARIAN_DESCRIPTION);
 }

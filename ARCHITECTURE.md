@@ -30,8 +30,8 @@ TUI 工具与编辑（`preview`、`view-image`、`files`、
 并行子代理误报过滤，rubric 改编自 Claude Code 的 security-review）、`answer`、`btw`（在主会话旁开启独立旁路线程））、
 模式与提示词编辑（`prompt-editor`）、监控与装饰（`cache-hit-monitor`、`notify`、`whimsical`、`inline`）。
 依赖 pi 运行时库 `@earendil-works/pi-coding-agent`、
-`pi-tui`、`pi-ai`。子代理运行时（`lib/subagent.ts`：spawn 隔离子 pi 进程的 Subagent 机制库；
-`task.ts`/`finder.ts`/`oracle.ts`/`librarian.ts` 四个兄弟扩展各自注册一个子代理工具）与 session 工具
+`pi-tui`、`pi-ai`。子代理（`subagents.ts` 单文件扩展：spawn 隔离子 pi 进程的 Subagent 机制 +
+`task`/`finder`/`oracle`/`librarian` 四个工具各自的 spec 常量与注册）与 session 工具
 （`read-session.ts`：read_session、read_session_compaction、read_session_entry 三件套，只读解析 session
 JSONL；`find-session.ts`：search_sessions 工具 + /search-sessions 命令，无索引实时扫描：原始文本预滤 +
 活跃分支解析，会话级归组（代表命中 + more=N）与两级键排序（首条 user 消息命中优先），
@@ -41,8 +41,7 @@ Enter 上下文敏感：词干净时注入选中命中、词改动时重扫，Es
 也都是本目录的顶层扩展。
 扩展间共享的非扩展模块放在 `lib/` 子目录（`lib/worker.ts`：从 modes.json 解析当前激活模式的
 `roles.subagents` pin（provider/model/thinkingLevel），供 `answer`、`handoff`、`compact-worker` 与 `goal` 的
-verifier 发起一次性 LLM 请求时使用；`lib/subagent.ts`：Subagent
-机制库；`lib/session-common.ts`：session JSONL 解析管线（读/解析分离：readSessionText 供预滤、
+verifier 发起一次性 LLM 请求时使用；`lib/session-common.ts`：session JSONL 解析管线（读/解析分离：readSessionText 供预滤、
 parseSessionText 供解析），供 `read-session` 与 `find-session` 共用；
 `lib/session-preview.ts`：会话预览 overlay + read_session 风格转录格式化，供 `find-session`（ctrl+o 全文预览）
 与 `background-task`（preview 动作）共用；`lib/session-picker.ts`：内置 /resume 选择器的
@@ -61,8 +60,8 @@ pi 只把 `extensions/*.ts` 顶层文件与含 `index.ts` 的子目录
 pi coding agent 的运行时配置中心。`models.json` 定义多 provider 的模型清单与成本参数；`modes.json` 定义
 default/rush/smart 等工作模式及其 roles 模型绑定；`keybindings.json` 定制 TUI 键位；`settings.json` 存放
 agent 全局设置（不再使用 `packages` 声明第三方扩展包）；子代理能力由本地扩展提供（`task`/`finder`/
-`oracle`/`librarian` 四个工具，机制在 `extensions/lib/subagent.ts`），各工具的模型/工具配置内联
-在各自扩展文件的 spec 常量中；`telegram.json` 配置 Telegram bot
+`oracle`/`librarian` 四个工具，机制与各工具的模型/工具配置 spec 常量同在同一文件
+`extensions/subagents.ts` 中）；`telegram.json` 配置 Telegram bot
 远程交互通道；`auth.json` 管理 API 密钥；`trust.json` 记录项目信任状态；`prompts/` 存放可复用
 提示词模板（`prototype.md`、`simplify.md`、`clarify.md`、`summary.md`、`translate-paragraph.md`）。
 `AGENTS.md` 定义 agent 行为规范。
@@ -70,7 +69,7 @@ agent 全局设置（不再使用 `packages` 声明第三方扩展包）；子�
 
 **API Boundary:** `models.json` 是 provider/模型清单的唯一来源，扩展不直接读取；`modes.json` 由 `prompt-editor` 扩展
 提供 TUI 编辑入口，运行时与扩展共享读写。子代理运行时与 session 查看工具均为本地 `extensions/`
-顶层扩展与 `lib/` 共享模块（`lib/subagent.ts`、`lib/session-common.ts`、`lib/session-preview.ts`、`lib/worker.ts`、`lib/review-target.ts`），
+顶层扩展与 `lib/` 共享模块（`lib/session-common.ts`、`lib/session-preview.ts`、`lib/worker.ts`、`lib/review-target.ts`），
 不与本地其他扩展源码混写。
 
 ### `agents/skills/`
