@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "currentMode": "default",
+  "currentMode": "rush",
   "modes": {
     "default": {
       "roles": {
@@ -15,8 +15,8 @@
           "thinkingLevel": "high"
         },
         "subagents": {
-          "provider": "opencode-go",
-          "modelId": "hy4-preview",
+          "provider": "deepseek",
+          "modelId": "deepseek-flash",
           "thinkingLevel": "high"
         }
       }
