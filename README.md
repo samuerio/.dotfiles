@@ -66,6 +66,25 @@
 - 主要是编辑器与终端配置（`vscode/`、`windows_terminal/`）
 - 键位自动化放在 `autohotkey/`
 
+## pi 扩展 submodule
+
+pi 的部分扩展以 git submodule 形式引入（如 `pi/agent/extensions/subagent-manager/`）。
+clone 后该目录为空属正常现象（父仓库只记录 commit 指针），不影响其他扩展加载。
+需要启用时手动执行：
+
+```bash
+cd ~/workspace/.dotfiles
+git submodule update --init pi/agent/extensions/subagent-manager
+cd pi/agent/extensions/subagent-manager && npm ci --omit=dev --legacy-peer-deps
+```
+
+更新 submodule 到父仓库钉住的新 commit：
+
+```bash
+cd ~/workspace/.dotfiles
+git submodule update pi/agent/extensions/subagent-manager
+```
+
 ## AI / 自动化
 
 - `pi/agent/`：pi coding agent 配置中心，包含模型、模式、扩展、键位与提示词；`settings.json` 等私有运行时配置由外部链接提供。
