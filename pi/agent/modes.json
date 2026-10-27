@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "currentMode": "rush",
+  "currentMode": "smart",
   "modes": {
     "default": {
       "roles": {
@@ -44,7 +44,7 @@
       "roles": {
         "main": {
           "provider": "opencode-go",
-          "modelId": "step-5-preview",
+          "modelId": "glm-5.3-flash",
           "thinkingLevel": "high"
         },
         "oracle": {
