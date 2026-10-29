@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import {
     mkdir,
     readdir,
@@ -145,10 +145,19 @@ function taskUuid(alias: string): string {
  */
 const ALIAS_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
-function validateAlias(alias: string): void {
+async function validateAlias(pi: ExtensionAPI, alias: string): Promise<void> {
     if (!ALIAS_PATTERN.test(alias)) {
         throw new Error(
             `Invalid task alias "${alias}": 1-64 chars, must start with a letter or digit, may contain letters, digits, ".", "_" and "-" (slashes are not allowed).`,
+        );
+    }
+    // The regex is wider than git's ref rules ("..", a trailing ".", and a
+    // trailing ".lock" all pass it but are invalid branch names). git worktree
+    // add would fail only after the run dir is claimed, so reject these here.
+    const refCheck = await pi.exec("git", ["check-ref-format", "--branch", alias]);
+    if (refCheck.code !== 0) {
+        throw new Error(
+            `Invalid task alias "${alias}": not usable as a git branch name. Choose a different alias.`,
         );
     }
 }
@@ -398,28 +407,6 @@ async function readTaskResult(
     )) as BackgroundTaskResult | null;
 }
 
-/** Dispatch-time registry record; worktree is intent, reality is probed via existsSync. */
-interface TaskMeta {
-    version: 1;
-    worktree: boolean;
-}
-
-async function readTaskMeta(
-    tasksDir: string,
-    alias: string,
-): Promise<TaskMeta | null> {
-    const value = await readRunJson(tasksDir, alias, "meta.json");
-    if (
-        value &&
-        typeof value === "object" &&
-        (value as TaskMeta).version === 1 &&
-        typeof (value as TaskMeta).worktree === "boolean"
-    ) {
-        return value as TaskMeta;
-    }
-    return null;
-}
-
 /** Dispatch timestamp = task.md mtime (written right before the child starts). */
 async function readTaskStartedAt(
     tasksDir: string,
@@ -444,7 +431,6 @@ interface OpenOutput {
 }
 
 interface CleanOutput {
-    success: boolean;
     worktreePath: string;
     leftoverCount: number;
     leftovers: string[];
@@ -476,8 +462,7 @@ type TaskStatus = "completed" | "failed";
 /**
  * Independent facts about one background-task alias. The run dir
  * (tasks/<alias>) is the source of truth; the worktree is optional and
- * expressed by the optional worktree entity (meta.json intent × existsSync
- * reality).
+ * expressed by the optional worktree entity (existsSync reality).
  */
 interface TaskFacts {
     name: string;
@@ -503,9 +488,9 @@ function taskWorktreePath(repoRoot: string, alias: string): string {
 
 /**
  * Per-name fact core shared by the task list and single-task resolution:
- * meta.json worktree intent × existsSync worktree reality (a missing
- * worktree path, e.g. manually removed, reads as already cleaned) joined
- * with result.json status and tmux session existence. The caller supplies
+ * worktree reality (a missing worktree path, e.g. manually removed, reads
+ * as already cleaned) joined with result.json status and tmux session
+ * existence. The caller supplies
  * env and session names so listing resolves them once for all tasks.
  */
 async function taskFactsFor(
@@ -513,14 +498,10 @@ async function taskFactsFor(
     sessions: string[],
     name: string,
 ): Promise<TaskFacts> {
-    // Worktree: meta.json intent, written at the atomic claim before any
-    // worktree side effect, so a missing meta only means a broken run dir.
-    const meta = await readTaskMeta(env.tasksDir, name);
     const worktreePath = taskWorktreePath(env.repoRoot, name);
-    const worktree =
-        meta?.worktree && existsSync(worktreePath)
-            ? { path: worktreePath }
-            : undefined;
+    const worktree = existsSync(worktreePath)
+        ? { path: worktreePath }
+        : undefined;
 
     // Task status: verbatim result.json status; undefined while running.
     const childResult = await readTaskResult(env.tasksDir, name);
@@ -553,8 +534,8 @@ async function resolveTaskFacts(
 
 /**
  * Background task list: readdir of tasks/ (the source of truth — one
- * subdirectory per task) joined with meta.json worktree intent, existsSync
- * worktree reality, result.json task status, and tmux session existence.
+ * subdirectory per task) joined with existsSync worktree reality,
+ * result.json task status, and tmux session existence.
  * Dirty state is not listed; it is computed at close time for the selected
  * task only.
  */
@@ -593,7 +574,7 @@ async function selectTask(
         return null;
     }
 
-    // Display row: "<alias> (<taskStatus>|running) (no worktree) (no session)"
+    // Display row: "<alias> (<taskStatus>|running) (no session)"
     // — each mark omitted per facts; running = live session, no result yet.
     // Map display strings back to facts to avoid parsing.
     const displayToFacts = new Map<string, TaskFacts>();
@@ -602,10 +583,9 @@ async function selectTask(
         if (task.taskStatus) marks.push(task.taskStatus);
         else if (task.sessionExists) marks.push("running");
         const mark = marks.length > 0 ? ` (${marks.join(", ")})` : "";
-        const noWorktree = task.worktree ? "" : " (no worktree)";
         const noSession = task.sessionExists ? "" : " (no session)";
         displayToFacts.set(
-            `${task.name}${mark}${noWorktree}${noSession}`,
+            `${task.name}${mark}${noSession}`,
             task,
         );
     }
@@ -649,9 +629,7 @@ function taskActionItems(facts: TaskFacts): SelectItem[] {
     }
     items.push({
         value: "close",
-        label: facts.worktree
-            ? "Close (remove worktree + kill session)"
-            : "Close (kill session + remove artifacts)",
+        label: "Close (remove worktree + kill session)",
     });
     return items;
 }
@@ -752,7 +730,29 @@ async function runCloseAction(
         }
     }
 
-    // Unreachable in practice: force closes a dirty worktree unconditionally.
+    // Leftover directory (exists but no registered worktree): confirm
+    // before the forced removal, with its own truthful title — its contents
+    // are not covered by the dirty-worktree probe.
+    if (outcome.status === "leftover") {
+        const proceed = await ctx.ui.confirm(
+            "Task Directory Not a Worktree",
+            `The directory for task "${facts.name}" exists but is not a registered git worktree. Remove it and close anyway?`,
+        );
+        if (!proceed) {
+            ctx.ui.notify("Cancelled.", "info");
+            return;
+        }
+        try {
+            outcome = await closeTask(pi, { name: facts.name, force: true });
+        } catch (error) {
+            ctx.ui.notify(
+                error instanceof Error ? error.message : String(error),
+                "error",
+            );
+            return;
+        }
+    }
+
     if (outcome.status !== "closed") return;
     const result = outcome.result;
     if (result.warning) {
@@ -980,8 +980,7 @@ function formatDuration(
  * under the status line on failed; attach line only while the tmux session
  * still exists (attachCommand undefined otherwise), with " (copied)" appended
  * when the command was copied to the clipboard; provider/model line once
- * settled; worktree line only in worktree mode (no line at all when the
- * child runs in the main repo).
+ * settled; worktree line while the worktree dir still exists.
  */
 function formatLogWidgetLines(
     alias: string,
@@ -1088,6 +1087,8 @@ async function ensureSession(
 interface CloseResult {
     name: string;
     leftoverCount: number;
+    /** First leftover paths (truncated like the shell's own output). */
+    leftovers?: string[];
     /** One of at most one: session kill or run-dir removal partially failed. */
     warning?: string;
 }
@@ -1106,20 +1107,23 @@ async function isWorktreeDirty(
     return result.code === 0 && result.stdout.trim().length > 0;
 }
 
-/** closeTask outcome: "dirty" asks the caller to confirm a forced retry; "closed" finished the cleanup. */
+/** closeTask outcome: "dirty" / "leftover" ask the caller to confirm a forced retry; "closed" finished the cleanup. */
 type CloseOutcome =
     | { status: "dirty" }
+    | { status: "leftover" }
     | { status: "closed"; result: CloseResult };
 
 /**
- * Close a background task. Worktree mode: removes the worktree (a dirty
- * one returns the "dirty" outcome unless force; a missing worktree path
- * counts as already cleaned, so close stays idempotent). No-worktree mode
- * skips worktree cleanup entirely. Both modes kill the tmux session when
- * present and delete the run dir (task.md / result.json / meta.json) — the
- * task list is sourced from tasks/, so leftover artifacts would be
- * orphaned. The sessions dir (child session history) is append-only and
- * never touched here.
+ * Close a background task. Removes the worktree if one is registered at
+ * the derived path (a dirty one returns the "dirty" outcome unless force;
+ * a missing path counts as already cleaned, so close stays idempotent).
+ * If the path exists but git is not a worktree there, the "leftover"
+ * outcome asks for confirmation first — its contents may be the child's
+ * uncommitted work. Also kills the
+ * tmux session when present and deletes the run dir (task.md /
+ * result.json) — the task list is sourced from tasks/, so leftover
+ * artifacts would be orphaned. The sessions dir (child session history)
+ * is append-only and never touched here.
  *
  * Failures throw a user-facing Error; a successful close returns "closed".
  */
@@ -1132,16 +1136,58 @@ async function closeTask(
 
     let cleanOutput: CleanOutput | null = null;
     if (facts.worktree !== undefined) {
-        const dirty = await isWorktreeDirty(pi, facts.worktree.path);
-        if (dirty && !force) {
-            return { status: "dirty" };
+        // A real git worktree, or just a leftover directory at the derived
+        // path? Ask git: a leftover resolves --show-toplevel to the main
+        // repo (or fails), so the dirty probe below would report the main
+        // repo's entries instead of this directory's contents.
+        const probe = await pi.exec("git", [
+            "-C",
+            facts.worktree.path,
+            "rev-parse",
+            "--show-toplevel",
+        ]);
+        // .git must be a file: a registered worktree's .git links back to
+        // the main repo, while a leftover directory that is itself a repo
+        // root has a .git directory (so rev-parse would answer from it and
+        // trick the probe into "registered" — then clean always fails
+        // without --force and Close dead-ends).
+        let registered = false;
+        try {
+            registered =
+                probe.code === 0 &&
+                probe.stdout.trim() === facts.worktree.path &&
+                statSync(path.join(facts.worktree.path, ".git")).isFile();
+        } catch {
+            registered = false;
+        }
+        if (!registered && !force) {
+            return { status: "leftover" };
+        }
+        let dirty = false;
+        if (registered) {
+            dirty = await isWorktreeDirty(pi, facts.worktree.path);
+            if (dirty && !force) {
+                return { status: "dirty" };
+            }
         }
 
+        // Leftover removal always goes through --force; worktree.sh only
+        // deletes a plain (unregistered) directory under that flag.
         const cleanArgs = [WORKTREE_SH, "clean", name];
-        if (dirty) cleanArgs.push("--force");
+        // Include force: the leftover retry re-enters closeTask with
+        // force=true after the user confirmed; without it the identical
+        // command runs again and the retry is a silent no-op.
+        if (dirty || !registered || force) cleanArgs.push("--force");
         cleanArgs.push("--json");
         const cleanResult = await pi.exec("bash", cleanArgs);
         if (cleanResult.code !== 0) {
+            // The shell re-decides registration at clean time; exit 3 is
+            // its dedicated "unregistered directory, no --force" refusal
+            // (any other non-zero is a real git failure). Fall back to the
+            // leftover confirmation instead of dead-ending Close.
+            if (cleanResult.code === 3) {
+                return { status: "leftover" };
+            }
             throw new Error(
                 cleanResult.stderr.trim() || "Failed to remove worktree.",
             );
@@ -1182,6 +1228,7 @@ async function closeTask(
         }
     }
 
+    // Worktree gone; branch (usually) kept.
     return {
         status: "closed",
         result: {
@@ -1195,21 +1242,34 @@ async function closeTask(
 function formatCloseText(result: CloseResult): string {
     let msg = `Background task "${result.name}" closed.`;
     if (result.leftoverCount > 0) {
-        msg += ` Warning: ${result.leftoverCount} leftover file(s).`;
+        msg += ` Warning: ${result.leftoverCount} leftover file(s):`;
+        const shown = result.leftovers?.slice(0, 3) ?? [];
+        for (const item of shown) {
+            msg += `
+  ${item}`;
+        }
+        const hidden = result.leftoverCount - shown.length;
+        if (hidden > 0) msg += `
+  ...and ${hidden} more`;
     }
+    // Without this line the next dispatch of a reused alias fails with an
+    // alias-branch conflict that reads like an unrelated git problem.
+    // Hedged: a leftover-dir close means the branch may not exist.
+    msg += `
+Branch "${result.name}" may remain — delete it when done (git branch -D ${result.name}).`;
     return msg;
 }
 
 // ─── Background Task Dispatch ─────────────────────────────────────
 
-/** Thrown by dispatchBackgroundTask when the alias is already taken (live tmux session or existing run dir). Callers can use instanceof to retry with a different alias. */
+/** Thrown by dispatchBackgroundTask when the alias is already taken (live tmux session or existing run dir). */
 export class TaskAliasConflictError extends Error {}
 
 export interface DispatchResult {
     alias: string;
     /** sha256(alias) truncated to 16 hex chars — worktree/run/session key. */
     uuid: string;
-    /** Worktree path in worktree mode; undefined when the child runs in the main repo. */
+    /** Fresh git worktree the child runs in. */
     worktreePath?: string;
     tmuxSession: string;
     attachCommand: string;
@@ -1225,12 +1285,11 @@ export async function dispatchBackgroundTask(
         alias: string;
         prompt: string;
         description: string;
-        worktree: boolean;
         ctx: ExtensionContext;
     },
 ): Promise<DispatchResult> {
-    const { alias, prompt, description, worktree, ctx } = opts;
-    validateAlias(alias);
+    const { alias, prompt, description, ctx } = opts;
+    await validateAlias(pi, alias);
 
     // Model check first: no filesystem side effects before it can pass.
     const provider = ctx.model?.provider;
@@ -1276,20 +1335,6 @@ export async function dispatchBackgroundTask(
     }
 
     let resultPath: string;
-    // meta.json records the worktree intent right after the atomic claim,
-    // before any worktree/session side effect, so "run dir exists ⇒ meta
-    // exists" holds and readers need no missing-meta fallback. Atomic write,
-    // so a crash cannot leave a half-written record.
-    try {
-        await writeJsonAtomic(path.join(runDir, "meta.json"), {
-            version: 1,
-            worktree,
-        });
-    } catch (error) {
-        throw new Error(
-            `Failed to write task meta: ${error instanceof Error ? error.message : String(error)}`,
-        );
-    }
     let promptPath: string;
     let sessionDir: string;
     try {
@@ -1307,9 +1352,9 @@ export async function dispatchBackgroundTask(
         );
     }
 
-    // Optional worktree; no-worktree mode runs the child in the main repo.
-    let worktreePath: string | undefined;
-    if (worktree) {
+    // Fresh git worktree for the child (branch = alias).
+    let worktreePath: string;
+    {
         const wtResult = await pi.exec("bash", [
             WORKTREE_SH,
             "open",
@@ -1317,22 +1362,45 @@ export async function dispatchBackgroundTask(
             "--json",
         ]);
         if (wtResult.code !== 0) {
+            // Nothing was created yet (no session, no worktree): roll back
+            // the run-dir claim so the alias is immediately retryable and
+            // the real failure reason is not masked by a phantom task.
+            await rm(runDir, { recursive: true, force: true }).catch(
+                () => {},
+            );
             throw new Error(wtResult.stderr.trim() || "worktree.sh open failed");
         }
         const output = parseOpenOutput(wtResult.stdout);
         if (!output) {
+            await rm(runDir, { recursive: true, force: true }).catch(
+                () => {},
+            );
             throw new Error("Failed to parse worktree output");
         }
         worktreePath = output.worktreePath;
+        // Second line of defence: worktree.sh reports success only for a
+        // directory that exists; a missing one would make tmux silently
+        // start the child in $HOME instead.
+        if (!existsSync(worktreePath)) {
+            await rm(runDir, { recursive: true, force: true }).catch(
+                () => {},
+            );
+            throw new Error(
+                `worktree.sh open reported ${worktreePath} but the directory does not exist.`,
+            );
+        }
     }
+    const cleanupHint = `run dir/worktree already created (clean up: user runs /background-tasks, select "${alias}", then Close)`;
     const sessionOk = await ensureSession(
         pi,
         env.socketPath,
         session,
-        worktreePath ?? env.repoRoot,
+        worktreePath,
     );
     if (!sessionOk) {
-        throw new Error(`Failed to start tmux session "${session}".`);
+        throw new Error(
+            `Failed to start tmux session "${session}". (${cleanupHint})`,
+        );
     }
 
     const remain = await pi.exec("tmux", [
@@ -1346,7 +1414,7 @@ export async function dispatchBackgroundTask(
     ]);
     if (remain.code !== 0) {
         throw new Error(
-            remain.stderr.trim() || "Failed to set remain-on-exit.",
+            `${remain.stderr.trim() || "Failed to set remain-on-exit."} (${cleanupHint})`,
         );
     }
 
@@ -1379,7 +1447,6 @@ export async function dispatchBackgroundTask(
         piArgs.map(shellQuote).join(" "),
     ].join(" ");
 
-    const cleanupHint = `run dir/session already created (clean up: user runs /background-tasks, select "${alias}", then Close)`;
     const sent = await pi.exec("tmux", [
         "-S",
         env.socketPath,
@@ -1667,36 +1734,30 @@ export default function (pi: ExtensionAPI): void {
     });
 
     // ── Tool: background_task ──
-    // One-shot background task: optional fresh worktree + interactive child
-    // Pi, dispatched and returned immediately (no waiting / polling).
+    // One-shot background task: fresh git worktree + interactive child Pi,
+    // dispatched and returned immediately (no waiting / polling).
 
     pi.registerTool({
         name: "background_task",
         label: "Background task",
         description:
-            "Dispatch a one-shot background task: create a tmux session keyed by the task alias (the child runs in a fresh git worktree by default, or directly in the main repo when worktree is false), then start an interactive Pi process with the given prompt. Returns immediately without waiting for the task. Progress and completion are observed by the user via /background-tasks. Fails fast if the alias already exists.",
+            "Dispatch a one-shot background task: create a tmux session keyed by the task alias (the child runs in a fresh git worktree, branch = alias), then start an interactive Pi process with the given prompt. Returns immediately without waiting for the task. Progress and completion are observed by the user via /background-tasks. Fails fast if the alias already exists.",
         promptSnippet:
-            "Dispatch a one-shot background task (isolated worktree by default); returns immediately.",
+            "Dispatch a one-shot background task (isolated fresh git worktree); returns immediately.",
         promptGuidelines: [
             "background_task is fire-and-forget — returns immediately, the user observes via /background-tasks.",
-            "Keep background_task's prompt free of commit instructions; leave the work uncommitted so the user can review before anything lands. In no-worktree mode this matters more: a child commit would land on the user's live checked-out branch.",
-            "Worktree mode (default): write file paths in the prompt relative to the worktree root (the child Pi's cwd is the fresh worktree, which contains all committed repo files, so relative paths also work for read-only references). Never put an absolute main-repo path in the prompt: the child follows literal paths and would edit the main repo, bypassing worktree isolation. No-worktree mode: the child runs directly in the main repo, so main-repo paths are correct and its edits are immediately live. In both modes, if the child needs uncommitted main-repo content as context, paste the relevant snippet into the prompt instead of a path.",
+            "Keep background_task's prompt free of commit instructions; leave the work uncommitted so the user can review before anything lands.",
+            "Write file paths in the prompt relative to the worktree root (the child Pi's cwd is the fresh worktree, which contains all committed repo files, so relative paths also work for read-only references). Never put an absolute main-repo path in the prompt: the child follows literal paths and would edit the main repo, bypassing worktree isolation. If the child needs uncommitted main-repo content as context, paste the relevant snippet into the prompt instead of a path.",
             "Never clean up a background task yourself (worktree removal, session kill, run dir deletion); the user closes it via /background-tasks after reviewing.",
         ],
         parameters: Type.Object({
             alias: Type.String({
                 description:
-                    "Task alias: 1-64 chars, must start with a letter or digit, then letters/digits/./_/- (flat names, no slashes; e.g. fix-socket-hang). Also used as the branch name in worktree mode. Must not already exist.",
+                    "Task alias: 1-64 chars, must start with a letter or digit, then letters/digits/./_/- (flat names, no slashes; e.g. fix-socket-hang). Also used as the branch name. Must not already exist.",
             }),
-            worktree: Type.Optional(
-                Type.Boolean({
-                    description:
-                        "Create a fresh git worktree for the task (default true). When false, the child runs directly in the main repo: edits are immediately live and commits land on the user's checked-out branch.",
-                }),
-            ),
             prompt: Type.String({
                 description:
-                    "The task for the agent to perform. Be specific about what needs to be done and include any relevant context. In worktree mode (default) reference files by paths relative to the worktree root; never absolute paths into the main repo.",
+                    "The task for the agent to perform. Be specific about what needs to be done and include any relevant context. Reference files by paths relative to the worktree root; never absolute paths into the main repo.",
             }),
             description: Type.String({
                 description:
@@ -1723,13 +1784,10 @@ export default function (pi: ExtensionAPI): void {
                     "background_task requires a non-empty description.",
                 );
             }
-            const worktree =
-                typeof params.worktree === "boolean" ? params.worktree : true;
             const result = await dispatchBackgroundTask(pi, {
                 alias,
                 prompt,
                 description,
-                worktree,
                 ctx,
             });
             return {
@@ -1763,14 +1821,9 @@ export default function (pi: ExtensionAPI): void {
             }
             if (expanded) {
                 const container = new Container();
-                // Only mark the deviation from the default: no worktree
-                // means the child edits the main repo directly (live).
-                const modeMark = details.worktreePath
-                    ? ""
-                    : theme.fg("muted", " · no worktree");
                 container.addChild(
                     new Text(
-                        `${theme.fg("warning", "●")} ${theme.fg("toolTitle", theme.bold(details.alias))}${theme.fg("muted", " · dispatched")}${modeMark}`,
+                        `${theme.fg("warning", "●")} ${theme.fg("toolTitle", theme.bold(details.alias))}${theme.fg("muted", " · dispatched")}`,
                         0,
                         0,
                     ),
@@ -1797,13 +1850,9 @@ export default function (pi: ExtensionAPI): void {
                 );
                 return container;
             }
-            // Compact view: same single-line mode mark as the expanded view.
-            const modeMark = details.worktreePath
-                ? ""
-                : theme.fg("muted", " · no worktree");
+            // Compact view.
             let text = `${theme.fg("warning", "●")} ${theme.fg("toolTitle", theme.bold(details.alias))}`;
             text += theme.fg("muted", " · dispatched");
-            text += modeMark;
             text += `\n  ${theme.fg("accent", details.attachCommand)}`;
             text += `\n  ${theme.fg("dim", `${details.provider}/${details.model} (${details.thinking})`)}`;
             return new Text(text, 0, 0);

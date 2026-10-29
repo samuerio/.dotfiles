@@ -13,12 +13,9 @@
  * - Review a specific commit
  * - Review a folder (snapshot audit, not a diff)
  *
- * Modes (no Empty branch / loop fixing: security review produces a report,
- * not a fix loop; isolation is covered by the background dispatch):
- * - Current session (appends the prompt to the live conversation)
- * - Background task (dispatches to an unattended child Pi in the main repo
- *   via the background-task extension; fire-and-forget, results observed
- *   via /background-tasks)
+ * Mode (no Empty branch / loop fixing: security review produces a report,
+ * not a fix loop): the review runs in the current session (appended to the
+ * live conversation). It runs without worktree isolation.
  *
  * Usage:
  * - `/security-review` - show interactive selector
@@ -49,7 +46,6 @@ import type {
 import {
     applyUncommittedWorktree,
     buildTargetFocusPrompt,
-    dispatchPromptTask,
     getUserFacingHint,
     makeCustomInstructionsToggle,
     resolveReviewTarget,
@@ -324,28 +320,6 @@ export default function securityReviewExtension(pi: ExtensionAPI) {
         pi.sendUserMessage(fullPrompt);
     }
 
-    /**
-     * Dispatch the review as a background task (no worktree: the child runs
-     * directly in the main repo). Fire-and-forget: results are observed via
-     * /background-tasks ("Add result to prompt" yields the clean report).
-     */
-    async function executeBackgroundSecurityReview(
-        ctx: ExtensionCommandContext,
-        target: ReviewTarget,
-        extraInstruction?: string,
-    ): Promise<void> {
-        const fullPrompt = await buildFullSecurityPrompt(pi, target, {
-            extraInstruction,
-        });
-        await dispatchPromptTask(pi, ctx, {
-            command: "security-review",
-            description: `security review: ${getUserFacingHint(target)}`,
-            prompt: fullPrompt,
-            notifyLead: "Background security review",
-            target,
-        });
-    }
-
     // Register the /security-review command
     pi.registerCommand("security-review", {
         description:
@@ -397,32 +371,6 @@ export default function securityReviewExtension(pi: ExtensionAPI) {
 
                 if (!target) {
                     ctx.ui.notify("Security review cancelled", "info");
-                    return;
-                }
-
-                // Always ask which mode to run the review in: background
-                // dispatch is independent of session content, and current
-                // session appends to the live conversation.
-                const choice = await ctx.ui.select(
-                    "Start security review in:",
-                    ["Current session", "Background task"],
-                );
-
-                if (choice === undefined) {
-                    if (fromSelector) {
-                        target = null;
-                        continue;
-                    }
-                    ctx.ui.notify("Security review cancelled", "info");
-                    return;
-                }
-
-                if (choice === "Background task") {
-                    await executeBackgroundSecurityReview(
-                        ctx,
-                        target,
-                        extraInstruction,
-                    );
                     return;
                 }
 

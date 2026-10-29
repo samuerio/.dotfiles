@@ -117,9 +117,7 @@ append_worktree() {
     *) return 0 ;;
   esac
 
-  [ -n "$branch_ref" ] || return 0
   branch_name="${branch_ref#refs/heads/}"
-  [ -n "$branch_name" ] || return 0
 
   WORKTREE_BRANCHES+=("$branch_name")
   WORKTREE_PATHS+=("$path")
@@ -139,7 +137,9 @@ print_worktree_json() {
 
   printf '[\n'
   for i in "${!WORKTREE_BRANCHES[@]}"; do
-    if [ -n "${query:-}" ] && [[ "${WORKTREE_BRANCHES[$i]}" != *"$query"* ]]; then
+    local branch="${WORKTREE_BRANCHES[$i]}"
+    branch="${branch:-(detached)}"
+    if [ -n "${query:-}" ] && [[ "$branch" != *"$query"* ]]; then
       continue
     fi
 
@@ -154,7 +154,7 @@ print_worktree_json() {
       printf ',\n'
     fi
     printf '  {"branch":"%s","path":"%s","dirty":%s}' \
-      "$(json_escape "${WORKTREE_BRANCHES[$i]}")" \
+      "$(json_escape "$branch")" \
       "$(json_escape "${WORKTREE_PATHS[$i]}")" \
       "$dirty"
   done
@@ -199,7 +199,7 @@ print_worktree_list() {
   local count=0
 
   for i in "${!WORKTREE_BRANCHES[@]}"; do
-    if [ -z "${query:-}" ] || [[ "${WORKTREE_BRANCHES[$i]}" == *"$query"* ]]; then
+    if [ -z "${query:-}" ] || [[ "${WORKTREE_BRANCHES[$i]:-(detached)}" == *"$query"* ]]; then
       count=$((count + 1))
     fi
   done
@@ -208,7 +208,9 @@ print_worktree_list() {
   printf 'worktree_count=%s\n' "$count"
 
   for i in "${!WORKTREE_BRANCHES[@]}"; do
-    if [ -n "${query:-}" ] && [[ "${WORKTREE_BRANCHES[$i]}" != *"$query"* ]]; then
+    local branch="${WORKTREE_BRANCHES[$i]}"
+    branch="${branch:-(detached)}"
+    if [ -n "${query:-}" ] && [[ "$branch" != *"$query"* ]]; then
       continue
     fi
 
@@ -217,7 +219,7 @@ print_worktree_list() {
       dirty="yes"
     fi
 
-    printf 'worktree_%s_branch=%s\n' "$output_index" "${WORKTREE_BRANCHES[$i]}"
+    printf 'worktree_%s_branch=%s\n' "$output_index" "$branch"
     printf 'worktree_%s_path=%s\n' "$output_index" "${WORKTREE_PATHS[$i]}"
     printf 'worktree_%s_dirty=%s\n' "$output_index" "$dirty"
     output_index=$((output_index + 1))
@@ -238,7 +240,28 @@ branch_for_worktree_path() {
   return 1
 }
 
+# Stale registrations (worktree dir removed but the entry remains) would
+# make open "succeed" without creating anything; prune them up front. Safe:
+# prune only drops registrations whose directory is gone (never locked).
+# Restricted to open/clean: only they need the "no stale registration at
+# this path" guarantee; list/root-path stay side-effect free (an external
+# volume that is temporarily unmounted must not lose its registration).
+if [ "$command" = "open" ] || [ "$command" = "clean" ]; then
+  git -C "$repo_main" worktree prune >/dev/null 2>&1 || true
+fi
+
 collect_worktrees
+# True when a worktree is registered exactly at this path — the real
+# "is registered" fact. Independent of which branch it holds: a worktree
+# on a detached HEAD has no `branch` porcelain line, so the branch name
+# cannot be used for this test.
+worktree_path_registered() {
+  local i=0
+  for i in "${!WORKTREE_PATHS[@]}"; do
+    [ "${WORKTREE_PATHS[$i]}" = "$1" ] && return 0
+  done
+  return 1
+}
 
 if [ "$command" = "root-path" ]; then
   printf '%s\n' "$repo_main"
@@ -268,12 +291,34 @@ if [ -n "$existing_branch" ] && [ "$existing_branch" != "$branch" ]; then
   echo "choose a different branch name or clean up the conflicting worktree" >&2
   exit 1
 fi
+# Registration is decided by path membership, not by the branch: detached
+# registered worktrees have no branch line. The .git file must actually be
+# there: a prunable registration whose directory is gone must not read as
+# "usable worktree exists" (prune above usually cleaned it; belt & braces).
+path_registered="no"
+if worktree_path_registered "$worktree_path" && [ -e "$worktree_path/.git" ]; then
+  path_registered="yes"
+fi
 
 if [ "$command" = "clean" ]; then
-  if [ "$force" = "--force" ]; then
-    git -C "$repo_main" worktree remove --force -- "$worktree_path"
+  if [ "$path_registered" = "yes" ]; then
+    if [ "$force" = "--force" ]; then
+      git -C "$repo_main" worktree remove --force -- "$worktree_path"
+    else
+      git -C "$repo_main" worktree remove -- "$worktree_path"
+    fi
   else
-    git -C "$repo_main" worktree remove -- "$worktree_path"
+    # Directory at the derived path but no registered worktree (leftover
+    # after manual recovery or partial cleanup). It may hold the child's
+    # uncommitted work, so removal requires --force (closeTask asks for
+    # confirmation first with its own, truthful leftover prompt).
+    if [ "$force" != "--force" ]; then
+      echo "error: $worktree_path is not a registered worktree; rerun clean with --force to delete it" >&2
+      # Dedicated code (vs git's 128 / usage's 2): closeTask keys its
+      # recoverable leftover flow on this number, not on the message text.
+      exit 3
+    fi
+    rm -rf -- "$worktree_path"
   fi
 
   leftovers=()
@@ -340,22 +385,33 @@ fi
 mkdir -p "$(dirname "$worktree_path")"
 
 needs_new_worktree="yes"
-if [ -n "$existing_branch" ]; then
+if [ "$path_registered" = "yes" ]; then
+  # A worktree is already registered at the derived path (including one on
+  # a detached HEAD): reuse it as-is, regardless of which branch it holds.
   needs_new_worktree="no"
-elif [ -d "$worktree_path/.git" ] || [ -f "$worktree_path/.git" ]; then
-  echo "error: $worktree_path exists but is not a registered git worktree" >&2
+elif [ -e "$worktree_path" ]; then
+  # Any pre-existing directory blocks a fresh add; `worktree add -b` would
+  # otherwise create the branch first and then die on the path, orphaning
+  # it. The run dir is rolled back on this failure, so /background-tasks
+  # shows nothing for this alias: the directory must go by hand.
+  echo "error: $worktree_path exists but is not a registered git worktree — remove it (rm -rf) and dispatch again" >&2
   exit 1
 fi
 
 created="no"
 if git -C "$repo_main" show-ref --verify --quiet "refs/heads/$branch"; then
   if [ "$needs_new_worktree" = "yes" ]; then
-    git -C "$repo_main" worktree add "$worktree_path" "$branch" >&2
-    created="yes"
+    # Branch exists but no worktree holds it: never check the branch out
+    # into the task worktree (a stale alias would silently reuse an old
+    # HEAD, and the alias may be the user's own branch).
+    echo "error: alias \"$branch\" matches an existing branch. Choose a different alias, or delete the branch yourself (this discards its commits): git branch -D $branch" >&2
+    exit 1
   fi
 else
-  git -C "$repo_main" worktree add -b "$branch" "$worktree_path" >&2
-  created="yes"
+  if [ "$needs_new_worktree" = "yes" ]; then
+    git -C "$repo_main" worktree add -b "$branch" "$worktree_path" >&2
+    created="yes"
+  fi
 fi
 
 if [ "$json_output" = true ]; then

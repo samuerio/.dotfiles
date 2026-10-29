@@ -19,11 +19,11 @@ pi coding agent 的自定义 TypeScript 扩展集，仓库中除 `nvim/` 外最�
 会话编排与交接（`continue`、`find-session`（search_sessions 工具 + /search-sessions 面板：browse 模式列出
 全部会话、Enter 注入代表命中、ctrl+e 追加会话引用、ctrl+o 全文预览高亮关键词；`/pick-session` 为其
 废弃转发 stub）、`handoff`、`session-breakdown`、`background-task`（后台任务派发：
-可选 git worktree + tmux 子会话 + `.pi/background-tasks/tasks/` 任务注册表 + 结果回报）、`tmux-split-fork`、
+fresh git worktree（branch = alias）+ tmux 子会话 + `.pi/background-tasks/tasks/` 任务注册表 + 结果回报）、`tmux-split-fork`、
 `goal`（目标驱动自动迭代：`/goal` 命令族 + agent_settled 续跑循环 + worker 模型无工具 verifier 判定完成）、
 `loop`（定时任务：`/loop [interval] <prompt>` 命令 + loop_create/loop_list/loop_delete 模型工具，
-任务存 `.pi/loop-tasks.json`，30s 自调度 tick 链按 `lastFiredAt + intervalMs` 到点后复用
-`background-task` 的 dispatchBackgroundTask 派发隔离子 pi；`.pi/loop-tasks.lock` 文件锁 +
+任务存 `.pi/loop-tasks.json`，1s 自调度 tick 链按 cron 的下次触发时间到点后
+通过 sendMessage 注入当前会话；`.pi/loop-tasks.lock` 文件锁 +
 mtime 陈旧判定做多会话调度权互斥，claim-then-dispatch 毫秒级关键区））、
 TUI 工具与编辑（`preview`、`view-image`、`files`、
 `context`、`unified-edit`、`review`、`security-review`（安全审查：高置信漏洞识别 +
@@ -48,8 +48,8 @@ parseSessionText 供解析），供 `read-session` 与 `find-session` 共用；
 ctrl+o 预览子类封装（pickSession），供 `background-task` 挑选会话，`/pick-session` 已废弃为
 `/search-sessions` 的转发 stub（browse 模式吸收了其列表/预览/追加编辑器能力）；
 `lib/review-target.ts`：ReviewTarget 模型 + git 基础设施
-（merge base、分支/提交列表、PR checkout）+ preset 选择器（可选附加项）+ 直参解析 + 后台 prompt
-派发 helper，供 `review` 与 `security-review` 共用，两命令各自持有 rubric 与会话机制）。
+（merge base、分支/提交列表、PR checkout）+ preset 选择器（可选附加项）+ 直参解析，
+供 `review` 与 `security-review` 共用，两命令各自持有 rubric 与会话机制）。
 pi 只把 `extensions/*.ts` 顶层文件与含 `index.ts` 的子目录
 识别为扩展，`lib/` 子目录不会被自动加载。
 

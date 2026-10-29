@@ -7,10 +7,6 @@
  * - Review against a base branch (PR style)
  * - Review uncommitted changes
  * - Review a specific commit
- * - Review as a background task (dispatches the prompt to an unattended child
- *   Pi in the main repo via the background-task extension; fire-and-forget,
- *   results observed via /background-tasks). The child reviews the working
- *   tree as it exists when it runs, so uncommitted reviews may see later edits.
  * - Shared custom review instructions (applied to all review modes when configured)
  *
  * Usage:
@@ -31,9 +27,9 @@
  * Note: PR review requires a clean working tree (no uncommitted changes to tracked files).
  *
  * The target layer (ReviewTarget model, git plumbing, preset selector with
- * the Custom Instructions / Loop Fixing toggles, direct-argument parsing,
- * and the background prompt dispatch) lives in lib/review-target.ts and is
- * shared with the /security-review extension. This file owns the review
+ * the Custom Instructions / Loop Fixing toggles, and direct-argument
+ * parsing) lives in lib/review-target.ts and is shared with the
+ * /security-review extension. This file owns the review
  * rubric, prompt templates, project guidelines loading, session state,
  * loop fixing, and /end-review.
  */
@@ -51,7 +47,6 @@ import { promises as fs } from "node:fs";
 import {
     applyUncommittedWorktree,
     buildTargetFocusPrompt,
-    dispatchPromptTask,
     getUserFacingHint,
     makeCustomInstructionsToggle,
     resolveReviewTarget,
@@ -598,8 +593,8 @@ async function buildReviewPrompt(
 
 /**
  * Assemble the full review prompt (rubric + target focus + shared custom
- * instructions + extra instruction + project guidelines). Shared by the
- * interactive review path (executeReview) and background dispatch.
+ * instructions + extra instruction + project guidelines). Used by the
+ * interactive review path (executeReview).
  */
 async function buildFullReviewPrompt(
     pi: ExtensionAPI,
@@ -880,29 +875,6 @@ export default function reviewExtension(pi: ExtensionAPI) {
         return true;
     }
 
-    /**
-     * Dispatch the review as a background task (no worktree: the child runs
-     * directly in the main repo). Fire-and-forget: results are observed via
-     * /background-tasks (Status to watch, "Add result to prompt" to act on
-     * findings). Never touches review state (reviewOriginId / /end-review).
-     */
-    async function executeBackgroundReview(
-        ctx: ExtensionCommandContext,
-        target: ReviewTarget,
-        extraInstruction?: string,
-    ): Promise<void> {
-        const fullPrompt = await buildFullReviewPrompt(pi, ctx.cwd, target, {
-            extraInstruction,
-        });
-        await dispatchPromptTask(pi, ctx, {
-            command: "review",
-            description: `code review: ${getUserFacingHint(target)}`,
-            prompt: fullPrompt,
-            notifyLead: "Background review",
-            target,
-        });
-    }
-
     function isLoopCompatibleTarget(target: ReviewTarget): boolean {
         if (target.type !== "commit") {
             return true;
@@ -1176,14 +1148,12 @@ export default function reviewExtension(pi: ExtensionAPI) {
                     return;
                 }
 
-                // Always ask which mode to run the review in: background
-                // dispatch is independent of session content, and even an
-                // empty session differs between fresh (returnable via
+                // Always ask which mode to run the review in: an empty
+                // session differs between fresh (returnable via
                 // /end-review) and current semantics.
                 const choice = await ctx.ui.select("Start review in:", [
                     "Empty branch",
                     "Current session",
-                    "Background task",
                 ]);
 
                 if (choice === undefined) {
@@ -1192,15 +1162,6 @@ export default function reviewExtension(pi: ExtensionAPI) {
                         continue;
                     }
                     ctx.ui.notify("Review cancelled", "info");
-                    return;
-                }
-
-                if (choice === "Background task") {
-                    // Loop fixing is mutually exclusive with every mode
-                    // choice: when reviewLoopFixingEnabled is true the
-                    // handler returns at runLoopFixingReview above, before
-                    // this selector is ever shown.
-                    await executeBackgroundReview(ctx, target, extraInstruction);
                     return;
                 }
 

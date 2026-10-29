@@ -4,9 +4,9 @@
  * Owns everything target-shaped that both commands need: the ReviewTarget
  * model, git plumbing (merge base, branches, commits, PR checkout), the
  * preset selector (with optional extra items for command-specific toggles),
- * direct-argument parsing, and the background prompt dispatch helper.
- * Per-command rubrics, prompt templates, and session machinery (loop
- * fixing, /end-review) stay in the command extensions.
+ * and direct-argument parsing. Per-command rubrics, prompt templates, and
+ * session machinery (loop fixing, /end-review) stay in the command
+ * extensions.
  */
 
 
@@ -28,13 +28,6 @@ import {
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import {
-    dispatchBackgroundTask,
-    TaskAliasConflictError,
-    type DispatchResult,
-} from "../background-task.ts";
-
-
 // Review target types (matching Codex's approach)
 export type ReviewTarget =
     | { type: "uncommitted"; worktreePath?: string }
@@ -45,8 +38,6 @@ export type ReviewTarget =
           prNumber: number;
           baseBranch: string;
           title: string;
-          /** Branch that was checked out before the PR checkout (for the background review switch-back hint). */
-          originalBranch?: string | null;
       }
     | { type: "folder"; paths: string[] };
 
@@ -342,9 +333,9 @@ export async function applyUncommittedWorktree(
 /**
  * Standard instruction block appended to an uncommitted review prompt when a
  * worktree other than the current one was selected. Git commands and file
- * reads must target that worktree explicitly: the child cwd for background
- * tasks is the main repo, and in-session tools also run in the launching
- * cwd, so without these instructions the review inspects the wrong tree.
+ * reads must target that worktree explicitly: in-session tools run in the
+ * launching cwd, and the targeted worktree is another one, so without
+ * these instructions the review inspects the wrong tree.
  */
 function worktreeInstructionsBlock(worktreePath: string): string {
     return [
@@ -414,13 +405,7 @@ async function getPrInfo(
 async function checkoutPr(
     pi: ExtensionAPI,
     prNumber: number,
-): Promise<{
-    success: boolean;
-    error?: string;
-    originalBranch?: string | null;
-}> {
-    // Capture the pre-checkout branch before gh pr checkout switches it.
-    const originalBranch = await getCurrentBranch(pi);
+): Promise<{ success: boolean; error?: string }> {
     const { stdout, stderr, code } = await pi.exec("gh", [
         "pr",
         "checkout",
@@ -434,7 +419,7 @@ async function checkoutPr(
         };
     }
 
-    return { success: true, originalBranch };
+    return { success: true };
 }
 
 /**
@@ -503,25 +488,6 @@ export function getUserFacingHint(target: ReviewTarget): string {
                 : `folders: ${joined}`;
         }
     }
-}
-
-/** Short target token used in auto-generated background review aliases. */
-export function reviewTargetToken(target: ReviewTarget): string {
-    switch (target.type) {
-        case "baseBranch":
-            return "branch";
-        case "pullRequest":
-            return "pr";
-        default:
-            return target.type;
-    }
-}
-
-/** Local-time HHmmss stamp for auto-generated aliases. */
-export function hhmmssStamp(): string {
-    const now = new Date();
-    const pad = (value: number) => String(value).padStart(2, "0");
-    return `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
 }
 
 /** Per-command prompt templates for {@link buildTargetFocusPrompt}. */
@@ -1038,7 +1004,6 @@ async function showPrInput(
         prNumber,
         baseBranch: prInfo.baseBranch,
         title: prInfo.title,
-        originalBranch: checkoutResult.originalBranch,
     };
 }
 
@@ -1298,7 +1263,6 @@ export async function handlePrCheckout(
         prNumber,
         baseBranch: prInfo.baseBranch,
         title: prInfo.title,
-        originalBranch: checkoutResult.originalBranch,
     };
 }
 
@@ -1523,86 +1487,4 @@ export async function resolveReviewTarget(
 
     return { status: "ok", target, extraInstruction, fromSelector };
 }
-export type PromptTaskOptions = {
-    /**
-     * Command name used as the alias prefix, e.g. "review" or
-     * "security-review"; a "-2" retry handles same-second collisions.
-     */
-    command: string;
-    /** Child session name shown in /background-tasks. */
-    description: string;
-    /** Fully-built prompt sent to the child. */
-    prompt: string;
-    /** Lead phrase for the success notification, e.g. "Background review". */
-    notifyLead: string;
-    /** Review target (used for the PR switch-back hint). */
-    target: ReviewTarget;
-};
 
-/**
- * Dispatch a fully-built prompt as a background task (no worktree: the child
- * runs directly in the main repo). Fire-and-forget: results are observed
- * via /background-tasks (Status to watch, "Add result to prompt" to act on
- * findings). The child sees the working tree as it exists when it runs, so
- * reviews of uncommitted changes may see later edits.
- */
-export async function dispatchPromptTask(
-    pi: ExtensionAPI,
-    ctx: ExtensionCommandContext,
-    options: PromptTaskOptions,
-): Promise<void> {
-    const alias = `${options.command}-${reviewTargetToken(options.target)}-${hhmmssStamp()}`;
-    let result: DispatchResult;
-    try {
-        result = await dispatchBackgroundTask(pi, {
-            alias,
-            prompt: options.prompt,
-            description: options.description,
-            worktree: false,
-            ctx,
-        });
-    } catch (error) {
-        // Alias collision (two dispatches within the same second): retry
-        // once with a "-2" suffix. Other dispatch failures leave a task
-        // that is listed and closable via /background-tasks; report and stop.
-        if (!(error instanceof TaskAliasConflictError)) {
-            ctx.ui.notify(
-                error instanceof Error ? error.message : String(error),
-                "error",
-            );
-            return;
-        }
-        try {
-            result = await dispatchBackgroundTask(pi, {
-                alias: `${alias}-2`,
-                prompt: options.prompt,
-                description: options.description,
-                worktree: false,
-                ctx,
-            });
-        } catch (retryError) {
-            ctx.ui.notify(
-                retryError instanceof Error
-                    ? retryError.message
-                    : String(retryError),
-                "error",
-            );
-            return;
-        }
-    }
-
-    const lines = [
-        `${options.notifyLead} dispatched: ${result.alias}`,
-        `  ${result.attachCommand}`,
-        `  Results via /background-tasks → select "${result.alias}" → Add result to prompt`,
-    ];
-    if (
-        options.target.type === "pullRequest" &&
-        options.target.originalBranch
-    ) {
-        lines.push(
-            `  Original branch: ${options.target.originalBranch} (switch back: git checkout ${options.target.originalBranch})`,
-        );
-    }
-    ctx.ui.notify(lines.join("\n"), "info");
-}
