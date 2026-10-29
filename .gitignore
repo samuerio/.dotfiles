@@ -20,3 +20,5 @@ spec/
 research/
 /.pi/background-tasks/
 .workbuddy
+pi/loop-tasks.json
+pi/loop-tasks.lock

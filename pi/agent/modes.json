@@ -49,7 +49,7 @@
         },
         "oracle": {
           "provider": "opencode-go",
-          "modelId": "hy4-preview",
+          "modelId": "deepseek-v4.1-flash",
           "thinkingLevel": "high"
         },
         "subagents": {
