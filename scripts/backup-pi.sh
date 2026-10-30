@@ -2,9 +2,10 @@
 # 打包 pi 配置及 SKILL 为 zip
 # 范围:
 #   ~/.pi/agent/ 下: AGENTS.md settings.json keybindings.json models.json
-#                   modes.json trust.json extensions/ prompts/ git/
+#                   modes.json trust.json extensions/(源码) prompts/ git/
 #   ~/.agents/skills/ 全部
-# 排除: sessions/ bin/ auth.json telegram.json node_modules/
+# 排除: sessions/ bin/ auth.json telegram.json
+#       extensions/ 内: node_modules/ .git(git worktree 指针)
 # 输出: 脚本执行目录/pi-config-YYYYMMDD-HHMMSS.zip
 
 set -euo pipefail
@@ -27,12 +28,18 @@ trap 'rm -rf "$STAGE"' EXIT
 mkdir -p "$STAGE/pi-agent" "$STAGE/skills"
 
 # 收集 pi-agent 配置文件与目录
-PI_ITEMS=(AGENTS.md settings.json keybindings.json models.json modes.json trust.json extensions prompts git)
+PI_ITEMS=(AGENTS.md settings.json keybindings.json models.json modes.json trust.json prompts git)
 for item in "${PI_ITEMS[@]}"; do
     if [[ -e "$PI_AGENT_DIR/$item" ]]; then
         cp -a "$PI_AGENT_DIR/$item" "$STAGE/pi-agent/"
     fi
 done
+
+# 收集 extensions(保留源码,排除 node_modules 和失效的 .git worktree 指针)
+rsync -a \
+    --exclude='node_modules' \
+    --exclude='.git' \
+    "$PI_AGENT_DIR/extensions/" "$STAGE/pi-agent/extensions/"
 
 # 收集 SKILL(排除 node_modules)
 rsync -a --exclude='node_modules' "$SKILLS_DIR/" "$STAGE/skills/"

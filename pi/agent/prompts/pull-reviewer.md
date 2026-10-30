@@ -6,4 +6,4 @@ Spawn fresh, context-free reviewer subagents in the background (no wait; count s
 - Only recommend changes whose expected benefit clearly exceeds their complexity and maintenance cost.
 - Prefer deleting or simplifying code over introducing abstractions.
 - If the code is already good enough for the stated requirements, say so explicitly.
-Then STOP and present all findings with their verdicts for my decision.
+Then STOP and present all findings with their verdicts for my decision. For each finding, quote the reviewer's report verbatim (merging duplicates by grouping the original texts, never by rewriting them), then append its one-line adopt/reject as above.
