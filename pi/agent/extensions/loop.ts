@@ -1777,10 +1777,10 @@ const loopListRenderers = {
 // ─── Extension registration ───────────────────────────────────────
 
 export default function (pi: ExtensionAPI) {
-    // Background-task children auto-discover this extension too (~/.pi is a
+    // Worktree-task children auto-discover this extension too (~/.pi is a
     // symlink into this repo); a task runner session must not drive the
     // scheduler or inject prompts into its own throwaway session.
-    if (process.env.PI_BACKGROUND_TASK_CHILD === "1") return;
+    if (process.env.PI_WORKTREE_TASK_CHILD === "1") return;
 
     api = pi;
 

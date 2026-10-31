@@ -392,7 +392,7 @@ if [ "$path_registered" = "yes" ]; then
 elif [ -e "$worktree_path" ]; then
   # Any pre-existing directory blocks a fresh add; `worktree add -b` would
   # otherwise create the branch first and then die on the path, orphaning
-  # it. The run dir is rolled back on this failure, so /background-tasks
+  # it. The run dir is rolled back on this failure, so /worktree-tasks
   # shows nothing for this alias: the directory must go by hand.
   echo "error: $worktree_path exists but is not a registered git worktree — remove it (rm -rf) and dispatch again" >&2
   exit 1

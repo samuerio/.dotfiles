@@ -170,7 +170,7 @@ export function parseExplainArgs(
 /**
  * Generic bordered SelectList. SelectList keeps the caller's item objects by
  * reference and hands the selected one back, so `done(item as T)` restores the
- * original typed item (same cast background-task.ts does with item.value).
+ * original typed item (same cast worktree-task.ts does with item.value).
  */
 function showActionMenu<T extends SelectItem>(
 	ctx: ExtensionCommandContext,

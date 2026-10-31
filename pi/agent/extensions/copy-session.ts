@@ -11,7 +11,7 @@ import { copyToClipboard } from "./lib/clipboard.ts";
  * resolveSessionRef), so the paste target stays the caller's choice.
  *
  * Clipboard-unavailable fallback: warn-notify the id itself for manual
- * copy (same degradation as background-task's status action).
+ * copy (same degradation as worktree-task's status action).
  */
 export default function (pi: ExtensionAPI): void {
 	pi.registerCommand("copy-session", {

@@ -14,11 +14,10 @@ linux_rime/user.yaml
 pi/agent/models-store.json
 **/node_modules/
 /.worktree/
-# background-task temporary mount area (spec symlinks)
 /.bw/
 spec/
 research/
-/.pi/background-tasks/
+# worktree-task artifacts (tasks/, sessions/, tmux.sock)
+.pi/worktree-tasks/
+
 .workbuddy
-pi/loop-tasks.json
-pi/loop-tasks.lock
