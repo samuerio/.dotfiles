@@ -1,5 +1,9 @@
+import { mkdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
 	buildSessionContext,
+	convertToLlm,
 	createAgentSession,
 	createExtensionRuntime,
 	getMarkdownTheme,
@@ -26,6 +30,11 @@ import {
 	type TUI,
 } from "@earendil-works/pi-tui";
 
+/** Fork files for side sessions land here and are deleted on side-session dispose. */
+const SIDE_SESSION_DIR = join(tmpdir(), "pi-btw-side");
+// Created owner-only upfront: forkFrom reuses an existing directory, so fork
+// files stay unreadable to other local users on shared hosts.
+mkdirSync(SIDE_SESSION_DIR, { recursive: true, mode: 0o700 });
 const BTW_ENTRY_TYPE = "btw-thread-entry";
 const BTW_RESET_TYPE = "btw-thread-reset";
 
@@ -66,8 +75,11 @@ type OverlayRuntime = {
 
 type SideSessionRuntime = {
 	session: AgentSession;
-	modelKey: string;
+	/** File-backed fork source for cleanup; undefined for in-memory fallback sessions. */
+	sideFile?: string;
 	unsubscribe: () => void;
+	/** Main content leaf (non-custom branch tail) the side session's main context covers. */
+	contentLeafId: string | null;
 };
 
 type ToolCallInfo = {
@@ -139,16 +151,13 @@ function getLastAssistantMessage(session: AgentSession): AssistantMessage | null
 	return null;
 }
 
-function buildSeedMessages(ctx: ExtensionContext, thread: BtwDetails[]): Message[] {
+/**
+ * Replays the BTW Q&A history as seed messages. Main-conversation context comes
+ * from the session manager itself; the BTW entries are custom entries, which the
+ * session projection skips, so they have to be appended explicitly.
+ */
+function buildThreadSeedMessages(ctx: ExtensionContext, thread: BtwDetails[]): Message[] {
 	const seed: Message[] = [];
-
-	try {
-		const contextMessages = buildSessionContext(ctx.sessionManager.getEntries(), ctx.sessionManager.getLeafId()).messages;
-		seed.push(...(contextMessages.filter((message) => "role" in message) as Message[]));
-	} catch {
-		// Ignore context seed failures and continue with an empty side thread.
-	}
-
 	for (const item of thread) {
 		seed.push(
 			{
@@ -177,7 +186,6 @@ function buildSeedMessages(ctx: ExtensionContext, thread: BtwDetails[]): Message
 			},
 		);
 	}
-
 	return seed;
 }
 
@@ -376,11 +384,6 @@ export default function (pi: ExtensionAPI) {
 
 	const mdTheme = getMarkdownTheme();
 
-	function getModelKey(ctx: ExtensionContext): string {
-		const model = ctx.model;
-		return model ? `${model.provider}/${model.id}` : "none";
-	}
-
 	function renderMarkdownLines(text: string, width: number): string[] {
 		if (!text) return [];
 		try {
@@ -539,6 +542,14 @@ export default function (pi: ExtensionAPI) {
 		}
 		current.session.dispose();
 
+		if (current.sideFile) {
+			try {
+				rmSync(current.sideFile, { force: true });
+			} catch {
+				// Ignore fork-file cleanup errors (tmpdir, best effort).
+			}
+		}
+
 		if (overlayRefreshTimer) {
 			clearTimeout(overlayRefreshTimer);
 			overlayRefreshTimer = null;
@@ -595,96 +606,188 @@ export default function (pi: ExtensionAPI) {
 		syncOverlay();
 	}
 
-	async function createSideSession(ctx: ExtensionCommandContext): Promise<SideSessionRuntime | null> {
+	/**
+	 * Forked snapshot: every (re)creation forks a fresh copy of the main session,
+	 * so the side LLM sees the main conversation exactly as its own model would,
+	 * including the latest compaction. Staleness is tracked in ensureSideSession,
+	 * which recreates whenever the main content leaf moves.
+	 */
+	function buildForkedSessionManager(ctx: ExtensionContext): SessionManager {
+		const sourcePath = ctx.sessionManager.getSessionFile();
+		if (!sourcePath) {
+			throw new Error("main session is not file-backed");
+		}
+		const forked = SessionManager.forkFrom(sourcePath, ctx.sessionManager.getCwd(), SIDE_SESSION_DIR);
+		// forkFrom's leaf is the source file's tail; align it with the main session's
+		// current leaf (entry ids survive the verbatim copy, so branch() by the main
+		// leaf id works). An empty main session has a null leaf and keeps the tail.
+		const mainLeafId = ctx.sessionManager.getLeafId();
+		if (mainLeafId) {
+			forked.branch(mainLeafId);
+		}
+		return forked;
+	}
+
+	/**
+	 * Fallback for when forking is impossible (non-file-backed main session or a
+	 * forkFrom failure): an in-memory session manager seeded from the main branch's
+	 * projection. convertToLlm turns compaction/branch-summary/custom roles into
+	 * plain messages, since appendMessage forbids writing entry-only roles.
+	 */
+	function buildInMemorySessionManager(ctx: ExtensionContext): SessionManager {
+		const fallback = SessionManager.inMemory(ctx.sessionManager.getCwd());
+		try {
+			const contextMessages = buildSessionContext(ctx.sessionManager.getEntries(), ctx.sessionManager.getLeafId()).messages;
+			for (const message of convertToLlm(contextMessages)) {
+				fallback.appendMessage(message);
+			}
+		} catch (error) {
+			// Surface context seed failures; continue with the BTW thread only (no main context).
+			const message = error instanceof Error ? error.message : String(error);
+			notify(ctx, `BTW: main context seed failed: ${message}`, "warning");
+		}
+		return fallback;
+
+	}
+
+	async function createSideSession(ctx: ExtensionCommandContext, contentLeafId: string | null): Promise<SideSessionRuntime | null> {
 		if (!ctx.model) {
 			return null;
 		}
 
-		const { session } = await createAgentSession({
-			sessionManager: SessionManager.inMemory(),
-			model: ctx.model,
-			modelRegistry: ctx.modelRegistry as AgentSession["modelRegistry"],
-			thinkingLevel: pi.getThinkingLevel() as SessionThinkingLevel,
-			tools: ["read", "bash", "edit", "write"],
-			resourceLoader: createBtwResourceLoader(ctx),
-		});
-
-		const seedMessages = buildSeedMessages(ctx, thread);
-		if (seedMessages.length > 0) {
-			session.agent.state.messages = seedMessages as typeof session.agent.state.messages;
+		let sessionManager: SessionManager;
+		let sideFile: string | undefined;
+		try {
+			sessionManager = buildForkedSessionManager(ctx);
+			sideFile = sessionManager.getSessionFile();
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			console.warn(`BTW: main session fork failed (${message}); falling back to in-memory seed.`);
+			sessionManager = buildInMemorySessionManager(ctx);
 		}
 
-		const unsubscribe = session.subscribe((event: AgentSessionEvent) => {
-			if (!sideBusy || !pendingQuestion) {
-				return;
+		try {
+			const { session } = await createAgentSession({
+				sessionManager,
+				model: ctx.model,
+				modelRegistry: ctx.modelRegistry as AgentSession["modelRegistry"],
+				thinkingLevel: pi.getThinkingLevel() as SessionThinkingLevel,
+				tools: ["read", "bash", "edit", "write"],
+				resourceLoader: createBtwResourceLoader(ctx),
+			});
+
+			// Seed via the session manager: AgentSession's prepareRequest hook rebuilds
+			// context from the session manager's projection, so plain
+			// agent.state.messages assignment would be discarded at request time.
+			for (const message of buildThreadSeedMessages(ctx, thread)) {
+				sessionManager.appendMessage(message);
 			}
 
-			switch (event.type) {
-				case "message_start":
-				case "message_update":
-				case "message_end": {
-					const streamed = extractEventAssistantText(event.message);
-					if (streamed) {
-						pendingAnswer = streamed;
-						pendingError = null;
-					}
-					setOverlayStatus(event.type === "message_end" ? "Finalizing side response..." : "Streaming side response...", true);
+			const unsubscribe = session.subscribe((event: AgentSessionEvent) => {
+				if (!sideBusy || !pendingQuestion) {
 					return;
 				}
-				case "tool_execution_start": {
-					const toolName = (event as { toolName?: string }).toolName ?? "unknown";
-					try {
-						pendingToolCalls.push({
-							toolCallId: (event as { toolCallId?: string }).toolCallId ?? "",
-							toolName,
-							args: formatToolArgs(toolName, (event as { args?: unknown }).args),
-							status: "running",
-						});
-					} catch {
-						// Ignore tool tracking failures
-					}
-					setOverlayStatus(`Running tool: ${toolName}...`, true);
-					return;
-				}
-				case "tool_execution_end": {
-					const endToolName = (event as { toolName?: string }).toolName ?? "unknown";
-					const tc = pendingToolCalls.find(
-						(t) => t.toolName === endToolName && t.status === "running",
-					);
-					if (tc) {
-						tc.status = (event as { isError?: boolean }).isError ? "error" : "done";
-					}
-					setOverlayStatus("Streaming side response...", true);
-					return;
-				}
-				case "turn_end": {
-					setOverlayStatus("Finalizing side response...", true);
-					return;
-				}
-				default:
-					return;
-			}
-		});
 
-		return {
-			session,
-			modelKey: getModelKey(ctx),
-			unsubscribe,
-		};
+				switch (event.type) {
+					case "message_start":
+					case "message_update":
+					case "message_end": {
+						const streamed = extractEventAssistantText(event.message);
+						if (streamed) {
+							pendingAnswer = streamed;
+							pendingError = null;
+						}
+						setOverlayStatus(event.type === "message_end" ? "Finalizing side response..." : "Streaming side response...", true);
+						return;
+					}
+					case "tool_execution_start": {
+						const toolName = (event as { toolName?: string }).toolName ?? "unknown";
+						try {
+							pendingToolCalls.push({
+								toolCallId: (event as { toolCallId?: string }).toolCallId ?? "",
+								toolName,
+								args: formatToolArgs(toolName, (event as { args?: unknown }).args),
+								status: "running",
+							});
+						} catch {
+							// Ignore tool tracking failures
+						}
+						setOverlayStatus(`Running tool: ${toolName}...`, true);
+						return;
+					}
+					case "tool_execution_end": {
+						const endToolName = (event as { toolName?: string }).toolName ?? "unknown";
+						const tc = pendingToolCalls.find(
+							(t) => t.toolName === endToolName && t.status === "running",
+						);
+						if (tc) {
+							tc.status = (event as { isError?: boolean }).isError ? "error" : "done";
+						}
+						setOverlayStatus("Streaming side response...", true);
+						return;
+					}
+					case "turn_end": {
+						setOverlayStatus("Finalizing side response...", true);
+						return;
+					}
+					default:
+						return;
+				}
+			});
+
+			return {
+				session,
+				sideFile,
+				unsubscribe,
+				contentLeafId,
+			};
+		} catch (error) {
+			// forkFrom copies the transcript eagerly; drop the file when session
+			// creation or seeding fails so no transcript copy outlives this attempt.
+			if (sideFile) {
+				try {
+					rmSync(sideFile, { force: true });
+				} catch {
+					// Best-effort tmpdir cleanup.
+				}
+			}
+			throw error;
+		}
 	}
 
+	/**
+	 * The side LLM's view of the main conversation ends at the newest non-custom
+	 * branch entry: custom entries (BTW thread entries, resets) are skipped by the
+	 * session projection, so they do not count as content. That id is the
+	 * snapshot key for side-session reuse.
+	 */
+	function getMainContentLeafId(ctx: ExtensionCommandContext): string | null {
+		const branch = ctx.sessionManager.getBranch();
+		for (let i = branch.length - 1; i >= 0; i--) {
+			if (branch[i].type !== "custom") {
+				return branch[i].id;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Snapshot-cached: the side session is recreated only when the main
+	 * conversation's content moved, so a follow-up within one snapshot reuses the
+	 * side session and keeps its tool results.
+	 */
 	async function ensureSideSession(ctx: ExtensionCommandContext): Promise<SideSessionRuntime | null> {
 		if (!ctx.model) {
 			return null;
 		}
 
-		const expectedModelKey = getModelKey(ctx);
-		if (activeSideSession && activeSideSession.modelKey === expectedModelKey) {
+		const contentLeafId = getMainContentLeafId(ctx);
+		if (activeSideSession && activeSideSession.contentLeafId === contentLeafId) {
 			return activeSideSession;
 		}
 
 		await disposeSideSession();
-		activeSideSession = await createSideSession(ctx);
+		activeSideSession = await createSideSession(ctx, contentLeafId);
 		return activeSideSession;
 	}
 
@@ -881,22 +984,25 @@ export default function (pi: ExtensionAPI) {
 			notify(ctx, "BTW is still processing the previous message.", "warning");
 			return;
 		}
-
-		const side = await ensureSideSession(ctx);
-		if (!side) {
-			notify(ctx, "Unable to create BTW side session.", "error");
-			return;
-		}
-
+		// Claim the busy slot before the first await: ensureSideSession disposes the
+		// previous side session, so a second submit inside that window would abort
+		// the in-flight prompt.
 		sideBusy = true;
-		pendingQuestion = question;
-		pendingAnswer = "";
-		pendingError = null;
-		pendingToolCalls = [];
-		setOverlayStatus("Streaming side response...");
-		syncOverlay();
 
 		try {
+			const side = await ensureSideSession(ctx);
+			if (!side) {
+				notify(ctx, "Unable to create BTW side session.", "error");
+				return;
+			}
+
+			pendingQuestion = question;
+			pendingAnswer = "";
+			pendingError = null;
+			pendingToolCalls = [];
+			setOverlayStatus("Streaming side response...");
+			syncOverlay();
+
 			await side.session.prompt(question, { source: "extension" });
 			const response = getLastAssistantMessage(side.session);
 			if (!response) {
@@ -966,8 +1072,6 @@ export default function (pi: ExtensionAPI) {
 						"Start fresh",
 					]);
 					if (choice === "Continue previous conversation") {
-						// Dispose session so it's recreated with fresh main context on next submit
-						await disposeSideSession();
 						setOverlayStatus("Continuing BTW thread.");
 						await ensureOverlay(ctx);
 					} else if (choice === "Start fresh") {
