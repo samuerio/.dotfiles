@@ -7,6 +7,16 @@ import {
 	createAgentSession,
 	createExtensionRuntime,
 	getMarkdownTheme,
+	ToolExecutionComponent,
+	createBashToolDefinition,
+	createEditToolDefinition,
+	createFindToolDefinition,
+	createGrepToolDefinition,
+	createLsToolDefinition,
+	createPowerShellToolDefinition,
+	createReadToolDefinition,
+	createWriteToolDefinition,
+	type ToolDefinition,
 	SessionManager,
 	type AgentSession,
 	type AgentSessionEvent,
@@ -18,6 +28,7 @@ import {
 import { type AssistantMessage, type Message, type ThinkingLevel as AiThinkingLevel } from "@earendil-works/pi-ai";
 import {
 	Container,
+	Text,
 	Input,
 	Key,
 	Markdown,
@@ -27,7 +38,13 @@ import {
 	type Focusable,
 	type KeybindingsManager,
 	type OverlayHandle,
+	type TuiMouseEvent,
+	type TuiMouseEventResult,
+	type Component,
 	type TUI,
+	ScrollView,
+	stripTerminalSequences,
+	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 
 /** Fork files for side sessions land here and are deleted on side-session dispose. */
@@ -49,6 +66,9 @@ const BTW_SUMMARY_PROMPT =
 	"Summarize this side conversation for handoff into the main conversation. Keep key decisions, findings, risks, and next actions. Output only the summary.";
 
 type SessionThinkingLevel = "off" | AiThinkingLevel;
+
+/** Theme token/attribute helpers, as handed to every BTW renderer. */
+type BtwTheme = ExtensionContext["ui"]["theme"];
 
 type BtwDetails = {
 	question: string;
@@ -82,10 +102,29 @@ type SideSessionRuntime = {
 	contentLeafId: string | null;
 };
 
+/** Minimal structural match for pi-tui's unexported dispatch result: the
+ * override contract requires a child target; a self-target keeps the wheel
+ * result out of pi's delegated-child bookkeeping. */
+type OverlayWheelResult = {
+	handled: true;
+	render: boolean;
+	target: {
+		component: Component;
+		originX: number;
+		originY: number;
+		width: number;
+		height: number;
+	};
+};
+
 type ToolCallInfo = {
 	toolCallId: string;
 	toolName: string;
-	args: string;
+	/** Raw tool-call arguments, as passed to the native tool renderers. */
+	args: unknown;
+	/** Raw tool result captured at tool_execution_end; undefined while running. */
+	result?: unknown;
+	isError: boolean;
 	status: "running" | "done" | "error";
 };
 
@@ -151,6 +190,223 @@ function getLastAssistantMessage(session: AgentSession): AssistantMessage | null
 	return null;
 }
 
+// ---------------------------------------------------------------------------
+// Rendering core — forked from subagent-manager/src/ui/live-agent-view.ts
+// (upstream commit 0f0349a). Kept inline in this file; if a second consumer
+// ever appears, lift this whole section into pi/agent/extensions/lib/.
+// ---------------------------------------------------------------------------
+
+/** Transcript detail level cycled by Ctrl+O: full → preview → compact. */
+type TranscriptDetail = "full" | "preview" | "compact";
+const DETAIL_CYCLE: TranscriptDetail[] = ["full", "preview", "compact"];
+const BTW_PREVIEW_ROWS = 3;
+/** Source-size bound before rendering collapsed content. */
+const BTW_TEXT_LIMIT = 32768;
+
+let transcriptDetail: TranscriptDetail = "preview";
+
+/** Ctrl+O cycle: full → preview → compact → full. */
+function cycleTranscriptDetail(): void {
+	transcriptDetail = DETAIL_CYCLE[(DETAIL_CYCLE.indexOf(transcriptDetail) + 1) % DETAIL_CYCLE.length];
+}
+
+/** Fully cover the overlay slot; only trusted renderers emit terminal sequences. */
+function fillViewport(lines: string[], width: number, height: number): string[] {
+	width = Math.max(0, Math.floor(width));
+	height = Math.max(1, Math.floor(height));
+	const result = lines.slice(0, height).map((line) => {
+		const clipped = truncateToWidth(line, width, "", true);
+		return clipped + " ".repeat(Math.max(0, width - visibleWidth(clipped)));
+	});
+	while (result.length < height) result.push(" ".repeat(width));
+	return result;
+}
+
+/** Sanitize untrusted text before any renderer or wrapper interpolates it. */
+function stripUnsafeTerminalText(value: string): string {
+	return stripTerminalSequences(value)
+		.replace(/\r\n?/g, "\n")
+		.replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "");
+}
+
+/** ANSI-aware wrapping for plain text (flush-left, no padding per BTW spec). */
+function wrapPlain(value: string, width: number): string[] {
+	const safe = stripUnsafeTerminalText(value);
+	const bounded = safe.length > BTW_TEXT_LIMIT ? safe.slice(0, BTW_TEXT_LIMIT) : safe;
+	return bounded.split("\n").flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width)));
+}
+
+/** Sanitized tools snapshot for a finished turn; aborted calls freeze as errored. */
+function snapshotToolCalls(calls: ToolCallInfo[]): ToolCallInfo[] {
+	return calls.map((tool) =>
+		tool.status === "running" ? { ...tool, isError: true, status: "error" as const } : tool,
+	);
+}
+
+/** Same themed markdown (incl. code highlighting) as pi's main transcript. */
+function markdownToLines(value: string, width: number, theme: BtwTheme, thinking = false): string[] {
+	if (!value) return [];
+	const safe = stripUnsafeTerminalText(value);
+	try {
+		const md = new Markdown(
+			safe,
+			0,
+			0,
+			mdTheme,
+			thinking ? { color: (v) => theme.fg("thinkingText", v), italic: true } : undefined,
+		);
+		return md.render(Math.max(1, width));
+	} catch {
+		return wrapPlain(safe, width);
+	}
+}
+
+type ThreadItemCacheEntry = {
+	width: number;
+	detail: TranscriptDetail;
+	toolsKey: string;
+	lines: string[];
+};
+const transcriptCache = new WeakMap<BtwDetails, ThreadItemCacheEntry>();
+
+/**
+ * One Q&A turn as rhythm rows: `you` heading + question, blank line,
+ * `assistant` heading + this turn's tool boxes + markdown answer, blank line.
+ * Flush-left, no padding.
+ */
+function renderThreadItem(
+	item: BtwDetails,
+	theme: BtwTheme,
+	width: number,
+	detail: TranscriptDetail,
+	tools: ToolCallInfo[],
+): string[] {
+	const toolsKey = tools.map((tc) => `${tc.toolCallId}:${tc.status}`).join(",");
+	const cached = transcriptCache.get(item);
+	if (cached && cached.width === width && cached.detail === detail && cached.toolsKey === toolsKey) {
+		return cached.lines;
+	}
+	// Agent-manager semantics: detail cycles affect only thinking and tool boxes;
+	// question/answer text renders full at every level.
+	const lines: string[] = [
+		theme.fg("accent", "you"),
+		...wrapPlain(item.question, width),
+		"",
+		theme.fg("accent", "assistant"),
+		...renderToolInfos(tools, width),
+		...markdownToLines(item.answer, width, theme),
+		"",
+	];
+	transcriptCache.set(item, { width, detail, toolsKey, lines });
+	return lines;
+}
+
+/**
+ * Collapse a rendered answer/thinking block to three rendered rows. Works on
+ * rendered output (not source) so markdown structure stays intact per row.
+ */
+function collapseRendered(lines: string[], theme: BtwTheme, ellipsis: string): string[] {
+	if (lines.length <= BTW_PREVIEW_ROWS) return lines;
+	return [...lines.slice(0, BTW_PREVIEW_ROWS), theme.fg("dim", ellipsis)];
+}
+
+/**
+ * Rendered tool boxes cached by toolCallId, serving both the in-flight turn and
+ * finished history turns; ids absent from the latest pass are evicted.
+ */
+type PendingToolCacheEntry = {
+	args: unknown;
+	result: unknown;
+	isError: boolean;
+	running: boolean;
+	width: number;
+	detail: TranscriptDetail;
+	lines: string[];
+};
+
+/**
+ * Native tool boxes for one turn's recorded calls (in flight or finished). Pairs
+ * by toolCallId (see the session subscriber); renders via pi's own
+ * ToolExecutionComponent wrappers so tools look exactly like pi's main
+ * transcript tools.
+ */
+function renderToolInfos(toolCalls: ToolCallInfo[], width: number): string[] {
+	if (toolCalls.length === 0) {
+		return [];
+	}
+	const liveIds = new Set(toolCalls.map((tc) => tc.toolCallId));
+	const lines: string[] = [];
+	for (const tc of toolCalls) {
+		const running = tc.status === "running";
+		const cached = pendingToolCache.get(tc.toolCallId);
+		if (
+			cached &&
+			cached.width === width &&
+			cached.detail === transcriptDetail &&
+			cached.args === tc.args &&
+			cached.result === tc.result &&
+			cached.isError === tc.isError &&
+			cached.running === running
+		) {
+			lines.push(...cached.lines);
+			continue;
+		}
+		const rendered = renderTranscriptTool(
+			tc.toolName,
+			tc.toolCallId,
+			tc.args,
+			tc.result,
+			tc.isError,
+			running,
+			transcriptDetail,
+			width,
+		);
+		lines.push(...rendered);
+		pendingToolCache.set(tc.toolCallId, {
+			args: tc.args,
+			result: tc.result,
+			isError: tc.isError,
+			running,
+			width,
+			detail: transcriptDetail,
+			lines: rendered,
+		});
+	}
+	for (const id of pendingToolCache.keys()) {
+		if (!liveIds.has(id)) pendingToolCache.delete(id);
+	}
+	return lines;
+}
+
+// Pending turn state shared by the renderers above and the extension runtime
+// below; resetPendingTurn() drops the pending* fields when a turn or thread
+// completes (per-turn tool history deliberately outlives the turn that filled it).
+let thread: BtwDetails[] = [];
+let pendingQuestion: string | null = null;
+let pendingAnswer = "";
+let pendingError: string | null = null;
+let pendingAssistant: AssistantMessage | null = null;
+let pendingToolCalls: ToolCallInfo[] = [];
+/** Tool boxes of the turn that threw; rendered above the error for diagnosis. */
+let failedTools: ToolCallInfo[] = [];
+/** Tool boxes stay bound to the thread item they belong to for the whole session
+ * (WeakMap: dropped with the item itself on thread reset/reload). Transient UI
+ * state; never persisted to BtwDetails. */
+const threadTools = new WeakMap<BtwDetails, ToolCallInfo[]>();
+const pendingToolCache = new Map<string, PendingToolCacheEntry>();
+const mdTheme = getMarkdownTheme();
+
+/** Drop the in-flight turn: question, stream, error, thinking and tool state. */
+function resetPendingTurn(): void {
+	pendingQuestion = null;
+	pendingAnswer = "";
+	pendingError = null;
+	pendingAssistant = null;
+	pendingToolCalls = [];
+	failedTools = [];
+	pendingToolCache.clear();
+}
+
 /**
  * Replays the BTW Q&A history as seed messages. Main-conversation context comes
  * from the session manager itself; the BTW entries are custom entries, which the
@@ -201,21 +457,158 @@ function notify(ctx: ExtensionContext | ExtensionCommandContext, message: string
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Tool rendering — verbatim fork of subagent-manager/src/ui/transcript-tool.ts
+// (upstream commit 0f0349a). Renders live tool calls through pi's own
+// ToolExecutionComponent and trusted built-in tool renderers, with the
+// observer-safety patches kept intact:
+//   * TUI stub: no execution-lifecycle clock.
+//   * edit.renderCall(argsComplete: false): never re-read today's file per
+//     paint; use the recorded result diff.
+//   * image blocks replaced with text placeholders (no Kitty conversion).
+//   * args/content/details all sanitized; unknown tools use a bounded fallback.
+// ---------------------------------------------------------------------------
+
+/** Only trusted pi built-ins: observing a transcript must never execute extension renderers. */
+type RendererPair = Pick<ToolDefinition<any, any>, "renderCall" | "renderResult">;
+const transcriptToolRenderers = new Map<string, RendererPair>(
+	[
+		createBashToolDefinition(process.cwd()),
+		createPowerShellToolDefinition(process.cwd()),
+		createReadToolDefinition(process.cwd()),
+		createEditToolDefinition(process.cwd()),
+		createWriteToolDefinition(process.cwd()),
+		createGrepToolDefinition(process.cwd()),
+		createFindToolDefinition(process.cwd()),
+		createLsToolDefinition(process.cwd()),
+	].map((tool) => [
+		tool.name,
+		{ renderCall: tool.renderCall, renderResult: tool.renderResult } as RendererPair,
+	]),
+);
+
+// Native edit call previews otherwise read today's file asynchronously. An observer must
+// use the recorded result.diff, not inspect a possibly different worktree on every paint.
+const transcriptToolEdit = transcriptToolRenderers.get("edit")!;
+const transcriptToolEditCall = transcriptToolEdit.renderCall!;
+transcriptToolEdit.renderCall = (args, theme, context) =>
+	transcriptToolEditCall(args, theme, { ...context, argsComplete: false });
+
+const transcriptToolGeneric: RendererPair = {
+	renderResult(result, options, theme) {
+		const output = result.content
+			.filter((block) => block.type === "text")
+			.map((block) => block.text)
+			.join("\n");
+		const bounded = options.expanded ? output : output.slice(0, BTW_TEXT_LIMIT);
+		const component = new Text(theme.fg("toolOutput", bounded), 0, 0);
+		return {
+			invalidate() {
+				component.invalidate();
+			},
+			render(width) {
+				const rows = component.render(width);
+				if (options.expanded || (rows.length <= 5 && bounded.length === output.length)) return rows;
+				return [...rows.slice(0, 5), theme.fg("muted", "… more lines (Ctrl+O to expand)")];
+			},
+		};
+	},
+};
+
+/** Sanitize args, content AND details before trusted renderers interpolate them. */
+function sanitizeToolValue(value: unknown, seen = new WeakSet<object>(), depth = 0): any {
+	if (typeof value === "string") return stripUnsafeTerminalText(value);
+	if (!value || typeof value !== "object") return typeof value === "bigint" ? String(value) : value;
+	if (seen.has(value)) return "[Circular]";
+	if (depth > 64) return "[Nested data omitted]";
+	seen.add(value);
+	const safe = Array.isArray(value)
+		? value.map((item) => sanitizeToolValue(item, seen, depth + 1))
+		: Object.fromEntries(
+			Object.entries(value).map(([key, item]) => [
+				stripUnsafeTerminalText(key),
+				sanitizeToolValue(item, seen, depth + 1),
+			]),
+		);
+	seen.delete(value);
+	return safe;
+}
+
+function renderTranscriptTool(
+	name: string,
+	id: string,
+	args: unknown,
+	result: unknown,
+	isError: boolean,
+	running: boolean,
+	detail: TranscriptDetail,
+	width: number,
+): string[] {
+	// Pi's tool component owns elapsed-time intervals after markExecutionStarted().
+	// An observer has no execution lifecycle to dispose, so don't start that clock.
+	const ui = { requestRender() {} } as TUI;
+	const component = new ToolExecutionComponent(
+		stripUnsafeTerminalText(name),
+		stripUnsafeTerminalText(id),
+		sanitizeToolValue(args),
+		{ showImages: false },
+		transcriptToolRenderers.get(name) ?? transcriptToolGeneric,
+		ui,
+		process.cwd(),
+	);
+	const data = result && typeof result === "object" ? (result as Record<string, unknown>) : undefined;
+	const content = data?.content ?? result;
+	component.updateResult(
+		{
+			content: (Array.isArray(content) ? content : content === undefined ? [] : [content]).map(
+				(block) => {
+					// Never hand image payloads to pi (even showImages:false can trigger Kitty conversion).
+					if (block && typeof block === "object" && (block as { type?: string }).type === "image")
+						return { type: "text", text: "[Image — text-only observer]" };
+					if (block && typeof block === "object" && (block as { type?: string }).type === "text")
+						return {
+							type: "text",
+							text: stripUnsafeTerminalText(String((block as { text?: unknown }).text ?? "")),
+						};
+					return {
+						type: "text",
+						text: stripUnsafeTerminalText(
+							typeof block === "string" ? block : (JSON.stringify(sanitizeToolValue(block)) ?? ""),
+						),
+					};
+				},
+			),
+			details: sanitizeToolValue(data?.details),
+			isError: isError || data?.isError === true,
+		},
+		running,
+	);
+	component.setExpanded(detail === "full");
+	const lines = component.render(Math.max(3, width));
+	if (detail === "compact")
+		return lines.filter((line) => stripTerminalSequences(line).trim()).slice(0, 1);
+	return lines;
+}
+
+/** Status-row tone: idle is muted, a failure is an error, anything in flight warns. */
+function statusColor(status: string): "dim" | "error" | "warning" {
+	if (status.startsWith("Ready")) return "dim";
+	if (status.includes("failed")) return "error";
+	return "warning";
+}
 
 class BtwOverlay extends Container implements Focusable {
 	private readonly input: Input;
 	private readonly tui: TUI;
-	private readonly theme: ExtensionContext["ui"]["theme"];
+	private readonly theme: BtwTheme;
 	private readonly keybindings: KeybindingsManager;
-	private readonly getTranscript: (width: number, theme: ExtensionContext["ui"]["theme"]) => string[];
+	private readonly getTranscript: (width: number, theme: BtwTheme) => string[];
 	private readonly getStatus: () => string;
 	private readonly onSubmitCallback: (value: string) => void;
 	private readonly onDismissCallback: () => void;
 	private _focused = false;
-	private scrollOffset = 0;
-	private followTail = true;
-	private lastTotal = 0;
-	private lastHeight = 6;
+	private readonly scroll: ScrollView;
+	private content: string[] = [];
 
 	get focused(): boolean {
 		return this._focused;
@@ -228,9 +621,9 @@ class BtwOverlay extends Container implements Focusable {
 
 	constructor(
 		tui: TUI,
-		theme: ExtensionContext["ui"]["theme"],
+		theme: BtwTheme,
 		keybindings: KeybindingsManager,
-		getTranscript: (width: number, theme: ExtensionContext["ui"]["theme"]) => string[],
+		getTranscript: (width: number, theme: BtwTheme) => string[],
 		getStatus: () => string,
 		onSubmit: (value: string) => void,
 		onDismiss: () => void,
@@ -245,15 +638,23 @@ class BtwOverlay extends Container implements Focusable {
 		this.onDismissCallback = onDismiss;
 
 		this.input = new Input();
+		this.scroll = new ScrollView(
+			{ render: () => this.content, invalidate() {} },
+			{ follow: "end", overscroll: "contain", scrollbar: "hidden" },
+		);
 		this.input.onSubmit = (value) => {
 			// A new question pins the view back to the latest messages.
-			this.followTail = true;
-			this.scrollOffset = 0;
+			this.scroll.scrollToEnd();
 			this.onSubmitCallback(value);
 		};
 		this.input.onEscape = () => {
 			this.onDismissCallback();
 		};
+	}
+
+	/** Half the visible body, at least one row: the ctrl+u/ctrl+d paging step. */
+	private halfPage(): number {
+		return Math.max(1, Math.floor(this.scroll.viewportHeight / 2));
 	}
 
 	handleInput(data: string): void {
@@ -263,14 +664,44 @@ class BtwOverlay extends Container implements Focusable {
 		}
 
 		if (matchesKey(data, Key.ctrl("u"))) {
-			this.pageBy(-1);
+			this.scroll.scrollBy(-this.halfPage());
+			this.tui.requestRender();
 			return;
 		}
 		if (matchesKey(data, Key.ctrl("d"))) {
-			this.pageBy(1);
+			this.scroll.scrollBy(this.halfPage());
+			// Paged back to the bottom: explicitly restore follow-end.
+			if (this.scroll.scrollTop >= Math.max(0, this.content.length - this.scroll.viewportHeight)) {
+				this.scroll.scrollToEnd();
+			}
+			this.tui.requestRender();
+			return;
+		}
+		if (matchesKey(data, Key.ctrl("o"))) {
+			cycleTranscriptDetail();
+			// Cached tool renders are keyed by detail, so the cycle drops them all.
+			pendingToolCache.clear();
+			this.tui.requestRender();
 			return;
 		}
 		this.input.handleInput(data);
+	}
+
+	/** Fullscreen wheel events scroll the transcript, even while composing. */
+	override handleMouse(event: TuiMouseEvent): OverlayWheelResult | undefined {
+		if (event.type !== "wheel") return undefined;
+		const delta = Math.trunc(event.wheelDelta ?? 0);
+		if (!Number.isFinite(delta) || delta === 0) return undefined;
+		this.scroll.scrollBy(delta);
+		// The override must structurally match pi-tui's unexported dispatch
+		// result, which requires a child target; a self-target keeps the wheel
+		// result out of pi's delegated-child bookkeeping (harmless today, and
+		// the only shape the type system allows).
+		return {
+			handled: true,
+			render: true,
+			target: { component: this, originX: 0, originY: 0, width: 0, height: 0 },
+		};
 	}
 
 	setDraft(value: string): void {
@@ -282,99 +713,62 @@ class BtwOverlay extends Container implements Focusable {
 		return this.input.getValue();
 	}
 
-	private pageBy(direction: 1 | -1): void {
-		const halfPage = Math.max(1, Math.floor(this.lastHeight / 2));
-		const maxScroll = Math.max(0, this.lastTotal - this.lastHeight);
-		const next = this.scrollOffset + direction * halfPage;
-		if (direction > 0 && next >= maxScroll) {
-			// Scrolled back to the bottom: resume tail-following.
-			this.followTail = true;
-			this.scrollOffset = maxScroll;
-		} else if (next <= 0) {
-			this.followTail = false;
-			this.scrollOffset = 0;
-		} else {
-			this.followTail = false;
-			this.scrollOffset = next;
-		}
-		this.tui.requestRender();
-	}
-
-	private frameLine(content: string, innerWidth: number): string {
-		const truncated = truncateToWidth(content, innerWidth, "");
-		const padding = Math.max(0, innerWidth - visibleWidth(truncated));
-		return `${this.theme.fg("borderMuted", "│")}${truncated}${" ".repeat(padding)}${this.theme.fg("borderMuted", "│")}`;
-	}
-
-	private borderLine(innerWidth: number, edge: "top" | "bottom"): string {
-		const left = edge === "top" ? "┌" : "└";
-		const right = edge === "top" ? "┐" : "┘";
-		return this.theme.fg("borderMuted", `${left}${"─".repeat(innerWidth)}${right}`);
-	}
-
 	override render(width: number): string[] {
-		const dialogWidth = Math.max(56, Math.min(width, Math.floor(width * 0.9)));
-		const innerWidth = Math.max(40, dialogWidth - 2);
-		const terminalRows = process.stdout.rows ?? 30;
-		const dialogHeight = Math.max(16, Math.min(30, Math.floor(terminalRows * 0.75)));
-		const chromeHeight = 7;
-		const transcriptHeight = Math.max(6, dialogHeight - chromeHeight);
+		// Fullscreen cover: pi composites exactly these rows over the main
+		// transcript, so the component owns the height via its line count.
+		const height = Math.max(1, this.tui.terminal.rows);
+		// pad1 owns the left-most column, so content renders at width-1; a
+		// full-width row would lose its last cell when fillViewport right-clips.
+		const columns = Math.max(1, width - 1);
 
-		// Markdown renders to innerWidth already — no manual wrapping needed
-		const transcript = this.getTranscript(innerWidth, this.theme);
-		this.lastTotal = transcript.length;
-		this.lastHeight = transcriptHeight;
-		const maxScroll = Math.max(0, transcript.length - transcriptHeight);
-		if (this.followTail) {
-			this.scrollOffset = maxScroll;
-		} else {
-			this.scrollOffset = Math.min(this.scrollOffset, maxScroll);
-		}
-		const visibleTranscript = transcript.slice(this.scrollOffset, this.scrollOffset + transcriptHeight);
-		const transcriptPadding = Math.max(0, transcriptHeight - visibleTranscript.length);
+		this.content = this.getTranscript(columns, this.theme);
 
 		const status = this.getStatus();
+		const header = this.theme.bold(this.theme.fg("accent", "BTW side chat"));
+		const followState = this.scroll.isFollowingEnd ? "following" : "scrolled";
+		const hint = `Enter submit · Esc close · ctrl+u/d page · ctrl+o view: ${transcriptDetail} · ${followState}`;
+		const hintLine = this.theme.fg("dim", hint);
+		// Status text is never trusted (provider errors flow through it): one
+		// sanitized row so a newline cannot evict hint/input from the frame.
+		const statusLine = this.theme.fg(statusColor(status), wrapPlain(status, columns)[0] ?? "");
+		const inputLine = this.input.render(columns)[0] ?? "";
 
-		const previousFocused = this.input.focused;
-		this.input.focused = false;
-		const inputLine = this.input.render(innerWidth)[0] ?? "";
-		this.input.focused = previousFocused;
+		// LiveAgentView-style one-column side padding keeps headings, bodies, tool
+		// bands and chrome off the hard terminal edge; fillViewport clips the rest.
+		const pad1 = (lines: string[]): string[] => lines.map((line) => (line ? ` ${line}` : " "));
 
-		const lines = [
-			this.borderLine(innerWidth, "top"),
-			this.frameLine(this.theme.fg("accent", this.theme.bold(" BTW side chat ")), innerWidth),
-			this.frameLine(this.theme.fg("dim", "Separate side conversation. Esc closes."), innerWidth),
-			this.theme.fg("borderMuted", `├${"─".repeat(innerWidth)}┤`),
+		// Under four rows there is no body: the input survives, then the header, then the hint.
+		if (height === 1) return fillViewport(pad1([inputLine]), width, height);
+		if (height === 2) return fillViewport(pad1([header, inputLine]), width, height);
+		if (height === 3) return fillViewport(pad1([header, hintLine, inputLine]), width, height);
+
+		// Full layout spends six chrome rows (header, breathing blank, body,
+		// blank, status, hint+input); 4-7-row terminals drop the breathing rows
+		// so the input still fits and the body keeps >= 2 rows.
+		const breathing = height >= 8;
+		const bodyHeight = height - (breathing ? 6 : 4);
+		// Layout before slicing: with viewportHeight 0, follow-end silently no-ops.
+		this.scroll.updateLayout(this.content.length, bodyHeight, () => this.tui.requestRender());
+		const body = this.scroll.render(columns).slice(this.scroll.scrollTop, this.scroll.scrollTop + bodyHeight);
+		while (body.length < bodyHeight) body.push("");
+
+		// pad1 is per-row, so padding the composed rows equals padding each segment;
+		// these rows fill the slot exactly and fillViewport clips and right-pads.
+		const breathingRow = breathing ? [""] : [];
+		const rows = [
+			header,
+			...breathingRow,
+			...body,
+			...breathingRow,
+			statusLine,
+			hintLine,
+			inputLine,
 		];
-
-		for (const line of visibleTranscript) {
-			lines.push(this.frameLine(line, innerWidth));
-		}
-		for (let i = 0; i < transcriptPadding; i++) {
-			lines.push(this.frameLine("", innerWidth));
-		}
-
-		lines.push(this.theme.fg("borderMuted", `├${"─".repeat(innerWidth)}┤`));
-		lines.push(this.frameLine(this.theme.fg("warning", status), innerWidth));
-		lines.push(
-			`${this.theme.fg("borderMuted", "│")}${inputLine}${this.theme.fg("borderMuted", "│")}`,
-		);
-		const hint = this.followTail
-			? "Enter submit · Esc close"
-			: "Enter submit · Esc close · ctrl+d back to latest";
-		lines.push(this.frameLine(this.theme.fg("dim", hint), innerWidth));
-		lines.push(this.borderLine(innerWidth, "bottom"));
-
-		return lines;
+		return fillViewport(pad1(rows), width, height);
 	}
 }
 
 export default function (pi: ExtensionAPI) {
-	let thread: BtwDetails[] = [];
-	let pendingQuestion: string | null = null;
-	let pendingAnswer = "";
-	let pendingError: string | null = null;
-	let pendingToolCalls: ToolCallInfo[] = [];
 	let sideBusy = false;
 	let overlayStatus = "Ready";
 	let overlayDraft = "";
@@ -382,56 +776,26 @@ export default function (pi: ExtensionAPI) {
 	let activeSideSession: SideSessionRuntime | null = null;
 	let overlayRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
-	const mdTheme = getMarkdownTheme();
-
-	function renderMarkdownLines(text: string, width: number): string[] {
-		if (!text) return [];
-		try {
-			const md = new Markdown(text, 0, 0, mdTheme);
-			return md.render(width);
-		} catch {
-			// Fall back to plain text wrapping if Markdown rendering fails
-			return text.split("\n").flatMap((line) => {
-				if (!line) return [""];
-				const wrapped: string[] = [];
-				for (let i = 0; i < line.length; i += width) {
-					wrapped.push(line.slice(i, i + width));
-				}
-				return wrapped.length > 0 ? wrapped : [""];
-			});
-		}
-	}
-
-	function formatToolArgs(toolName: string, args: unknown): string {
-		if (!args || typeof args !== "object") return "";
-		const a = args as Record<string, unknown>;
-		switch (toolName) {
-			case "bash":
-				return typeof a.command === "string" ? truncateToWidth(a.command.split("\n")[0], 50, "…") : "";
-			case "read":
-			case "write":
-			case "edit":
-				return typeof a.path === "string" ? a.path : "";
-			default: {
-				const first = Object.values(a)[0];
-				return typeof first === "string" ? truncateToWidth(first.split("\n")[0], 40, "…") : "";
-			}
-		}
-	}
-
-	function renderToolCallLines(toolCalls: ToolCallInfo[], theme: ExtensionContext["ui"]["theme"], width: number): string[] {
+	function renderPendingThinking(width: number, theme: BtwTheme): string[] {
+		if (!pendingAssistant) return [];
+		const content = Array.isArray(pendingAssistant.content) ? pendingAssistant.content : [];
 		const lines: string[] = [];
-		for (const tc of toolCalls) {
-			const icon = tc.status === "running" ? "⚙" : tc.status === "error" ? "✗" : "✓";
-			const color = tc.status === "error" ? "error" : tc.status === "done" ? "success" : "dim";
-			const label = theme.fg(color, `${icon} `) + theme.fg("toolTitle", tc.toolName);
-			const argsText = tc.args ? theme.fg("dim", ` ${tc.args}`) : "";
-			lines.push(truncateToWidth(`  ${label}${argsText}`, width, ""));
+		for (const block of content) {
+			if (!block || typeof block !== "object" || (block as { type?: string }).type !== "thinking") {
+				continue;
+			}
+			const thinkingText = String((block as { thinking?: string }).thinking ?? "[redacted thinking]");
+			if (transcriptDetail === "compact") {
+				lines.push(theme.fg("dim", "[Thinking hidden · ctrl+o cycles view]"));
+				continue;
+			}
+			const rendered = markdownToLines(thinkingText, width, theme, true);
+			lines.push(...(transcriptDetail === "full" ? rendered : collapseRendered(rendered, theme, "...")));
 		}
 		return lines;
 	}
 
-	function getTranscriptLines(width: number, theme: ExtensionContext["ui"]["theme"]): string[] {
+	function getTranscriptLines(width: number, theme: BtwTheme): string[] {
 		try {
 			return getTranscriptLinesInner(width, theme);
 		} catch (error) {
@@ -439,40 +803,47 @@ export default function (pi: ExtensionAPI) {
 		}
 	}
 
-	function getTranscriptLinesInner(width: number, theme: ExtensionContext["ui"]["theme"]): string[] {
-		if (thread.length === 0 && !pendingQuestion && !pendingAnswer && !pendingError) {
+	function getTranscriptLinesInner(width: number, theme: BtwTheme): string[] {
+		if (thread.length === 0 && !pendingQuestion && !pendingAssistant && !pendingError) {
 			return [theme.fg("dim", "No BTW messages yet. Type a question below.")];
 		}
 
 		const lines: string[] = [];
 		for (const item of thread) {
-			// User message
-			const userText = item.question.trim().split("\n")[0];
-			lines.push(theme.fg("accent", theme.bold("You: ")) + truncateToWidth(userText, width - 5, "…"));
-			lines.push("");
-
-			// Assistant message rendered as markdown
-			const mdLines = renderMarkdownLines(item.answer, width);
-			lines.push(...mdLines);
-			lines.push("");
+			// Items hit the (item, width, detail, toolsKey) cache; a flying tool
+			// status flip re-renders only the owning item. One throwing renderer
+			// degrades to one line instead of hiding the whole transcript.
+			try {
+				lines.push(...renderThreadItem(item, theme, width, transcriptDetail, threadTools.get(item) ?? []));
+			} catch (error) {
+				const label = stripUnsafeTerminalText(item.question).slice(0, 40);
+				lines.push(theme.fg("error", `[render error: ${label}] ${error instanceof Error ? error.message : String(error)}`));
+			}
 		}
 
 		if (pendingQuestion) {
-			const userText = pendingQuestion.trim().split("\n")[0];
-			lines.push(theme.fg("accent", theme.bold("You: ")) + truncateToWidth(userText, width - 5, "…"));
-
-			// Show tool calls inline
-			if (pendingToolCalls.length > 0) {
-				lines.push(...renderToolCallLines(pendingToolCalls, theme, width));
-			}
+			lines.push(theme.fg("accent", "you"), ...wrapPlain(pendingQuestion, width), "");
 
 			if (pendingError) {
-				lines.push(theme.fg("error", `❌ ${pendingError}`));
-			} else if (pendingAnswer) {
-				lines.push("");
-				const mdLines = renderMarkdownLines(pendingAnswer, width);
-				lines.push(...mdLines);
-			} else if (pendingToolCalls.length === 0) {
+				// The calls that ran before the throw stay visible above the error,
+				// so a failure after N tools is diagnosable from the transcript.
+				lines.push(
+					theme.fg("error", "assistant"),
+					...failedTools.map((tool) =>
+						theme.fg("error", `  ✗ ${stripUnsafeTerminalText(tool.toolName)} (${tool.toolCallId})`),
+					),
+					...wrapPlain(`✗ ${pendingError}`, width).map((line) => theme.fg("error", line)),
+				);
+				return lines;
+			}
+
+			const thinkingLines = renderPendingThinking(width, theme);
+			const toolLines = renderToolInfos(pendingToolCalls, width);
+			const answerLines = pendingAnswer ? markdownToLines(pendingAnswer, width, theme) : [];
+			const bodyLines = [...thinkingLines, ...toolLines, ...answerLines];
+			if (bodyLines.length > 0) {
+				lines.push(theme.fg("accent", "assistant"), ...bodyLines);
+			} else {
 				lines.push(theme.fg("dim", "…"));
 			}
 		}
@@ -558,10 +929,7 @@ export default function (pi: ExtensionAPI) {
 
 	async function resetThread(ctx: ExtensionContext | ExtensionCommandContext, persist = true): Promise<void> {
 		thread = [];
-		pendingQuestion = null;
-		pendingAnswer = "";
-		pendingError = null;
-		pendingToolCalls = [];
+		resetPendingTurn();
 		sideBusy = false;
 		setOverlayDraft("");
 		setOverlayStatus("Ready");
@@ -576,10 +944,7 @@ export default function (pi: ExtensionAPI) {
 	async function restoreThread(ctx: ExtensionContext): Promise<void> {
 		await disposeSideSession();
 		thread = [];
-		pendingQuestion = null;
-		pendingAnswer = "";
-		pendingError = null;
-		pendingToolCalls = [];
+		resetPendingTurn();
 		sideBusy = false;
 		overlayStatus = "Ready";
 		overlayDraft = "";
@@ -692,7 +1057,12 @@ export default function (pi: ExtensionAPI) {
 					case "message_start":
 					case "message_update":
 					case "message_end": {
-						const streamed = extractEventAssistantText(event.message);
+						// message_update carries the cumulative message — no delta work.
+						const assistantMessage = event.message;
+						if (assistantMessage?.role === "assistant") {
+							pendingAssistant = assistantMessage;
+						}
+						const streamed = extractEventAssistantText(assistantMessage);
 						if (streamed) {
 							pendingAnswer = streamed;
 							pendingError = null;
@@ -701,27 +1071,41 @@ export default function (pi: ExtensionAPI) {
 						return;
 					}
 					case "tool_execution_start": {
-						const toolName = (event as { toolName?: string }).toolName ?? "unknown";
 						try {
-							pendingToolCalls.push({
-								toolCallId: (event as { toolCallId?: string }).toolCallId ?? "",
-								toolName,
-								args: formatToolArgs(toolName, (event as { args?: unknown }).args),
-								status: "running",
-							});
+							const toolCallId = event.toolCallId ?? "";
+							if (!toolCallId) {
+								return;
+							}
+							const toolName = event.toolName ?? "unknown";
+							const args = event.args;
+							// Pair by toolCallId end-to-end; concurrent same-name tools stay distinct.
+							const existing = pendingToolCalls.find((t) => t.toolCallId === toolCallId);
+							if (existing) {
+								existing.args = args;
+								existing.status = "running";
+							} else {
+								pendingToolCalls.push({
+									toolCallId,
+									toolName,
+									args,
+									result: undefined,
+									isError: false,
+									status: "running",
+								});
+							}
+							setOverlayStatus(`Running tool: ${toolName}...`, true);
 						} catch {
 							// Ignore tool tracking failures
 						}
-						setOverlayStatus(`Running tool: ${toolName}...`, true);
 						return;
 					}
 					case "tool_execution_end": {
-						const endToolName = (event as { toolName?: string }).toolName ?? "unknown";
-						const tc = pendingToolCalls.find(
-							(t) => t.toolName === endToolName && t.status === "running",
-						);
+						const toolCallId = event.toolCallId ?? "";
+						const tc = pendingToolCalls.find((t) => t.toolCallId === toolCallId);
 						if (tc) {
-							tc.status = (event as { isError?: boolean }).isError ? "error" : "done";
+							tc.result = event.result;
+							tc.isError = event.isError === true;
+							tc.status = tc.isError ? "error" : "done";
 						}
 						setOverlayStatus("Streaming side response...", true);
 						return;
@@ -858,11 +1242,11 @@ export default function (pi: ExtensionAPI) {
 				{
 					overlay: true,
 					overlayOptions: {
-						width: "80%",
-						minWidth: 72,
-						maxHeight: "78%",
-						anchor: "top-center",
-						margin: { top: 1, left: 2, right: 2 },
+						width: "100%",
+						maxHeight: "100%",
+						row: 0,
+						col: 0,
+						margin: 0,
 					},
 					onHandle: (handle) => {
 						runtime.handle = handle;
@@ -996,10 +1380,8 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
+			resetPendingTurn();
 			pendingQuestion = question;
-			pendingAnswer = "";
-			pendingError = null;
-			pendingToolCalls = [];
 			setOverlayStatus("Streaming side response...");
 			syncOverlay();
 
@@ -1029,14 +1411,20 @@ export default function (pi: ExtensionAPI) {
 			thread.push(details);
 			pi.appendEntry(BTW_ENTRY_TYPE, details);
 
-			pendingQuestion = null;
-			pendingAnswer = "";
-			pendingToolCalls = [];
+			// Finished tool boxes stay attached to this turn's item for the whole
+			// session; snapshot before the pending reset drops live state.
+			threadTools.set(details, snapshotToolCalls(pendingToolCalls));
+			resetPendingTurn();
 			setOverlayStatus("Ready for the next side question.");
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			pendingError = message;
-			setOverlayStatus("BTW request failed.");
+			// Keep which calls ran (frozen as errored) for the error view; drop
+			// raw pending references and their volatile render cache.
+			failedTools = snapshotToolCalls(pendingToolCalls);
+			pendingToolCalls = [];
+			pendingToolCache.clear();
+			setOverlayStatus(wrapPlain(message, 60)[0] ?? "BTW request failed.");
 			notify(ctx, message, "error");
 		} finally {
 			sideBusy = false;
