@@ -717,9 +717,9 @@ class BtwOverlay extends Container implements Focusable {
 		// Fullscreen cover: pi composites exactly these rows over the main
 		// transcript, so the component owns the height via its line count.
 		const height = Math.max(1, this.tui.terminal.rows);
-		// pad1 owns the left-most column, so content renders at width-1; a
-		// full-width row would lose its last cell when fillViewport right-clips.
-		const columns = Math.max(1, width - 1);
+		// pad2 owns the left- and right-most columns, so content renders at
+		// width-2; a wider row would lose its last cell when fillViewport clips.
+		const columns = Math.max(1, width - 2);
 
 		this.content = this.getTranscript(columns, this.theme);
 
@@ -727,20 +727,22 @@ class BtwOverlay extends Container implements Focusable {
 		const header = this.theme.bold(this.theme.fg("accent", "BTW side chat"));
 		const followState = this.scroll.isFollowingEnd ? "following" : "scrolled";
 		const hint = `Enter submit · Esc close · ctrl+u/d page · ctrl+o view: ${transcriptDetail} · ${followState}`;
-		const hintLine = this.theme.fg("dim", hint);
+		// Budgeted to columns: an overflowing hint would clip into the right pad
+		// column inside fillViewport and end flush against the terminal edge.
+		const hintLine = this.theme.fg("dim", truncateToWidth(hint, columns, "…"));
 		// Status text is never trusted (provider errors flow through it): one
 		// sanitized row so a newline cannot evict hint/input from the frame.
 		const statusLine = this.theme.fg(statusColor(status), wrapPlain(status, columns)[0] ?? "");
 		const inputLine = this.input.render(columns)[0] ?? "";
 
-		// LiveAgentView-style one-column side padding keeps headings, bodies, tool
-		// bands and chrome off the hard terminal edge; fillViewport clips the rest.
-		const pad1 = (lines: string[]): string[] => lines.map((line) => (line ? ` ${line}` : " "));
+		// LiveAgentView-style side padding keeps headings, bodies, tool bands and
+		// chrome off the hard terminal edge; fillViewport clips the rest.
+		const pad2 = (lines: string[]): string[] => lines.map((line) => (line ? ` ${line} ` : " "));
 
 		// Under four rows there is no body: the input survives, then the header, then the hint.
-		if (height === 1) return fillViewport(pad1([inputLine]), width, height);
-		if (height === 2) return fillViewport(pad1([header, inputLine]), width, height);
-		if (height === 3) return fillViewport(pad1([header, hintLine, inputLine]), width, height);
+		if (height === 1) return fillViewport(pad2([inputLine]), width, height);
+		if (height === 2) return fillViewport(pad2([header, inputLine]), width, height);
+		if (height === 3) return fillViewport(pad2([header, hintLine, inputLine]), width, height);
 
 		// Full layout spends six chrome rows (header, breathing blank, body,
 		// blank, status, hint+input); 4-7-row terminals drop the breathing rows
@@ -752,7 +754,7 @@ class BtwOverlay extends Container implements Focusable {
 		const body = this.scroll.render(columns).slice(this.scroll.scrollTop, this.scroll.scrollTop + bodyHeight);
 		while (body.length < bodyHeight) body.push("");
 
-		// pad1 is per-row, so padding the composed rows equals padding each segment;
+		// pad2 is per-row, so padding the composed rows equals padding each segment;
 		// these rows fill the slot exactly and fillViewport clips and right-pads.
 		const breathingRow = breathing ? [""] : [];
 		const rows = [
@@ -764,7 +766,7 @@ class BtwOverlay extends Container implements Focusable {
 			hintLine,
 			inputLine,
 		];
-		return fillViewport(pad1(rows), width, height);
+		return fillViewport(pad2(rows), width, height);
 	}
 }
 
