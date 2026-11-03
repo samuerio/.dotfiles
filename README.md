@@ -68,21 +68,33 @@
 
 ## pi 扩展 submodule
 
-pi 的部分扩展以 git submodule 形式引入（如 `pi/agent/extensions/subagent-manager/`）。
-clone 后该目录为空属正常现象（父仓库只记录 commit 指针），不影响其他扩展加载。
-需要启用时手动执行：
+pi 的部分扩展以 git submodule 形式引入：
+
+- `pi/agent/extensions/subagent-manager/`（[pi-subagent-manager](https://github.com/samuerio/pi-subagent-manager)）
+- `pi/agent/extensions/context-view/`（[pi-context-view](https://github.com/dimk90/pi-context-view)）
+
+clone 后这些目录为空属正常现象（父仓库只记录 commit 指针），不影响其他扩展加载。
+需要启用时手动初始化：
 
 ```bash
 cd ~/workspace/.dotfiles
-git submodule update --init pi/agent/extensions/subagent-manager
-cd pi/agent/extensions/subagent-manager && npm ci --omit=dev --legacy-peer-deps
+git submodule update --init pi/agent/extensions/subagent-manager pi/agent/extensions/context-view
 ```
+
+`subagent-manager` 有运行时依赖，需在子模块内执行：
+
+```bash
+cd pi/agent/extensions/subagent-manager
+npm ci --omit=dev --legacy-peer-deps
+```
+
+`context-view` 只依赖 pi 本体提供的 peer 包（`@earendil-works/pi-*`），无需 npm install。
 
 更新 submodule 到父仓库钉住的新 commit：
 
 ```bash
 cd ~/workspace/.dotfiles
-git submodule update pi/agent/extensions/subagent-manager
+git submodule update pi/agent/extensions/subagent-manager pi/agent/extensions/context-view
 ```
 
 ## AI / 自动化

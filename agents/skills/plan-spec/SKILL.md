@@ -28,6 +28,8 @@ Write our discussion as a plan in `.pi/spec/[YYYYMMDD-HHMMSS]-[slug]/plan.md`, w
 Derive a concise kebab-case slug from the topic, e.g. `implement-auth`, `fix-issue-42`. Full directory example: `.pi/spec/20250622-143000-implement-auth/`.
 
 All explanatory prose in Simplified Chinese. Headings, paths, module names, identifiers in English.
+Do not transcribe the discussion: no design journey, no option comparisons, no rejected designs.
+Do not add out-of-goal ideas ("while we're at it...").
 
 Do not infer implementation permission from approval of the plan.
 

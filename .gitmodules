@@ -1,3 +1,6 @@
 [submodule "pi/agent/extensions/subagent-manager"]
 	path = pi/agent/extensions/subagent-manager
 	url = git@github.com:samuerio/pi-subagent-manager.git
+[submodule "pi/agent/extensions/context-view"]
+	path = pi/agent/extensions/context-view
+	url = git@github.com:samuerio/pi-context-view.git
