@@ -28,4 +28,5 @@
 ## Using Subagents
 - Do not spawn a subagent for work you can complete directly in a single response.
 - Spawn multiple Task subagents in the same turn when fanning out across genuinely independent items. Each subagent loses your context, so include everything it needs in the prompt: the plan, relevant file paths, coding conventions, and how to verify its work.
+  - Exception: reviewer_spawn and simplifier_spawn take typed `target`/`targetRef` params only and read the repo themselves. Never give them background, diffs, or conclusions about the change ("already implemented and verified" is the classic poison).
 - Avoid duplicating work that subagents are already doing. When a subagent finishes, summarize its result for the user since the user cannot see subagent output directly.
