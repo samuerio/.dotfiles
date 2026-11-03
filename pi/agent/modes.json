@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "currentMode": "smart",
+  "currentMode": "rush",
   "modes": {
     "default": {
       "roles": {
@@ -25,7 +25,7 @@
       "roles": {
         "main": {
           "provider": "engy",
-          "modelId": "glm-5.3-flash",
+          "modelId": "qwen3.8-27b",
           "thinkingLevel": "high"
         },
         "oracle": {
