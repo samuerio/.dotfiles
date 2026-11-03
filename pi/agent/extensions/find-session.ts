@@ -1366,6 +1366,21 @@ function matchLineIndexes(lines: string[], re: RegExp | undefined): number[] {
 }
 
 /**
+ * Wrap every plain-text segment of a styled line in a background so the
+ * mark survives mid-line SGR resets (\x1B[0m), which pi-tui's Markdown
+ * emits between styled spans. Segments are joined back untouched; the
+ * background code is re-asserted before each segment and cleared right
+ * after it (\x1B[49m), so the mark is self-contained in one line (the
+ * renderer already appends a full reset at end of line).
+ */
+function markLineBackground(line: string, bgAnsi: string): string {
+    const parts = line.split(/(\x1B\[[0-9;]*m)/);
+    for (let i = 0; i < parts.length; i += 2)
+        if (parts[i]) parts[i] = `${bgAnsi}${parts[i]}\x1b[49m`;
+    return parts.join("");
+}
+
+/**
  * Windowed MARKDOWN viewer for the preview panel (the scroll pattern from
  * lib/session-preview.ts). Lines are produced by pi-tui's Markdown component
  * (themed headings, code blocks, tables, lists) and cached per width, so
@@ -1380,7 +1395,11 @@ function matchLineIndexes(lines: string[], re: RegExp | undefined): number[] {
  * BEFORE that render, so without the callback the counter would stay at its
  * pre-match value until the first n/N. A later width change rebuilds the
  * cache (re-wrapping can move or split matches) but does not repaint the
- * footer; the next n/N refreshes it.
+ * footer; the next n/N refreshes it. `bgAnsi` (when set) paints the CURRENT
+ * match line's visible slice with the theme's search-match background each
+ * frame (markLineBackground, applied after the window slice, never cached):
+ * it tracks the n/N target, not the scroll position, so it stays put when
+ * the user scrolls away.
  */
 class PreviewText {
     private readonly md: Markdown;
@@ -1399,6 +1418,11 @@ class PreviewText {
         text: string,
         private readonly match?: { re: RegExp },
         private readonly onMatches?: () => void,
+        // Active match line background open-code, from
+        // theme.getBgAnsi("searchMatchBg"); a user theme with that token
+        // emptied gets \x1b[49m (no-op), so the mark silently degrades away
+        // while the footer counter still works.
+        private readonly bgAnsi?: string,
     ) {
         this.md = new Markdown(
             text.trim() ? text : "_Empty session._",
@@ -1438,10 +1462,23 @@ class PreviewText {
             0,
             Math.min(this.scrollOffset, maxScroll),
         );
-        const visible = lines.slice(
-            this.scrollOffset,
-            this.scrollOffset + contentHeight,
-        );
+        // Paint the current n/N match line (if any) with the search-match
+        // background, on the visible slice only: it tracks the match cursor,
+        // not the scroll position, so scrolling away leaves the mark on the
+        // match line (or off-screen) rather than clearing it.
+        const activeLine =
+            this.matchIndex !== undefined
+                ? this.cache?.matches[this.matchIndex]
+                : undefined;
+        const visible = lines
+            .slice(this.scrollOffset, this.scrollOffset + contentHeight)
+            .map((line, i) =>
+                activeLine !== undefined &&
+                this.bgAnsi !== undefined &&
+                this.scrollOffset + i === activeLine
+                    ? markLineBackground(line, this.bgAnsi)
+                    : line,
+            );
         const out = visible.map((line) => truncateToWidth(line, width));
         while (out.length < contentHeight) out.push("");
         return out;
@@ -2073,7 +2110,10 @@ export default function (pi: ExtensionAPI) {
                 // onMatches: the footer is built before the component's
                 // first render, the moment the match set exists; without it
                 // the counter would stay at its pre-read value until the
-                // first n/N.
+                // first n/N. bgAnsi: the theme's built-in search-match
+                // background (deliberately surface-close in both dark and
+                // light themes), not a hardcoded 256-color; never layer an
+                // fg on top of it (would flatten heading/code colors).
                 previewText = new PreviewText(
                     tui,
                     content,
@@ -2082,6 +2122,7 @@ export default function (pi: ExtensionAPI) {
                         previewHintLine?.setText(dim(` ${previewHint()}`));
                         tui.requestRender();
                     },
+                    theme.getBgAnsi("searchMatchBg"),
                 );
                 previewView.addChild(previewText);
                 previewHintLine = new Text(dim(` ${previewHint()}`), 0, 0);
