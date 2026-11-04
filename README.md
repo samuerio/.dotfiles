@@ -91,7 +91,7 @@ npm ci --omit=dev --legacy-peer-deps
 ```
 
 `context-view` 只依赖 pi 本体提供的 peer 包（`@earendil-works/pi-*`），无需 npm install。
-`e2e-cli` 有运行时依赖，需在子模块内执行 `npm ci --omit=dev`；PATH 上的 `e2e` 命令目前由 npm-global 独立安装提供，与本 submodule 未链接。
+`e2e-cli` 自带 `install.sh`（在子模块内运行）：把 skill 拷贝到 `~/.agents/skills/e2e-cli`（经 `~/.agents -> agents/` 软链即本仓库 `agents/skills/e2e-cli/`，更新后随本仓库提交），并用 npm pack 的 tgz 全局安装 `e2e` 命令（真实拷贝，非软链）；在子模块内开发/测试另需 `npm ci --omit=dev`。
 
 更新 submodule 到父仓库钉住的新 commit：
 

@@ -82,7 +82,8 @@ Obsidian 笔记管理、数据库查询等垂直能力。skill 之间通过 `ski
 
 e2e CLI 工具源码（OpenAPI 接口发现与调用、YAML e2e flow 执行），以 git submodule 形式引入的独立仓库
 （main 分支，remote 为 `https://github.com/samuerio/e2e-cli`），父仓库只钉住 commit 指针。
-工具用法由 `agents/skills/e2e-cli/` 文档化；PATH 上的 `e2e` 命令由 npm-global 独立安装提供，与本 submodule 未链接。
+工具用法由子模块自带 skill（`e2e-cli/skills/e2e-cli/`）文档化；运行 `e2e-cli/install.sh` 会把 skill 拷贝到
+`agents/skills/e2e-cli/`（经 `~/.agents -> agents/` 软链即 live skill，更新后随本仓库提交），并用 npm tgz 全局安装 `e2e` 命令。
 
 **配置边界:** submodule 仅钉源码版本，运行时安装与依赖安装（`npm ci`）不属于本仓库职责。
 
