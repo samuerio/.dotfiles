@@ -25,6 +25,7 @@
 | `linux_rime/` + `mac_rime/` | Rime 输入法配置 |
 | `vscode/` + `ideavim/` + `zed/` | IDE/编辑器配置 |
 | `uv/` | uv 配置 |
+| `e2e-cli/` | e2e CLI 工具源码（git submodule，独立仓库） |
 
 详细架构说明见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
@@ -66,19 +67,20 @@
 - 主要是编辑器与终端配置（`vscode/`、`windows_terminal/`）
 - 键位自动化放在 `autohotkey/`
 
-## pi 扩展 submodule
+## Submodule
 
-pi 的部分扩展以 git submodule 形式引入：
+pi 的部分扩展与外部工具源码以 git submodule 形式引入：
 
 - `pi/agent/extensions/subagent-manager/`（[pi-subagent-manager](https://github.com/samuerio/pi-subagent-manager)）
 - `pi/agent/extensions/context-view/`（[pi-context-view](https://github.com/dimk90/pi-context-view)）
+- `e2e-cli/`（[e2e-cli](https://github.com/samuerio/e2e-cli)）
 
 clone 后这些目录为空属正常现象（父仓库只记录 commit 指针），不影响其他扩展加载。
 需要启用时手动初始化：
 
 ```bash
 cd ~/workspace/.dotfiles
-git submodule update --init pi/agent/extensions/subagent-manager pi/agent/extensions/context-view
+git submodule update --init pi/agent/extensions/subagent-manager pi/agent/extensions/context-view e2e-cli
 ```
 
 `subagent-manager` 有运行时依赖，需在子模块内执行：
@@ -89,12 +91,13 @@ npm ci --omit=dev --legacy-peer-deps
 ```
 
 `context-view` 只依赖 pi 本体提供的 peer 包（`@earendil-works/pi-*`），无需 npm install。
+`e2e-cli` 有运行时依赖，需在子模块内执行 `npm ci --omit=dev`；PATH 上的 `e2e` 命令目前由 npm-global 独立安装提供，与本 submodule 未链接。
 
 更新 submodule 到父仓库钉住的新 commit：
 
 ```bash
 cd ~/workspace/.dotfiles
-git submodule update pi/agent/extensions/subagent-manager pi/agent/extensions/context-view
+git submodule update pi/agent/extensions/subagent-manager pi/agent/extensions/context-view e2e-cli
 ```
 
 ## AI / 自动化

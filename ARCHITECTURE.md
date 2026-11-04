@@ -78,6 +78,14 @@ Obsidian 笔记管理、数据库查询等垂直能力。skill 之间通过 `ski
 
 **API Boundary:** SKILL.md 是技能的唯一公开接口；脚本实现细节对调用方不可见。
 
+### `e2e-cli/`
+
+e2e CLI 工具源码（OpenAPI 接口发现与调用、YAML e2e flow 执行），以 git submodule 形式引入的独立仓库
+（main 分支，remote 为 `https://github.com/samuerio/e2e-cli`），父仓库只钉住 commit 指针。
+工具用法由 `agents/skills/e2e-cli/` 文档化；PATH 上的 `e2e` 命令由 npm-global 独立安装提供，与本 submodule 未链接。
+
+**配置边界:** submodule 仅钉源码版本，运行时安装与依赖安装（`npm ci`）不属于本仓库职责。
+
 ### `opencode/`
 
 OpenCode AI 助手的配置中心。`opencode.json` 定义 provider、模型与 MCP 服务；`tui.json` 定制 TUI 键位。
@@ -131,3 +139,5 @@ prompts 模板驱动的 `/clarify`、`/summary` 命令。
 - **跨平台一致性：** Linux（`i3`）与 macOS（`yabai`）桌面层、各平台 IDE 配置、`karabiner`/`autohotkey`/`rime`
 共同维护跨系统的键位与操作习惯。
 - **配置边界：** 每个工具独占一个顶层目录，不跨目录耦合；agent skills 遵循"一个目录一个技能"的自治边界。
+- **Submodule：** `pi/agent/extensions/subagent-manager`、`context-view` 与 `e2e-cli/` 均为钉住独立仓库 commit 的
+源码指针，父仓库不管理其构建与安装；初始化与更新命令见 README 的 Submodule 一节。

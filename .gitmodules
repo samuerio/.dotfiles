@@ -4,3 +4,6 @@
 [submodule "pi/agent/extensions/context-view"]
 	path = pi/agent/extensions/context-view
 	url = git@github.com:samuerio/pi-context-view.git
+[submodule "e2e-cli"]
+	path = e2e-cli
+	url = https://github.com/samuerio/e2e-cli.git
