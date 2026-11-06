@@ -57,7 +57,7 @@ schedule remove <id>                    # 只删定义，run 历史留给 GC
 schedule enable <id> / disable <id>     # 保留定义，停止/恢复触发
 schedule run <id> [--fg]                # 手动跑一次（manual trigger）
 schedule logs <id> [--raw] [-f]         # 摘要 / 原始输出 / 跟随
-schedule tick                           # 手动跑一次调度（cron 会每分钟调）
+schedule tick                           # 手动跑一次调度（cron 每分钟调）
 schedule install-cron / uninstall-cron  # 装/卸 crontab 块
 ```
 

@@ -1,15 +1,15 @@
 /**
  * schedule/tick.ts — the scheduler tick and crontab installation.
  *
- * `tick` is the only thing crontab runs (once a minute). It never waits for a
- * run: it decides what is due, claims the slot, and derives a detached helper
- * (`schedule __exec <id> <stamp>`) that owns the run's lifetime.
+ * `tick` is the only thing crontab runs (once a minute, TICK_SCHEDULE). It never
+ * waits for a run: it decides what is due, claims the slot, and derives a
+ * detached helper (`schedule __exec <id> <stamp>`) that owns the run's lifetime.
  *
  * Scheduling invariant (the bug this design exists to avoid): the anchor for
  * "when do I fire next" is the tick-owned watermark in
  * `runs/<id>/state.json`, never the run history. A missed slot advances the
  * watermark, so a machine that was off for four hours does not re-fire an
- * every-five-minutes task forever, and GC pressure cannot shift the schedule.
+ * every-minute task forever, and GC pressure cannot shift the schedule.
  *
  * pi-free on purpose (node built-ins + ./cron.ts ./store.ts ./run.ts only).
  */
@@ -33,6 +33,19 @@ import {
     writeWatermark,
 } from "./store.ts";
 import type { Task } from "./store.ts";
+
+/**
+ * The crontab schedule for `tick`. Single source of truth: `installCron` renders
+ * it and the tests assert against it.
+ *
+ * One minute is the resolution the scheduler can promise. A tick is a full
+ * `node` start (~150ms wall, ~0.5% of a core while it runs), so a coarser
+ * interval saves CPU — but any cron expression that resolves to slots closer
+ * together than the tick interval is coalesced into one run per tick, which
+ * silently turns `* * * * *` into "every N minutes". If you ever raise this,
+ * treat the tick interval as the scheduler's minimum granularity.
+ */
+export const TICK_SCHEDULE = "* * * * *";
 
 /** A slot older than this is recorded as missed instead of being dispatched. */
 export const CATCHUP_MS = 10 * 60 * 1000;
@@ -354,7 +367,7 @@ export function renderCronBlock(options: {
     return [
         CRON_BLOCK_BEGIN,
         `PATH=${path}`,
-        `* * * * * ${options.nodeBin} ${options.scheduleBin} tick >> ${options.logPath} 2>&1`,
+        `${TICK_SCHEDULE} ${options.nodeBin} ${options.scheduleBin} tick >> ${options.logPath} 2>&1`,
         CRON_BLOCK_END,
     ].join("\n");
 }

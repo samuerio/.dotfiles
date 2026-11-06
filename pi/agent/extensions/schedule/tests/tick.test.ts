@@ -17,6 +17,7 @@ import {
     CATCHUP_MS,
     CRON_BLOCK_BEGIN,
     CRON_BLOCK_END,
+    TICK_SCHEDULE,
     appendTickLog,
     formatTickResult,
     extractCronBlock,
@@ -361,7 +362,7 @@ describe("install-cron", () => {
         assert.equal(lines[1], "PATH=/opt/pi/bin:/usr/local/bin:/usr/bin:/bin");
         assert.equal(
             lines[2],
-            "* * * * * /usr/bin/node /home/zhe/.pi/agent/bin/schedule tick >> /home/zhe/.pi/agent/schedule/tick.log 2>&1",
+            `${TICK_SCHEDULE} /usr/bin/node /home/zhe/.pi/agent/bin/schedule tick >> /home/zhe/.pi/agent/schedule/tick.log 2>&1`,
         );
         assert.equal(lines[3], CRON_BLOCK_END);
     });
