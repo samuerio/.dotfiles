@@ -104,6 +104,7 @@ export interface MemorySearchResult {
 export interface MemorySearchResponse {
   results: MemorySearchResult[];
   warnings: MemoryWarning[];
+  partial: boolean;
 }
 
 export interface MemoryWriteRequest {

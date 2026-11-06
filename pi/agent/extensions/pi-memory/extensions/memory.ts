@@ -213,7 +213,7 @@ export default function (pi: ExtensionAPI) {
         content: [
           {
             type: "text",
-            text: formatSearchResultsText(response.results),
+            text: formatSearchResultsText(response.results, { partial: response.partial }),
           },
         ],
         details: {

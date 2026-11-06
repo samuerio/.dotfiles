@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatRelativeAge, searchEntries } from "../src/search.js";
+import { formatRelativeAge, formatSearchResultsText, searchEntries } from "../src/search.js";
 import type { ParsedEntry } from "../src/types.js";
 
 describe("search", () => {
@@ -125,6 +125,92 @@ describe("search", () => {
     const noCap = searchEntries(entries, { query: "many topic entry truncation", maxResults: 50 });
     expect(noCap.results).toHaveLength(12);
     expect(noCap.results.map((result) => result.id)).toEqual(entries.map((entry) => entry.id));
+  });
+
+  it("matches a CJK term embedded in a sentence without delimiters", () => {
+    const matches = searchEntries(
+      [
+        makeEntry({
+          id: "mem_cjk",
+          heading: "集成测试的前置条件",
+          body: "集成测试开始前必须先运行 docker compose up redis，否则会因连接超时而失败。",
+        }),
+        makeEntry({
+          id: "mem_other",
+          heading: "Release notes",
+          body: "Nothing about test setup here.",
+        }),
+      ],
+      { query: "集成测试" },
+      new Date("2026-04-06T00:00:00Z"),
+    );
+
+    expect(matches.results.map((result) => result.id)).toEqual(["mem_cjk"]);
+    expect(matches.partial).toBe(false);
+  });
+
+  it("matches an ASCII term glued to CJK text but not inside an ASCII word", () => {
+    const entries = [
+      makeEntry({ id: "mem_glued", heading: "缓存", body: "安装redis后重新运行即可。" }),
+      makeEntry({ id: "mem_ascii", heading: "Noise", body: "xredisx is not a word match." }),
+    ];
+
+    const matches = searchEntries(entries, { query: "redis" }, new Date("2026-04-06T00:00:00Z"));
+
+    expect(matches.results.map((result) => result.id)).toEqual(["mem_glued"]);
+  });
+
+  it("falls back to partial matches only when no entry covers every query word", () => {
+    const entries = [
+      makeEntry({
+        id: "mem_workaround",
+        heading: "Flaky test workaround",
+        body: "Clear caches before rerunning the suite.",
+      }),
+      makeEntry({
+        id: "mem_ci",
+        heading: "CI pipeline",
+        body: "The integration test suite is flaky and needs a rerun.",
+      }),
+    ];
+
+    const covered = searchEntries(
+      entries,
+      { query: "integration test flaky" },
+      new Date("2026-04-06T00:00:00Z"),
+    );
+    expect(covered.partial).toBe(false);
+    expect(covered.results.map((result) => result.id)).toEqual(["mem_ci"]);
+
+    const partial = searchEntries(
+      entries,
+      { query: "flaky caches integration" },
+      new Date("2026-04-06T00:00:00Z"),
+    );
+    expect(partial.partial).toBe(true);
+    expect(partial.results.map((result) => result.id)).toEqual(["mem_workaround", "mem_ci"]);
+  });
+
+  it("flags partial results in the rendered text", () => {
+    const entries = [
+      makeEntry({
+        id: "mem_partial",
+        heading: "Release cadence",
+        body: "Cut a release every second Friday.",
+      }),
+    ];
+    const matches = searchEntries(
+      entries,
+      { query: "release cadence rollback" },
+      new Date("2026-04-06T00:00:00Z"),
+    );
+
+    const partialText = formatSearchResultsText(matches.results, { partial: matches.partial });
+    expect(partialText.startsWith("No entry matched every query word.")).toBe(true);
+    expect(partialText).toContain("mem_partial");
+
+    const fullText = formatSearchResultsText(matches.results);
+    expect(fullText.startsWith("1. [project] Release cadence")).toBe(true);
   });
 });
 

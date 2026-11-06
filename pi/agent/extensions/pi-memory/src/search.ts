@@ -14,7 +14,14 @@ interface RankedMatch {
 
 const DEFAULT_MAX_RESULTS = 10;
 const EXCERPT_MAX_CHARS = 300;
-const WORD_CHAR_CLASS = "[\\p{L}\\p{N}]";
+// Word-boundary assertions exempt CJK scripts: those scripts are written without
+// spaces, so a term glued to its neighbours (安装redis, 集成测试开始前) is still a
+// whole word for matching purposes.
+const CJK_SCRIPT_CLASS = "\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\p{Script=Hangul}";
+// `v`-mode class subtraction requires the operands to be class-set operands, so
+// the union is nested instead of juxtaposed.
+const WORD_CHAR_CLASS = `[[\\p{L}\\p{N}]&&[^${CJK_SCRIPT_CLASS}]]`;
+const CJK_CHAR_RE = new RegExp(`[${CJK_SCRIPT_CLASS}]`, "u");
 
 export function searchEntries(
   entries: ParsedEntry[],
@@ -23,10 +30,11 @@ export function searchEntries(
 ): MemorySearchResponse {
   const queryWords = tokenizeQuery(request.query);
   if (queryWords.length === 0) {
-    return { results: [], warnings: [] };
+    return { results: [], warnings: [], partial: false };
   }
 
-  const rankedMatches: RankedMatch[] = [];
+  const fullMatches: RankedMatch[] = [];
+  const partialMatches: RankedMatch[] = [];
   const warnings: MemoryWarning[] = [];
 
   for (const entry of entries) {
@@ -41,15 +49,21 @@ export function searchEntries(
     );
     const totalMatches = headingMatches + bodyMatches;
 
-    if (totalMatches !== queryWords.length) continue;
+    if (totalMatches === 0) continue;
 
-    rankedMatches.push({
-      entry,
-      headingMatches,
-      bodyMatches,
-    });
+    const match: RankedMatch = { entry, headingMatches, bodyMatches };
+    if (totalMatches === queryWords.length) {
+      fullMatches.push(match);
+    } else {
+      partialMatches.push(match);
+    }
   }
 
+  // Prefer entries that match every query word. Only when nothing covers all of
+  // them fall back to partial coverage, ranked by the same comparator so the
+  // heading-dominates and recency-tiebreak rules stay intact.
+  const partial = fullMatches.length === 0 && partialMatches.length > 0;
+  const rankedMatches = partial ? partialMatches : fullMatches;
   rankedMatches.sort((left, right) => compareMatches(left, right));
 
   const maxResults = request.maxResults ?? DEFAULT_MAX_RESULTS;
@@ -57,13 +71,16 @@ export function searchEntries(
     .slice(0, maxResults)
     .map((match) => toSearchResult(match.entry, queryWords, now));
 
-  return { results, warnings };
+  return { results, warnings, partial };
 }
 
-export function formatSearchResultsText(results: MemorySearchResult[]): string {
+export function formatSearchResultsText(
+  results: MemorySearchResult[],
+  options: { partial?: boolean } = {},
+): string {
   if (results.length === 0) return "No matching memories.";
 
-  return results
+  const body = results
     .map(
       (result, index) =>
         `${index + 1}. [${result.scope}] ${result.heading}\n` +
@@ -74,6 +91,13 @@ export function formatSearchResultsText(results: MemorySearchResult[]): string {
         `Excerpt: ${result.excerpt || "(empty)"}`,
     )
     .join("\n\n");
+
+  if (!options.partial) return body;
+
+  return (
+    "No entry matched every query word. Showing partial matches, strongest first; " +
+    `confirm relevance before relying on them.\n\n${body}`
+  );
 }
 
 export function formatRelativeAge(updatedAt: number, now = new Date()): string {
@@ -179,7 +203,12 @@ function matchesWord(text: string, word: string): boolean {
 }
 
 function buildWordRegex(word: string): RegExp {
-  return new RegExp(`(?<!${WORD_CHAR_CLASS})${escapeRegExp(word)}(?!${WORD_CHAR_CLASS})`, "iu");
+  if (CJK_CHAR_RE.test(word)) {
+    // CJK runs have no delimiters, so substring containment is the closest match
+    // to how the same term gets found by hand (rg 集成测试).
+    return new RegExp(escapeRegExp(word), "iu");
+  }
+  return new RegExp(`(?<!${WORD_CHAR_CLASS})${escapeRegExp(word)}(?!${WORD_CHAR_CLASS})`, "iv");
 }
 
 function escapeRegExp(value: string): string {
