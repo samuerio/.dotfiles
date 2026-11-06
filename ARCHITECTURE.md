@@ -23,7 +23,14 @@ fresh git worktree（branch = alias）+ tmux 子会话 + `.pi/worktree-tasks/tas
 `loop`（定时任务：`/loop [interval] <prompt>` 命令 + loop_create/loop_list/loop_delete 模型工具，
 任务存 `.pi/loop-tasks.json`，1s 自调度 tick 链按 cron 的下次触发时间到点后
 通过 sendMessage 注入当前会话；`.pi/loop-tasks.lock` 文件锁 +
-mtime 陈旧判定做多会话调度权互斥，claim-then-dispatch 毫秒级关键区））、
+mtime 陈旧判定做多会话调度权互斥，claim-then-dispatch 毫秒级关键区）、
+`schedule`（cron 调度 + headless 执行：任务定义存 `pi/agent/schedule/tasks/*.json`，OS crontab 每分钟跑
+`schedule tick`，到期任务以非递归 `mkdir` 原子 claim 后派生 detached helper，由它启动
+`pi -p --approve --provider … --model … --thinking … --session <runDir>/session.jsonl -- @<runDir>/prompt.md`
+（模型 pin 在派发时从 `modes[currentMode].roles.subagents` 解析，任务本身不存模型）并负责 30 分钟墙钟超时
+（SIGTERM → 10s → SIGKILL 进程组）与两段式 metadata 状态机；调度锚点是 tick 独占的
+`runs/<id>/state.json` watermark（dispatched 与 missed 都消耗 slot），占用判定走 effectiveState
+派生而非 pid 注册表；管理面为独立 CLI `bin/schedule` → `extensions/schedule/cli.ts`，不注册模型工具））、
 TUI 工具与编辑（`preview`、`view-image`、`files`、
 `context`、`unified-edit`、`review`、`security-review`（安全审查：高置信漏洞识别 +
 并行子代理误报过滤，rubric 改编自 Claude Code 的 security-review）、`answer`、`btw`（在主会话旁开启独立旁路线程））、
@@ -49,9 +56,14 @@ ctrl+o 预览子类封装（pickSession），供 `worktree-task` 挑选会话；
 （merge base、分支/提交列表、PR checkout）+ preset 选择器（可选附加项）+ 直参解析，
 供 `review` 与 `security-review` 共用，两命令各自持有 rubric 与会话机制）。
 pi 只把 `extensions/*.ts` 顶层文件与含 `index.ts` 的子目录
-识别为扩展，`lib/` 子目录不会被自动加载。
+识别为扩展，`lib/` 子目录不会被自动加载；`extensions/schedule/` 是当前唯一「含 `index.ts` 而被自动加载」
+的子目录，同目录下的 `cron.ts`/`store.ts`/`run.ts`/`routing.ts`/`runs-view.ts`/`cli.ts`/`tick.ts` 不是扩展。
 
 **Architecture Invariant:** 扩展只能调用 pi 公开的 ExtensionAPI 与事件钩子，禁止直接操作 pi 内部状态。
+
+**Architecture Invariant:** `extensions/schedule/` 下的 `cron.ts`/`store.ts`/`run.ts`/`routing.ts`/`runs-view.ts`/`cli.ts`/`tick.ts` 只能 import
+node 标准库，禁止 import `@earendil-works/*` 或其它扩展：这些文件由 crontab 里的 `node` 直接执行，
+pi 的扩展加载器不在场，裸包名解析不到。该目录只有 `index.ts`（自动加载入口）允许 import pi 包。
 
 ### `pi/agent/`
 
@@ -63,7 +75,11 @@ agent 全局设置（不再使用 `packages` 声明第三方扩展包）；子�
 远程交互通道；`auth.json` 管理 API 密钥；`trust.json` 记录项目信任状态；`prompts/` 存放可复用
 提示词模板（`prototype.md`、`simplify.md`、`clarify.md`、`summary.md`、`translate-paragraph.md`）。
 `AGENTS.md` 定义 agent 行为规范。
-`sessions/`、`tmux-subagents/` 与 `bin/`（内置 `fd` 二进制）为运行时与工具产物，随使用生成。
+`sessions/`、`tmux-subagents/` 与 `bin/`（内置 `fd` 二进制、`schedule` 软链指向
+`extensions/schedule/cli.ts`）为运行时与工具产物，随使用生成（`bin/` 被 `pi/.gitignore` 忽略，该软链由
+`install.sh` 重建而非随仓库分发）。`schedule/tasks/*.json` 是 git 跟踪的任务定义
+（随仓库跨机同步，但 `cwd` 是绝对路径、跨机失效）；`schedule/runs/`（含 watermark `state.json`）、
+`schedule/tick.log`、`schedule/crontab.bak` 为运行产物，已 gitignore。
 
 **API Boundary:** `models.json` 是 provider/模型清单的唯一来源，扩展不直接读取；`modes.json` 由 `prompt-editor` 扩展
 提供 TUI 编辑入口，运行时与扩展共享读写。子代理运行时与 session 查看工具均为本地 `extensions/`
@@ -74,7 +90,7 @@ agent 全局设置（不再使用 `packages` 声明第三方扩展包）；子�
 
 可复用 AI agent 技能库。每个 skill 是自包含目录，包含 `SKILL.md` 说明文档与可选的辅助脚本（Shell/JS/Python）。
 被 agent 框架按需加载，提供 tmux 控制、浏览器自动化、K 线图表生成、提交工作流、架构文档生成、
-Obsidian 笔记管理、数据库查询等垂直能力。skill 之间通过 `skill()` 调用显式声明依赖。
+Obsidian 笔记管理、数据库查询、定时任务管理等垂直能力。skill 之间通过 `skill()` 调用显式声明依赖。
 
 **API Boundary:** SKILL.md 是技能的唯一公开接口；脚本实现细节对调用方不可见。
 

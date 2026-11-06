@@ -1,0 +1,485 @@
+/**
+ * schedule/tick.ts — the scheduler tick and crontab installation.
+ *
+ * `tick` is the only thing crontab runs (once a minute). It never waits for a
+ * run: it decides what is due, claims the slot, and derives a detached helper
+ * (`schedule __exec <id> <stamp>`) that owns the run's lifetime.
+ *
+ * Scheduling invariant (the bug this design exists to avoid): the anchor for
+ * "when do I fire next" is the tick-owned watermark in
+ * `runs/<id>/state.json`, never the run history. A missed slot advances the
+ * watermark, so a machine that was off for four hours does not re-fire an
+ * every-five-minutes task forever, and GC pressure cannot shift the schedule.
+ *
+ * pi-free on purpose (node built-ins + ./cron.ts ./store.ts ./run.ts only).
+ */
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { nextCron } from "./cron.ts";
+import { activeRun, claimRun } from "./run.ts";
+import {
+    atomicWriteJson,
+    ensureDir,
+    gcRuns,
+    getAgentDir,
+    getScheduleDir,
+    listTasks,
+    readWatermark,
+    taskRunsDir,
+    writeWatermark,
+} from "./store.ts";
+import type { Task } from "./store.ts";
+
+/** A slot older than this is recorded as missed instead of being dispatched. */
+export const CATCHUP_MS = 10 * 60 * 1000;
+
+/** tick.log is rotated to tick.log.1 past this size. */
+const TICK_LOG_MAX_BYTES = 1024 * 1024;
+
+/** Hard stop for the fast-forward loop (a year of minutes, plus slack). */
+const MAX_FAST_FORWARD_STEPS = 600_000;
+
+export const CRON_BLOCK_BEGIN = "# >>> pi-schedule >>>";
+export const CRON_BLOCK_END = "# <<< pi-schedule <<<";
+
+export interface TickResult {
+    dispatched: string[];
+    skipped: string[];
+    missed: number;
+}
+
+export interface TickOptions {
+    now?: Date;
+    /**
+     * Replacement for the detached helper spawn. Tests capture dispatches
+     * instead of starting real `pi` processes.
+     */
+    dispatch?: (taskId: string, stamp: string) => void;
+    /** Replacement for the append-only tick log. */
+    log?: (line: string) => void;
+}
+
+/** `YYYYMMDD-HHmmss`, local time — matches `claimRun`'s stamp pattern. */
+export function stampOf(date: Date): string {
+    const pad = (value: number, width = 2): string => String(value).padStart(width, "0");
+    return (
+        `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}` +
+        `-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
+    );
+}
+
+export function tickLogPath(): string {
+    return join(getScheduleDir(), "tick.log");
+}
+
+function rotateTickLogIfNeeded(): void {
+    const path = tickLogPath();
+    try {
+        if (statSync(path).size < TICK_LOG_MAX_BYTES) return;
+        renameSync(path, `${path}.1`);
+    } catch {
+        // no log yet, or rename failed: not worth failing a tick over
+    }
+}
+
+export function appendTickLog(line: string): void {
+    rotateTickLogIfNeeded();
+    ensureDir(getScheduleDir());
+    writeFileSync(tickLogPath(), `${new Date().toISOString()} ${line}\n`, { encoding: "utf8" });
+}
+
+/**
+ * Log a line only when `key` differs from the one logged last time.
+ *
+ * tick.log records *transitions*, not one line per task per minute. The key is
+ * kept in `runs/<id>/notice.json` — a sibling of the watermark, so GC (which
+ * only removes `<ts>` dirs) never touches it.
+ */
+function noticeOnce(taskId: string, key: string, line: string, log: (line: string) => void): void {
+    const path = join(taskRunsDir(taskId), "notice.json");
+    let previous: string | undefined;
+    try {
+        const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+        if (typeof parsed === "object" && parsed !== null) {
+            const value = (parsed as { key?: unknown }).key;
+            if (typeof value === "string") previous = value;
+        }
+    } catch {
+        previous = undefined;
+    }
+    if (previous === key) return;
+    atomicWriteJson(path, { version: 1, taskId, key, updatedAt: new Date().toISOString() });
+    log(line);
+}
+
+function defaultDispatch(taskId: string, stamp: string): void {
+    const cliPath = fileURLToPath(new URL("./cli.ts", import.meta.url));
+    const child = spawn(process.execPath, [cliPath, "__exec", taskId, stamp], {
+        detached: true,
+        stdio: "ignore",
+    });
+    child.on("error", (error: Error) => {
+        appendTickLog(`[${taskId}] dispatch failed: ${error.message}`);
+    });
+    child.unref();
+}
+
+function taskTimestamp(task: Task): number {
+    const createdAt = Date.parse(task.createdAt);
+    return Number.isFinite(createdAt) ? createdAt : Date.now();
+}
+
+/**
+ * One scheduler pass.
+ *
+ * For every enabled task:
+ *   active run (any trigger)         → skipped (change-logged only)
+ *   slots older than CATCHUP_MS      → missed, watermark advanced
+ *   slot due now                     → claim → watermark → dispatch
+ *   `once` with a watermark          → skipped
+ */
+export function runTick(options: TickOptions = {}): TickResult {
+    const now = options.now ?? new Date();
+    const log = options.log ?? appendTickLog;
+    const dispatch = options.dispatch ?? defaultDispatch;
+    const result: TickResult = { dispatched: [], skipped: [], missed: 0 };
+
+    gcRuns(now);
+
+    for (const entry of listTasks()) {
+        const { id } = entry;
+        const task = entry.task;
+        if (!task) {
+            noticeOnce(id, `corrupt:${entry.error ?? "unknown"}`, `[${id}] corrupt task file: ${entry.error ?? "unknown"}`, log);
+            continue;
+        }
+        if (!task.enabled) continue;
+
+        const active = activeRun(id);
+        if (active) {
+            const key = `active:${active.ts}:${active.effective}`;
+            const detail =
+                active.effective === "orphan"
+                    ? `orphan (pgid ${active.metadata.pgid ?? "?"})`
+                    : active.effective;
+            noticeOnce(id, key, `[${id}] ${detail} run ${active.ts}: scheduling skipped`, log);
+            result.skipped.push(id);
+            continue;
+        }
+        const watermark = readWatermark(id);
+        const anchor = watermark.lastSlotConsumed === null
+            ? new Date(taskTimestamp(task))
+            : new Date(watermark.lastSlotConsumed);
+        if (Number.isNaN(anchor.getTime())) {
+            noticeOnce(id, "bad-anchor", `[${id}] unusable scheduling anchor; skipping`, log);
+            continue;
+        }
+
+        let candidate: Date;
+        try {
+            candidate = nextCron(task.cron, anchor);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            noticeOnce(id, `cron:${message}`, `[${id}] cron '${task.cron}' is not schedulable: ${message}`, log);
+            continue;
+        }
+
+        // Walk every slot up to `now`:
+        //   * older than CATCHUP_MS → reported once as missed, watermark advances
+        //   * inside the catch-up window → remembered, but **coalesced** into a
+        //     single dispatch (a `* * * * *` task after 9 minutes of downtime
+        //     must run once, not nine times a second apart)
+        const cutoff = now.getTime() - CATCHUP_MS;
+        let lastMissed: Date | undefined;
+        let due: Date | undefined;
+        let steps = 0;
+        while (candidate.getTime() <= now.getTime()) {
+            if (candidate.getTime() <= cutoff) {
+                log(`[${id}] missed slot ${candidate.toISOString()} (cron '${task.cron}')`);
+                result.missed += 1;
+                lastMissed = candidate;
+            } else {
+                due = candidate;
+            }
+            steps += 1;
+            if (steps > MAX_FAST_FORWARD_STEPS) {
+                log(`[${id}] fast-forward aborted after ${steps} slots`);
+                break;
+            }
+            try {
+                candidate = nextCron(task.cron, candidate);
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                log(`[${id}] no further slot: ${message}`);
+                break;
+            }
+        }
+
+        const alreadyConsumed = watermark.lastSlotConsumed !== null;
+
+        // `once` is derived, not stored in the definition: it fires only while
+        // the watermark is still empty. A slot that was fast-forwarded as
+        // missed also counts as consumed, which `list` surfaces.
+        if (task.once && alreadyConsumed) {
+            noticeOnce(id, "once-consumed", `[${id}] once task already consumed; not firing again`, log);
+            continue;
+        }
+
+        const consumed = due ?? lastMissed;
+        if (consumed) writeWatermark(id, consumed.toISOString());
+
+        if (task.once && !due) {
+            noticeOnce(id, "once-missed", `[${id}] once task consumed by a missed slot; not firing`, log);
+            continue;
+        }
+
+        if (!due) continue;
+
+        const stamp = stampOf(now);
+        try {
+            claimRun(id, stamp);
+        } catch {
+            // EEXIST: another tick in the same second already took this slot.
+            continue;
+        }
+        try {
+            dispatch(id, stamp);
+            log(`[${id}] dispatched run ${stamp} (slot ${due.toISOString()})`);
+            result.dispatched.push(id);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            log(`[${id}] dispatch failed for run ${stamp}: ${message}`);
+        }
+    }
+
+    return result;
+}
+
+export function formatTickResult(result: TickResult): string {
+    return `dispatched ${result.dispatched.length} / skipped ${result.skipped.length} / missed ${result.missed}`;
+}
+
+// ---------------------------------------------------------------------------
+// install-cron
+// ---------------------------------------------------------------------------
+
+export interface CommandResult {
+    status: number | null;
+    stdout: string;
+    stderr: string;
+}
+
+export type CommandRunner = (
+    command: string,
+    args: string[],
+    options?: { input?: string },
+) => CommandResult;
+
+export function defaultRunner(
+    command: string,
+    args: string[],
+    options?: { input?: string },
+): CommandResult {
+    const result = spawnSync(command, args, { input: options?.input, encoding: "utf8" });
+    return {
+        status: result.status,
+        stdout: result.stdout ?? "",
+        stderr: result.stderr ?? "",
+    };
+}
+
+export interface InstallCronOptions {
+    runner?: CommandRunner;
+    /** Defaults to `<agentDir>/bin/schedule`. */
+    scheduleBin?: string;
+    /** Defaults to `process.execPath`. */
+    nodeBin?: string;
+    logPath?: string;
+    /** Defaults to a `which pi` probe. */
+    piDir?: string;
+}
+
+export interface InstallCronResult {
+    crontab: string;
+    warnings: string[];
+    smoke: { status: number | null; output: string };
+    scheduleBin: string;
+}
+
+/** The managed block, markers included, or undefined when there is none. */
+export function extractCronBlock(crontab: string): string | undefined {
+    const lines = crontab.split("\n");
+    const start = lines.findIndex((line) => line.trim() === CRON_BLOCK_BEGIN);
+    if (start < 0) return undefined;
+    const end = lines.findIndex(
+        (line, index) => index > start && line.trim() === CRON_BLOCK_END,
+    );
+    // An unterminated block still belongs to us: stripCronBlock removes the
+    // remainder too, so report the same span here.
+    return (end < 0 ? lines.slice(start) : lines.slice(start, end + 1)).join("\n");
+}
+
+/** Strip our managed block (markers included) from a crontab body. */
+export function stripCronBlock(crontab: string): string {
+    const lines = crontab.split("\n");
+    const kept: string[] = [];
+    let inBlock = false;
+    for (const line of lines) {
+        if (line.trim() === CRON_BLOCK_BEGIN) {
+            inBlock = true;
+            continue;
+        }
+        if (line.trim() === CRON_BLOCK_END) {
+            inBlock = false;
+            continue;
+        }
+        if (inBlock) continue;
+        kept.push(line);
+    }
+    while (kept.length > 0 && kept[kept.length - 1].trim() === "") kept.pop();
+    return kept.join("\n");
+}
+
+export function renderCronBlock(options: {
+    piDir: string;
+    nodeBin: string;
+    scheduleBin: string;
+    logPath: string;
+}): string {
+    const path = `${options.piDir}:/usr/local/bin:/usr/bin:/bin`;
+    return [
+        CRON_BLOCK_BEGIN,
+        `PATH=${path}`,
+        `* * * * * ${options.nodeBin} ${options.scheduleBin} tick >> ${options.logPath} 2>&1`,
+        CRON_BLOCK_END,
+    ].join("\n");
+}
+
+function resolvePiDir(runner: CommandRunner, warnings: string[]): string {
+    const which = runner("which", ["pi"]);
+    const found = which.stdout.split("\n")[0]?.trim();
+    if (which.status === 0 && found) return dirname(found);
+    warnings.push("could not resolve `pi` on PATH; assuming ~/.npm-global/bin in the crontab PATH");
+    return join(homedir(), ".npm-global", "bin");
+}
+
+function cronDaemonWarning(runner: CommandRunner, warnings: string[]): void {
+    for (const name of ["cron", "crond"]) {
+        const probe = runner("pgrep", ["-x", name]);
+        if (probe.status === 0 && probe.stdout.trim().length > 0) return;
+    }
+    warnings.push(
+        "no cron daemon running (pgrep -x cron / crond found nothing): ticks will never fire" +
+            " — enable one first (Arch: `sudo systemctl enable --now cronie`," +
+            " Debian/Ubuntu: `sudo systemctl enable --now cron`)",
+    );
+}
+
+/**
+ * Install (or refresh) the tick entry in the user's crontab.
+ *
+ * Idempotent and block-scoped: the user's own entries are preserved verbatim,
+ * only the marked block is replaced. The previous crontab is backed up first.
+ */
+export function installCron(options: InstallCronOptions = {}): InstallCronResult {
+    const runner = options.runner ?? defaultRunner;
+    const warnings: string[] = [];
+    const scheduleBin = options.scheduleBin ?? join(getAgentDir(), "bin", "schedule");
+    const nodeBin = options.nodeBin ?? process.execPath;
+    const logPath = options.logPath ?? tickLogPath();
+    const piDir = options.piDir ?? resolvePiDir(runner, warnings);
+
+    if (!existsSync(scheduleBin)) {
+        warnings.push(`schedule entry point not found at ${scheduleBin} (is the bin symlink installed?)`);
+    }
+    cronDaemonWarning(runner, warnings);
+
+    const listing = runner("crontab", ["-l"]);
+    const previous = listing.status === 0 ? listing.stdout : "";
+    if (previous.trim().length > 0) {
+        ensureDir(getScheduleDir());
+        writeFileSync(join(getScheduleDir(), "crontab.bak"), previous, { encoding: "utf8", mode: 0o600 });
+    }
+
+    const block = renderCronBlock({ piDir, nodeBin, scheduleBin, logPath });
+    const kept = stripCronBlock(previous);
+    const next = kept.length > 0 ? `${kept}\n${block}\n` : `${block}\n`;
+
+    const write = runner("crontab", ["-"], { input: next });
+    if (write.status !== 0) {
+        throw new Error(`install-cron: crontab write failed: ${write.stderr.trim() || `exit ${write.status}`}`);
+    }
+
+    // Smoke-test the crontab environment: a bare `env -i` has no HOME, no PATH
+    // beyond what we hand it, and that is precisely what breaks cron jobs.
+    const smoke = runner("env", [
+        "-i",
+        `PATH=${piDir}:/usr/local/bin:/usr/bin:/bin`,
+        `HOME=${homedir()}`,
+        nodeBin,
+        scheduleBin,
+        "list",
+    ]);
+    if (smoke.status !== 0) {
+        warnings.push(`smoke test under cron-like env failed (exit ${smoke.status}): ${(smoke.stderr || smoke.stdout).trim().slice(0, 400)}`);
+    }
+
+    warnings.push("your shell needs ~/.pi/agent/bin on PATH to run `schedule` directly (pi's bash tool already has it)");
+
+    return { crontab: next, warnings, smoke: { status: smoke.status, output: smoke.stdout.trim() }, scheduleBin };
+}
+
+export interface UninstallCronOptions {
+    runner?: CommandRunner;
+}
+
+export interface UninstallCronResult {
+    /** The crontab body that was written back. */
+    crontab: string;
+    /** False when there was no managed block to remove (idempotent no-op). */
+    removed: boolean;
+    /** The block that was removed, markers included, for the user to eyeball. */
+    removedBlock: string;
+    warnings: string[];
+}
+
+/**
+ * Remove the tick entry from the user's crontab.
+ *
+ * Idempotent and block-scoped, mirroring installCron: only the marked block is
+ * removed, the user's own entries stay verbatim, and the previous crontab is
+ * backed up first. Task definitions and run history are untouched — re-running
+ * `schedule install-cron` restores the schedule, not the state.
+ */
+export function uninstallCron(options: UninstallCronOptions = {}): UninstallCronResult {
+    const runner = options.runner ?? defaultRunner;
+    const warnings: string[] = [];
+
+    const listing = runner("crontab", ["-l"]);
+    const previous = listing.status === 0 ? listing.stdout : "";
+    const removedBlock = extractCronBlock(previous);
+    if (removedBlock === undefined) {
+        return { crontab: previous, removed: false, removedBlock: "", warnings };
+    }
+
+    ensureDir(getScheduleDir());
+    writeFileSync(join(getScheduleDir(), "crontab.bak"), previous, {
+        encoding: "utf8",
+        mode: 0o600,
+    });
+
+    const kept = stripCronBlock(previous);
+    const next = kept.length > 0 ? `${kept}\n` : "";
+    const write = runner("crontab", ["-"], { input: next });
+    if (write.status !== 0) {
+        throw new Error(
+            `uninstall-cron: crontab write failed: ${write.stderr.trim() || `exit ${write.status}`}`,
+        );
+    }
+
+    return { crontab: next, removed: true, removedBlock, warnings };
+}
