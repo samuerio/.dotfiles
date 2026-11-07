@@ -11,7 +11,7 @@ import { isActive, type ActiveRun } from "./run.ts";
 /** How much of a run's `error` string survives in a one-line label. */
 const ERROR_LABEL_WIDTH = 48;
 
-export function formatDuration(ms: number): string {
+function formatDuration(ms: number): string {
     if (!Number.isFinite(ms) || ms < 1_000) return "0s";
     const seconds = Math.round(ms / 1_000);
     if (seconds < 60) return `${seconds}s`;
@@ -36,7 +36,7 @@ export function elapsedSince(iso: string | undefined): string {
     return formatDuration(Date.now() - startedAt);
 }
 
-export function relativeTime(iso: string | undefined): string {
+function relativeTime(iso: string | undefined): string {
     if (!iso) return "never";
     const timestamp = Date.parse(iso);
     if (!Number.isFinite(timestamp)) return "unknown";

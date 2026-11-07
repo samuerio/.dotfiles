@@ -14,6 +14,7 @@
  */
 import { randomBytes } from "node:crypto";
 import {
+    type Dirent,
     chmodSync,
     existsSync,
     mkdirSync,
@@ -141,8 +142,27 @@ export function atomicWriteJson(path: string, value: unknown): void {
     }
 }
 
+/** Read + parse one JSON document; a missing or corrupt file yields undefined. */
+export function readJsonFile(path: string): unknown | undefined {
+    let raw: string;
+    try {
+        raw = readFileSync(path, "utf8");
+    } catch {
+        return undefined;
+    }
+    try {
+        return JSON.parse(raw) as unknown;
+    } catch {
+        return undefined;
+    }
+}
+
 export function validateTaskId(id: string): boolean {
     return typeof id === "string" && TASK_ID_PATTERN.test(id);
+}
+
+export function validateRunStamp(stamp: string): boolean {
+    return typeof stamp === "string" && RUN_STAMP_PATTERN.test(stamp);
 }
 
 function isString(value: unknown): value is string {
@@ -235,7 +255,7 @@ export function listTasks(): TaskListEntry[] {
     return out;
 }
 
-function errorMessage(error: unknown): string {
+export function errorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
 }
 
@@ -344,21 +364,10 @@ export function readWatermark(taskId: string): Watermark {
         updatedAt: "",
     };
     if (!validateTaskId(taskId)) return synthetic;
-    let raw: string;
-    try {
-        raw = readFileSync(watermarkPath(taskId), "utf8");
-    } catch {
-        return synthetic;
-    }
-    let value: unknown;
-    try {
-        value = JSON.parse(raw);
-    } catch {
-        // A torn/corrupt watermark must never wedge scheduling: treat it as
-        // "never consumed" and let the next tick rewrite it.
-        return synthetic;
-    }
-    if (typeof value !== "object" || value === null) return synthetic;
+    // A torn/corrupt watermark must never wedge scheduling: treat it as
+    // "never consumed" and let the next tick rewrite it.
+    const value = readJsonFile(watermarkPath(taskId));
+    if (!value || typeof value !== "object") return synthetic;
     const parsed = value as Partial<Watermark>;
     const slot = parsed.lastSlotConsumed;
     if (parsed.version !== 1) return synthetic;
@@ -385,22 +394,15 @@ export function writeWatermark(taskId: string, lastSlotConsumed: string | null):
 /** Run stamps (`YYYYMMDD-HHmmss`) of one task, newest first. */
 export function listRunStamps(taskId: string): string[] {
     if (!validateTaskId(taskId)) return [];
-    const dir = taskRunsDir(taskId);
-    let entries: string[];
+    let entries: Dirent[];
     try {
-        entries = readdirSync(dir);
+        entries = readdirSync(taskRunsDir(taskId), { withFileTypes: true });
     } catch {
         return [];
     }
     const stamps: string[] = [];
     for (const entry of entries) {
-        if (!RUN_STAMP_PATTERN.test(entry)) continue;
-        try {
-            if (!statSync(join(dir, entry)).isDirectory()) continue;
-        } catch {
-            continue;
-        }
-        stamps.push(entry);
+        if (validateRunStamp(entry.name) && entry.isDirectory()) stamps.push(entry.name);
     }
     stamps.sort((left, right) => (left < right ? 1 : left > right ? -1 : 0));
     return stamps;
@@ -417,20 +419,17 @@ export function listRunStamps(taskId: string): string[] {
 export function gcRuns(now: Date = new Date()): { removed: string[] } {
     const removed: string[] = [];
     const root = runsRoot();
-    let taskDirs: string[];
+    let taskDirs: Dirent[];
     try {
-        taskDirs = readdirSync(root);
+        taskDirs = readdirSync(root, { withFileTypes: true });
     } catch {
         return { removed };
     }
     const nowMs = now.getTime();
-    for (const taskId of taskDirs) {
+    for (const entry of taskDirs) {
+        if (!entry.isDirectory()) continue;
+        const taskId = entry.name;
         const taskDir = join(root, taskId);
-        try {
-            if (!statSync(taskDir).isDirectory()) continue;
-        } catch {
-            continue;
-        }
         const stamps = listRunStamps(taskId);
         stamps.forEach((stamp, index) => {
             if (index === 0) return; // newest run always survives

@@ -12,10 +12,9 @@
  * `settings.json` defaults (the pre-routing behaviour).
  */
 
-import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { getAgentDir } from "./store.ts";
+import { getAgentDir, readJsonFile } from "./store.ts";
 
 export type ThinkingLevel = "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
@@ -52,13 +51,7 @@ function pinToRoute(pin: unknown, source: string): ModelRoute | undefined {
 }
 
 function routeFromModesFile(path: string): ModelRoute | undefined {
-    if (!existsSync(path)) return undefined;
-    let parsed: unknown;
-    try {
-        parsed = JSON.parse(readFileSync(path, "utf8"));
-    } catch {
-        return undefined;
-    }
+    const parsed = readJsonFile(path);
     if (!parsed || typeof parsed !== "object") return undefined;
     const root = parsed as Record<string, unknown>;
     const currentMode = typeof root.currentMode === "string" ? root.currentMode : undefined;

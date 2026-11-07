@@ -27,7 +27,7 @@ import { previewSessionFile } from "../lib/session-preview.ts";
 import { cronToHuman, nextCron } from "./cron.ts";
 import { effectiveState, isActive, latestRun, listRuns, type ActiveRun } from "./run.ts";
 import { describeRunState, elapsedSince, runOptions } from "./runs-view.ts";
-import { listTasks, readWatermark, type Task } from "./store.ts";
+import { errorMessage, listTasks, readWatermark, type Task } from "./store.ts";
 
 const COMMAND_NAME = "schedule";
 const WIDGET_KEY = "schedule-running";
@@ -53,7 +53,7 @@ function nextFireText(task: Task): string {
     try {
         return nextCron(task.cron, base).toLocaleString();
     } catch (error) {
-        return `unavailable (${error instanceof Error ? error.message : String(error)})`;
+        return `unavailable (${errorMessage(error)})`;
     }
 }
 

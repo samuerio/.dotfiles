@@ -14,6 +14,9 @@
 import { spawn } from "node:child_process";
 import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+// Kept ref'd on purpose: an unref'd timer lets node exit before a pending
+// verb has finished writing (which silently swallowed `run`'s output).
+import { setTimeout as delay } from "node:timers/promises";
 
 import { CronParseError, cronToHuman, isValidCron, nextCron } from "./cron.ts";
 import {
@@ -32,6 +35,7 @@ import type { EffectiveState, RunMetadata } from "./run.ts";
 import {
     KEEP_MS,
     addTask,
+    errorMessage,
     getScheduleDir,
     listTasks,
     promptTextOf,
@@ -97,8 +101,6 @@ const BOOLEAN_FLAGS = new Set([
 interface ParsedArgs {
     positionals: string[];
     flags: Map<string, string | true>;
-    /** Everything after a `--` terminator. */
-    rest: string[];
 }
 
 /**
@@ -110,9 +112,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     const flags = new Map<string, string | true>();
     for (let i = 0; i < argv.length; i += 1) {
         const arg = argv[i];
-        if (arg === "--") {
-            return { positionals, flags, rest: argv.slice(i + 1) };
-        }
+        if (arg === "--") break;
         if (arg.startsWith("--") && arg.includes("=")) {
             const at = arg.indexOf("=");
             flags.set(arg.slice(0, at), arg.slice(at + 1));
@@ -134,7 +134,7 @@ function parseArgs(argv: string[]): ParsedArgs {
         }
         positionals.push(arg);
     }
-    return { positionals, flags, rest: [] };
+    return { positionals, flags };
 }
 
 function flag(args: ParsedArgs, name: string): string | undefined {
@@ -341,16 +341,15 @@ function cmdList(args: ParsedArgs): number {
 // ---------------------------------------------------------------------------
 
 function cmdAdd(args: ParsedArgs): number {
-    const name = flag(args, "--name");
-    const cron = flag(args, "--cron");
-    const cwd = flag(args, "--cwd");
+    // addTask owns the required-field checks; the catch below surfaces its
+    // messages, so they must not be duplicated here.
+    const name = flag(args, "--name") ?? "";
+    const cron = flag(args, "--cron") ?? "";
+    const cwd = flag(args, "--cwd") ?? "";
     const prompt = flag(args, "--prompt");
     const promptFile = flag(args, "--prompt-file");
 
-    if (!name) fail("add: --name is required");
-    if (!cron) fail("add: --cron is required");
-    if (!cwd) fail("add: --cwd is required");
-    if (!isValidCron(cron)) {
+    if (cron && !isValidCron(cron)) {
         let detail = "invalid expression";
         try {
             nextCron(cron, new Date());
@@ -371,7 +370,7 @@ function cmdAdd(args: ParsedArgs): number {
             once: has(args, "--once"),
         });
     } catch (error) {
-        fail(error instanceof Error ? error.message : String(error));
+        fail(errorMessage(error));
     }
 
     const next = nextFireOf(task);
@@ -412,22 +411,30 @@ function cliPath(): string {
     return fileURLToPath(import.meta.url);
 }
 
-function sleep(ms: number): Promise<void> {
-    // Not unref'd: an unref'd timer lets node exit before a pending verb has
-    // finished writing (which silently swallowed `run`'s output).
-    return new Promise((resolve) => {
-        setTimeout(resolve, ms);
-    });
-}
-
 async function waitForMetadata(dir: string, timeoutMs = 1000): Promise<RunMetadata | undefined> {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
         const metadata = readMetadata(dir);
         if (metadata) return metadata;
         if (Date.now() > deadline) return undefined;
-        await sleep(25);
+        await delay(25);
     }
+}
+
+/** Inputs every real run needs; both `run` and `__exec` go through here. */
+function runInputs(task: Task): {
+    promptText: string;
+    route: ReturnType<typeof resolveSubagentRoute>;
+} {
+    let promptText: string;
+    try {
+        promptText = promptTextOf(task);
+    } catch (error) {
+        fail(errorMessage(error));
+    }
+    // Runs are one-shot worker calls: follow the active mode's
+    // roles.subagents pin instead of whichever provider pi falls back to.
+    return { promptText, route: resolveSubagentRoute(task.cwd) };
 }
 
 async function cmdRun(args: ParsedArgs): Promise<number> {
@@ -442,17 +449,7 @@ async function cmdRun(args: ParsedArgs): Promise<number> {
         );
     }
 
-    let promptText: string;
-    try {
-        promptText = promptTextOf(task);
-    } catch (error) {
-        fail(error instanceof Error ? error.message : String(error));
-    }
-
-    // Scheduled runs are one-shot worker calls: route them through the active
-    // mode's roles.subagents pin so the model is deterministic and does not
-    // depend on whichever provider a bare `pi -p` would fall back to.
-    const route = resolveSubagentRoute(task.cwd);
+    const { promptText, route } = runInputs(task);
     const stamp = stampOf(new Date());
     let dir: string;
     try {
@@ -534,7 +531,7 @@ async function followRaw(path: string, done: () => boolean): Promise<number> {
             continue;
         }
         if (done()) return 0;
-        await sleep(250);
+        await delay(250);
     }
 }
 
@@ -612,7 +609,6 @@ function cmdUninstallCron(): number {
     }
     process.stdout.write("removed crontab block:\n");
     process.stdout.write(`${result.removedBlock}\n`);
-    for (const warning of result.warnings) process.stdout.write(`⚠ ${warning}\n`);
     process.stdout.write("tasks and run history are untouched\n");
     return 0;
 }
@@ -623,12 +619,7 @@ async function cmdExec(args: ParsedArgs): Promise<number> {
     if (!id || !stamp) fail("__exec: usage: schedule __exec <id> <stamp> [--fg] [--manual]");
     const task = readTask(id);
     if (!task) fail(`__exec: no such task: ${id}`);
-    let promptText: string;
-    try {
-        promptText = promptTextOf(task);
-    } catch (error) {
-        fail(error instanceof Error ? error.message : String(error));
-    }
+    const { promptText, route } = runInputs(task);
     return executeRun({
         taskId: task.id,
         stamp,
@@ -636,7 +627,7 @@ async function cmdExec(args: ParsedArgs): Promise<number> {
         foreground: has(args, "--fg"),
         cwd: task.cwd,
         promptText,
-        route: resolveSubagentRoute(task.cwd),
+        route,
     });
 }
 
@@ -698,6 +689,6 @@ main()
         process.exitCode = code;
     })
     .catch((error: unknown) => {
-        process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+        process.stderr.write(`${errorMessage(error)}\n`);
         process.exitCode = 1;
     });

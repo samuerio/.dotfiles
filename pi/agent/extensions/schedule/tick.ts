@@ -14,20 +14,22 @@
  * pi-free on purpose (node built-ins + ./cron.ts ./store.ts ./run.ts only).
  */
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { nextCron } from "./cron.ts";
+import { nextCron, parseCron, type CronFields } from "./cron.ts";
 import { activeRun, claimRun } from "./run.ts";
 import {
     atomicWriteJson,
     ensureDir,
+    errorMessage,
     gcRuns,
     getAgentDir,
     getScheduleDir,
     listTasks,
+    readJsonFile,
     readWatermark,
     taskRunsDir,
     writeWatermark,
@@ -114,18 +116,10 @@ export function appendTickLog(line: string): void {
  */
 function noticeOnce(taskId: string, key: string, line: string, log: (line: string) => void): void {
     const path = join(taskRunsDir(taskId), "notice.json");
-    let previous: string | undefined;
-    try {
-        const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
-        if (typeof parsed === "object" && parsed !== null) {
-            const value = (parsed as { key?: unknown }).key;
-            if (typeof value === "string") previous = value;
-        }
-    } catch {
-        previous = undefined;
-    }
-    if (previous === key) return;
-    atomicWriteJson(path, { version: 1, taskId, key, updatedAt: new Date().toISOString() });
+    const parsed = readJsonFile(path);
+    const previous = (parsed as { key?: unknown } | undefined)?.key;
+    if (typeof previous === "string" && previous === key) return;
+    atomicWriteJson(path, { key });
     log(line);
 }
 
@@ -192,11 +186,14 @@ export function runTick(options: TickOptions = {}): TickResult {
             continue;
         }
 
+        // Parse once: the fast-forward loop reuses the fields for every slot.
+        let fields: CronFields;
         let candidate: Date;
         try {
-            candidate = nextCron(task.cron, anchor);
+            fields = parseCron(task.cron);
+            candidate = nextCron(fields, anchor);
         } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
+            const message = errorMessage(error);
             noticeOnce(id, `cron:${message}`, `[${id}] cron '${task.cron}' is not schedulable: ${message}`, log);
             continue;
         }
@@ -224,10 +221,9 @@ export function runTick(options: TickOptions = {}): TickResult {
                 break;
             }
             try {
-                candidate = nextCron(task.cron, candidate);
+                candidate = nextCron(fields, candidate);
             } catch (error) {
-                const message = error instanceof Error ? error.message : String(error);
-                log(`[${id}] no further slot: ${message}`);
+                log(`[${id}] no further slot: ${errorMessage(error)}`);
                 break;
             }
         }
@@ -264,8 +260,7 @@ export function runTick(options: TickOptions = {}): TickResult {
             log(`[${id}] dispatched run ${stamp} (slot ${due.toISOString()})`);
             result.dispatched.push(id);
         } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            log(`[${id}] dispatch failed for run ${stamp}: ${message}`);
+            log(`[${id}] dispatch failed for run ${stamp}: ${errorMessage(error)}`);
         }
     }
 
@@ -303,6 +298,27 @@ export function defaultRunner(
         stdout: result.stdout ?? "",
         stderr: result.stderr ?? "",
     };
+}
+
+/** Current crontab, or "" when there is none (crontab -l exits non-zero). */
+function readCrontab(runner: CommandRunner): string {
+    const listing = runner("crontab", ["-l"]);
+    return listing.status === 0 ? listing.stdout : "";
+}
+
+/** Back up the old body, then write the new one (or throw). */
+function commitCrontab(runner: CommandRunner, previous: string, next: string, label: string): void {
+    if (previous.trim().length > 0) {
+        ensureDir(getScheduleDir());
+        writeFileSync(join(getScheduleDir(), "crontab.bak"), previous, {
+            encoding: "utf8",
+            mode: 0o600,
+        });
+    }
+    const write = runner("crontab", ["-"], { input: next });
+    if (write.status !== 0) {
+        throw new Error(`${label}: crontab write failed: ${write.stderr.trim() || `exit ${write.status}`}`);
+    }
 }
 
 export interface InstallCronOptions {
@@ -411,21 +427,11 @@ export function installCron(options: InstallCronOptions = {}): InstallCronResult
     }
     cronDaemonWarning(runner, warnings);
 
-    const listing = runner("crontab", ["-l"]);
-    const previous = listing.status === 0 ? listing.stdout : "";
-    if (previous.trim().length > 0) {
-        ensureDir(getScheduleDir());
-        writeFileSync(join(getScheduleDir(), "crontab.bak"), previous, { encoding: "utf8", mode: 0o600 });
-    }
-
+    const previous = readCrontab(runner);
     const block = renderCronBlock({ piDir, nodeBin, scheduleBin, logPath });
     const kept = stripCronBlock(previous);
     const next = kept.length > 0 ? `${kept}\n${block}\n` : `${block}\n`;
-
-    const write = runner("crontab", ["-"], { input: next });
-    if (write.status !== 0) {
-        throw new Error(`install-cron: crontab write failed: ${write.stderr.trim() || `exit ${write.status}`}`);
-    }
+    commitCrontab(runner, previous, next, "install-cron");
 
     // Smoke-test the crontab environment: a bare `env -i` has no HOME, no PATH
     // beyond what we hand it, and that is precisely what breaks cron jobs.
@@ -457,7 +463,6 @@ export interface UninstallCronResult {
     removed: boolean;
     /** The block that was removed, markers included, for the user to eyeball. */
     removedBlock: string;
-    warnings: string[];
 }
 
 /**
@@ -470,29 +475,15 @@ export interface UninstallCronResult {
  */
 export function uninstallCron(options: UninstallCronOptions = {}): UninstallCronResult {
     const runner = options.runner ?? defaultRunner;
-    const warnings: string[] = [];
-
-    const listing = runner("crontab", ["-l"]);
-    const previous = listing.status === 0 ? listing.stdout : "";
+    const previous = readCrontab(runner);
     const removedBlock = extractCronBlock(previous);
     if (removedBlock === undefined) {
-        return { crontab: previous, removed: false, removedBlock: "", warnings };
+        return { crontab: previous, removed: false, removedBlock: "" };
     }
-
-    ensureDir(getScheduleDir());
-    writeFileSync(join(getScheduleDir(), "crontab.bak"), previous, {
-        encoding: "utf8",
-        mode: 0o600,
-    });
 
     const kept = stripCronBlock(previous);
     const next = kept.length > 0 ? `${kept}\n` : "";
-    const write = runner("crontab", ["-"], { input: next });
-    if (write.status !== 0) {
-        throw new Error(
-            `uninstall-cron: crontab write failed: ${write.stderr.trim() || `exit ${write.status}`}`,
-        );
-    }
+    commitCrontab(runner, previous, next, "uninstall-cron");
 
-    return { crontab: next, removed: true, removedBlock, warnings };
+    return { crontab: next, removed: true, removedBlock };
 }

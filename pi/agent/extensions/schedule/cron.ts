@@ -71,18 +71,10 @@ const CRON_MACROS: Readonly<Record<string, string>> = {
     "@hourly": "0 * * * *",
 };
 
-interface NormalizedExpression {
-    expr: string;
-    /** True when the input was a macro and `expr` is its expansion. */
-    macro: boolean;
-}
-
-function normalizeExpression(expr: string): NormalizedExpression {
+/** Expand a macro, or return the trimmed 5-field expression unchanged. */
+function normalizeExpression(expr: string): string {
     const trimmed = expr.trim();
-    const expansion = CRON_MACROS[trimmed.toLowerCase()];
-    return expansion === undefined
-        ? { expr: trimmed, macro: false }
-        : { expr: expansion, macro: true };
+    return CRON_MACROS[trimmed.toLowerCase()] ?? trimmed;
 }
 
 type ExpandResult = { values: number[] } | { error: string };
@@ -149,7 +141,7 @@ function expandField(field: string, index: number): ExpandResult {
 
 /** Parse a 5-field expression (or macro). Throws `CronParseError`. */
 export function parseCron(expr: string): CronFields {
-    const { expr: expandedExpr } = normalizeExpression(expr);
+    const expandedExpr = normalizeExpression(expr);
     const parts = expandedExpr.length === 0 ? [] : expandedExpr.split(/\s+/);
     if (parts.length !== 5) {
         throw new CronParseError(
@@ -297,7 +289,7 @@ function formatLocalTime(minute: number, hour: number): string {
  */
 export function cronToHuman(expr: string): string {
     const raw = expr.trim();
-    const { expr: expandedExpr } = normalizeExpression(expr);
+    const expandedExpr = normalizeExpression(raw);
     const parts = expandedExpr.length === 0 ? [] : expandedExpr.split(/\s+/);
     if (parts.length !== 5) return raw;
     const [minute, hour, dayOfMonth, month, dayOfWeek] = parts as [

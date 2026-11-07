@@ -28,7 +28,17 @@ import type { ChildProcess } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { atomicWriteJson, listRunStamps, runDir as runDirOf, taskRunsDir } from "./store.ts";
+import {
+    atomicWriteJson,
+    ensureDir,
+    errorMessage,
+    listRunStamps,
+    readJsonFile,
+    runDir as runDirOf,
+    taskRunsDir,
+    validateRunStamp,
+    validateTaskId,
+} from "./store.ts";
 import { routeFlags, type ModelRoute } from "./routing.ts";
 
 /** Wall-clock ceiling for one run. Override with PI_SCHEDULE_TEST_TIMEOUT_MS. */
@@ -39,9 +49,6 @@ export const KILL_GRACE_MS = 10 * 1000;
 export const STALE_START_MS = 60 * 1000;
 /** Last-resort wait after SIGKILL; if the child still does not reap, give up. */
 const POST_KILL_WAIT_MS = 5 * 1000;
-
-const RUN_STAMP_PATTERN = /^\d{8}-\d{6}$/;
-const TASK_ID_PATTERN = /^[a-z0-9]{8}$/;
 
 /** pi is resolved from PATH; tests substitute a script through this env. */
 const PI_BIN_ENV = "PI_SCHEDULE_PI_BIN";
@@ -170,9 +177,9 @@ export function outputLogPath(dir: string): string {
  * the same second cannot both win (`EEXIST` for the loser).
  */
 export function claimRun(taskId: string, stamp: string): string {
-    if (!TASK_ID_PATTERN.test(taskId)) throw new Error(`invalid task id: ${taskId}`);
-    if (!RUN_STAMP_PATTERN.test(stamp)) throw new Error(`invalid run stamp: ${stamp}`);
-    mkdirSync(taskRunsDir(taskId), { recursive: true, mode: 0o700 });
+    if (!validateTaskId(taskId)) throw new Error(`invalid task id: ${taskId}`);
+    if (!validateRunStamp(stamp)) throw new Error(`invalid run stamp: ${stamp}`);
+    ensureDir(taskRunsDir(taskId));
     const dir = runDirOf(taskId, stamp);
     mkdirSync(dir, { mode: 0o700 });
     return dir;
@@ -188,17 +195,11 @@ function isString(value: unknown): value is string {
     return typeof value === "string";
 }
 
-function parseMetadata(raw: string): RunMetadata | undefined {
-    let value: unknown;
-    try {
-        value = JSON.parse(raw);
-    } catch {
-        return undefined;
-    }
+function parseMetadata(value: unknown): RunMetadata | undefined {
     if (typeof value !== "object" || value === null) return undefined;
     const metadata = value as Partial<RunMetadata>;
     if (metadata.version !== 1) return undefined;
-    if (!isString(metadata.taskId) || !TASK_ID_PATTERN.test(metadata.taskId)) return undefined;
+    if (!isString(metadata.taskId) || !validateTaskId(metadata.taskId)) return undefined;
     if (metadata.trigger !== "scheduled" && metadata.trigger !== "manual") return undefined;
     if (!isString(metadata.state) || !RUN_STATES.includes(metadata.state)) return undefined;
     if (!isString(metadata.startedAt)) return undefined;
@@ -209,13 +210,7 @@ function parseMetadata(raw: string): RunMetadata | undefined {
 }
 
 export function readMetadata(dir: string): RunMetadata | undefined {
-    let raw: string;
-    try {
-        raw = readFileSync(metadataPath(dir), "utf8");
-    } catch {
-        return undefined;
-    }
-    return parseMetadata(raw);
+    return parseMetadata(readJsonFile(metadataPath(dir)));
 }
 
 export function writeMetadata(dir: string, metadata: RunMetadata): void {
@@ -310,21 +305,30 @@ export function isActive(state: EffectiveState): boolean {
     return state === "starting" || state === "running" || state === "orphan";
 }
 
+function readRun(taskId: string, ts: string): ActiveRun | undefined {
+    const dir = runDirOf(taskId, ts);
+    const metadata = readMetadata(dir);
+    if (!metadata) return undefined;
+    return { dir, ts, metadata, effective: effectiveState(metadata) };
+}
+
 /** All runs of a task, newest first. */
 export function listRuns(taskId: string): ActiveRun[] {
     const runs: ActiveRun[] = [];
     for (const ts of listRunStamps(taskId)) {
-        const dir = runDirOf(taskId, ts);
-        const metadata = readMetadata(dir);
-        if (!metadata) continue;
-        runs.push({ dir, ts, metadata, effective: effectiveState(metadata) });
+        const run = readRun(taskId, ts);
+        if (run) runs.push(run);
     }
     return runs;
 }
 
-/** Newest run of a task, active or not. */
+/** Newest run of a task, active or not; stops at the first readable record. */
 export function latestRun(taskId: string): ActiveRun | undefined {
-    return listRuns(taskId)[0];
+    for (const ts of listRunStamps(taskId)) {
+        const run = readRun(taskId, ts);
+        if (run) return run;
+    }
+    return undefined;
 }
 
 /**
@@ -498,7 +502,7 @@ export async function executeRun(options: ExecuteRunOptions): Promise<number> {
         if (logFd !== undefined) closeSync(logFd);
         patchMetadata(dir, {
             state: "error",
-            error: error instanceof Error ? error.message : String(error),
+            error: errorMessage(error),
             finishedAt: new Date().toISOString(),
         });
         return 1;
@@ -536,16 +540,11 @@ export async function executeRun(options: ExecuteRunOptions): Promise<number> {
         exitInfo = info;
     });
 
-    // 5. Timeout.
-    let timedOut = false;
-    const timer = setTimeout(() => {
-        timedOut = true;
-    }, runTimeoutMs());
-    timer.unref?.();
-    const exitedInTime = await withDeadline(exitPromise, runTimeoutMs());
-    clearTimeout(timer);
+    // 5. Timeout. `withDeadline` is the single source of truth; a second timer
+    //    of the same length would only race it.
+    const timedOut = !await withDeadline(exitPromise, runTimeoutMs());
 
-    if (!exitedInTime || timedOut) {
+    if (timedOut) {
         // 6. Declare `killed` first: the scheduler must be free even if the
         //    process is stuck in uninterruptible sleep and ignores SIGKILL.
         patchMetadata(dir, { state: "killed" });
@@ -567,16 +566,12 @@ export async function executeRun(options: ExecuteRunOptions): Promise<number> {
     }
 
     // 7. Record the outcome. `killed` is terminal: never downgrade it to exited.
-    const current = readMetadata(dir);
-    const finishedAt = new Date().toISOString();
     const outcome: Partial<RunMetadata> = {
-        finishedAt,
+        finishedAt: new Date().toISOString(),
         exitCode: exitInfo ? exitInfo.code : null,
         signal: exitInfo ? exitInfo.signal : null,
+        ...(timedOut ? {} : { state: "exited" as const }),
     };
-    if (current && current.state !== "killed") {
-        outcome.state = "exited";
-    }
     patchMetadata(dir, outcome);
 
     return timedOut ? 124 : exitCodeOf(exitInfo);
