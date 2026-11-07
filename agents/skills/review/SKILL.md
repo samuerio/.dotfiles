@@ -29,7 +29,7 @@ target instead:
 - anything else: treat it as a base branch
 
 `git diff <base>` is wrong for a branch: it includes commits the base added and
-you never had. Resolve `git rev-parse --abbrev-ref '<base>@{upstream>'`, then
+you never had. Resolve `git rev-parse --abbrev-ref '<base>@{upstream}'`, then
 `git merge-base HEAD <upstream>` (falling back to `git merge-base HEAD '<base>'`
 when that lookup fails), then `git diff <mergeBase>`. Say so when the base has
 no upstream and may be stale. If the target cannot be resolved, ask the user
@@ -57,8 +57,25 @@ Launch **one review agent** via the task tool. Pass it, in the prompt:
 
 Wait for the agent, dedup findings that point at the same line or the same
 mechanism, and present the report as it came back. Do not add a summary, do not
-reword it, do not fix anything. If a finding is wrong, say so after the report
-rather than editing it.
+reword it, do not fix anything.
+
+Then give your own take, one line per finding, introduced by the literal label
+`My take:` so your words are never mistaken for the reviewer's. Read the code
+each finding points at, and the code around it, before you write the line: a
+diff excerpt is not enough to accept or reject a claim.
+
+```
+My take:
+- [P1] src/x.ts:42 - adopt: returning null hides the failure, rethrow is right
+- [P2] src/y.ts:10 - adopt: the caller two frames up already rethrows
+- [P3] src/z.ts:88 - reject: false positive, that helper lives in src/util/fs.ts:12
+```
+
+`adopt` means the finding is real and worth acting on, so say why it holds in
+one clause. `reject` means it is not worth acting on, so say why: a false
+positive, a change that would alter intended behavior, or work well outside the
+diff. Do not restate the finding, do not say how to fix it, and do not turn the
+line into a plan; the user still decides what gets fixed.
 
 ## The rubric
 
