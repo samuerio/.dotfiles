@@ -53,8 +53,8 @@ export interface Task {
 export interface Watermark {
     version: 1;
     taskId: string;
-    /** Last slot that was consumed (dispatched or recorded as missed). */
-    lastSlotConsumed: string | null;
+    /** Highest instant already accounted for; not necessarily a cron slot. */
+    accountedThrough: string | null;
     updatedAt: string;
 }
 
@@ -360,32 +360,33 @@ export function readWatermark(taskId: string): Watermark {
     const synthetic: Watermark = {
         version: 1,
         taskId,
-        lastSlotConsumed: null,
+        accountedThrough: null,
         updatedAt: "",
     };
     if (!validateTaskId(taskId)) return synthetic;
     // A torn/corrupt watermark must never wedge scheduling: treat it as
-    // "never consumed" and let the next tick rewrite it.
+    // "never accounted for" and let the next tick rewrite it. There is no
+    // pre-rename key compatibility: no watermark predates `accountedThrough`.
     const value = readJsonFile(watermarkPath(taskId));
     if (!value || typeof value !== "object") return synthetic;
     const parsed = value as Partial<Watermark>;
-    const slot = parsed.lastSlotConsumed;
     if (parsed.version !== 1) return synthetic;
-    if (slot !== null && !isString(slot)) return synthetic;
+    const accountedThrough = parsed.accountedThrough;
+    if (accountedThrough !== null && !isString(accountedThrough)) return synthetic;
     return {
         version: 1,
         taskId,
-        lastSlotConsumed: slot ?? null,
+        accountedThrough,
         updatedAt: isString(parsed.updatedAt) ? parsed.updatedAt : "",
     };
 }
 
-export function writeWatermark(taskId: string, lastSlotConsumed: string | null): void {
+export function writeWatermark(taskId: string, accountedThrough: string | null): void {
     if (!validateTaskId(taskId)) throw new Error(`invalid task id: ${taskId}`);
     const watermark: Watermark = {
         version: 1,
         taskId,
-        lastSlotConsumed,
+        accountedThrough,
         updatedAt: new Date().toISOString(),
     };
     atomicWriteJson(watermarkPath(taskId), watermark);

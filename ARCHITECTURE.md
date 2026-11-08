@@ -57,11 +57,11 @@ ctrl+o 预览子类封装（pickSession），供 `worktree-task` 挑选会话；
 供 `review` 与 `security-review` 共用，两命令各自持有 rubric 与会话机制）。
 pi 只把 `extensions/*.ts` 顶层文件与含 `index.ts` 的子目录
 识别为扩展，`lib/` 子目录不会被自动加载；`extensions/schedule/` 是当前唯一「含 `index.ts` 而被自动加载」
-的子目录，同目录下的 `cron.ts`/`store.ts`/`run.ts`/`routing.ts`/`runs-view.ts`/`cli.ts`/`tick.ts` 不是扩展。
+的子目录，同目录下的 `cron.ts`/`slots.ts`/`store.ts`/`run.ts`/`routing.ts`/`runs-view.ts`/`cli.ts`/`tick.ts` 不是扩展。
 
 **Architecture Invariant:** 扩展只能调用 pi 公开的 ExtensionAPI 与事件钩子，禁止直接操作 pi 内部状态。
 
-**Architecture Invariant:** `extensions/schedule/` 下的 `cron.ts`/`store.ts`/`run.ts`/`routing.ts`/`runs-view.ts`/`cli.ts`/`tick.ts` 只能 import
+**Architecture Invariant:** `extensions/schedule/` 下的 `cron.ts`/`slots.ts`/`store.ts`/`run.ts`/`routing.ts`/`runs-view.ts`/`cli.ts`/`tick.ts` 只能 import
 node 标准库，禁止 import `@earendil-works/*` 或其它扩展：这些文件由 crontab 里的 `node` 直接执行，
 pi 的扩展加载器不在场，裸包名解析不到。该目录只有 `index.ts`（自动加载入口）允许 import pi 包。
 
@@ -77,9 +77,9 @@ agent 全局设置（不再使用 `packages` 声明第三方扩展包）；子�
 `AGENTS.md` 定义 agent 行为规范。
 `sessions/`、`tmux-subagents/` 与 `bin/`（内置 `fd` 二进制、`schedule` 软链指向
 `extensions/schedule/cli.ts`）为运行时与工具产物，随使用生成（`bin/` 被 `pi/.gitignore` 忽略，该软链由
-`install.sh` 重建而非随仓库分发）。`schedule/tasks/*.json` 是 git 跟踪的任务定义
-（随仓库跨机同步，但 `cwd` 是绝对路径、跨机失效）；`schedule/runs/`（含 watermark `state.json`）、
-`schedule/tick.log`、`schedule/crontab.bak` 为运行产物，已 gitignore。
+`install.sh` 重建而非随仓库分发）。`schedule/tasks/*.json` 是任务定义，但 `cwd` 是绝对路径、
+跨机不可复用，因此与 `schedule/runs/`（含 watermark `state.json`）、`schedule/tick.log`、
+`schedule/crontab.bak` 一样属于本机运行产物，已 gitignore。
 
 **API Boundary:** `models.json` 是 provider/模型清单的唯一来源，扩展不直接读取；`modes.json` 由 `prompt-editor` 扩展
 提供 TUI 编辑入口，运行时与扩展共享读写。子代理运行时与 session 查看工具均为本地 `extensions/`

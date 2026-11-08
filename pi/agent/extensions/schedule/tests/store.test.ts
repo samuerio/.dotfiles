@@ -241,33 +241,51 @@ describe("promptTextOf", () => {
 });
 
 describe("watermark", () => {
-    test("missing watermark reads as never consumed", () => {
+    test("missing watermark reads as never accounted for", () => {
         const watermark = readWatermark("a1b2c3d4");
-        assert.equal(watermark.lastSlotConsumed, null);
+        assert.equal(watermark.accountedThrough, null);
         assert.equal(watermark.taskId, "a1b2c3d4");
     });
 
     test("round-trips through disk", () => {
         writeWatermark("a1b2c3d4", "2026-11-06T07:28:00.000Z");
         const watermark = readWatermark("a1b2c3d4");
-        assert.equal(watermark.lastSlotConsumed, "2026-11-06T07:28:00.000Z");
+        assert.equal(watermark.accountedThrough, "2026-11-06T07:28:00.000Z");
         assert.ok(watermark.updatedAt.length > 0);
         assert.ok(existsSync(watermarkPath("a1b2c3d4")));
         writeWatermark("a1b2c3d4", null);
-        assert.equal(readWatermark("a1b2c3d4").lastSlotConsumed, null);
+        assert.equal(readWatermark("a1b2c3d4").accountedThrough, null);
     });
 
-    test("a corrupt watermark degrades to never consumed instead of wedging scheduling", () => {
+    test("a corrupt watermark degrades to never accounted for instead of wedging scheduling", () => {
         mkdirSync(taskRunsDir("a1b2c3d4"), { recursive: true });
         writeFileSync(watermarkPath("a1b2c3d4"), "{ half");
-        assert.equal(readWatermark("a1b2c3d4").lastSlotConsumed, null);
-        writeFileSync(watermarkPath("a1b2c3d4"), JSON.stringify({ version: 1, lastSlotConsumed: 42 }));
-        assert.equal(readWatermark("a1b2c3d4").lastSlotConsumed, null);
+        assert.equal(readWatermark("a1b2c3d4").accountedThrough, null);
+        writeFileSync(watermarkPath("a1b2c3d4"), JSON.stringify({ version: 1, accountedThrough: 42 }));
+        assert.equal(readWatermark("a1b2c3d4").accountedThrough, null);
+    });
+
+    test("a missing field and the old key both read as null (no migration)", () => {
+        mkdirSync(taskRunsDir("a1b2c3d4"), { recursive: true });
+        writeFileSync(watermarkPath("a1b2c3d4"), JSON.stringify({ version: 1, taskId: "a1b2c3d4" }));
+        assert.equal(readWatermark("a1b2c3d4").accountedThrough, null);
+        writeFileSync(
+            watermarkPath("a1b2c3d4"),
+            JSON.stringify({ version: 1, lastSlotConsumed: "2026-11-06T07:28:00.000Z" }),
+        );
+        assert.equal(readWatermark("a1b2c3d4").accountedThrough, null);
+    });
+
+    test("writes only the accountedThrough contract", () => {
+        writeWatermark("a1b2c3d4", "2026-11-06T07:28:00.000Z");
+        const raw = JSON.parse(readFileSync(watermarkPath("a1b2c3d4"), "utf8")) as Record<string, unknown>;
+        assert.deepEqual(Object.keys(raw).sort(), ["accountedThrough", "taskId", "updatedAt", "version"]);
+        assert.equal(raw.accountedThrough, "2026-11-06T07:28:00.000Z");
     });
 
     test("invalid ids never touch the filesystem", () => {
         assert.throws(() => writeWatermark("../etc", null), /invalid task id/);
-        assert.equal(readWatermark("../etc").lastSlotConsumed, null);
+        assert.equal(readWatermark("../etc").accountedThrough, null);
     });
 });
 

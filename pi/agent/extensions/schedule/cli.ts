@@ -7,12 +7,12 @@
  * every verb is one short-lived `node` process, so crontab, the agent's bash
  * tool and a human shell all drive the same state.
  *
- * pi-free on purpose (node built-ins + ./cron.ts ./store.ts ./run.ts ./tick.ts).
+ * pi-free on purpose (node built-ins + ./cron.ts ./slots.ts ./store.ts ./run.ts ./tick.ts).
  * The CLI must run under a bare `node`, which cannot resolve `@earendil-works/*`
  * (pi's loader resolves those against the pi install root).
  */
 import { spawn } from "node:child_process";
-import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, readSync, realpathSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 // Kept ref'd on purpose: an unref'd timer lets node exit before a pending
 // verb has finished writing (which silently swallowed `run`'s output).
@@ -31,7 +31,8 @@ import {
     readMetadata,
     readRunSummary,
 } from "./run.ts";
-import type { EffectiveState, RunMetadata } from "./run.ts";
+import type { ActiveRun, EffectiveState, RunMetadata } from "./run.ts";
+import { slotVerdict } from "./slots.ts";
 import {
     KEEP_MS,
     addTask,
@@ -219,16 +220,34 @@ function describeState(effective: EffectiveState, metadata: RunMetadata | undefi
     return effective;
 }
 
-function nextFireOf(task: Task): Date | undefined {
+type NextFire =
+    | { kind: "at"; date: Date }
+    | { kind: "consumed" }
+    | { kind: "unschedulable" };
+
+function nextFireOf(task: Task): NextFire {
     try {
         const watermark = readWatermark(task.id);
-        const anchor = watermark.lastSlotConsumed === null
+        if (task.once && watermark.accountedThrough !== null) return { kind: "consumed" };
+        const anchor = watermark.accountedThrough === null
             ? new Date()
-            : new Date(Math.max(Date.now(), Date.parse(watermark.lastSlotConsumed)));
-        if (Number.isNaN(anchor.getTime())) return undefined;
-        return nextCron(task.cron, anchor);
+            : new Date(Math.max(Date.now(), Date.parse(watermark.accountedThrough)));
+        if (Number.isNaN(anchor.getTime())) return { kind: "unschedulable" };
+        return { kind: "at", date: nextCron(task.cron, anchor) };
     } catch {
-        return undefined;
+        return { kind: "unschedulable" };
+    }
+}
+
+/** `NEXT` column: `—` means only one thing — a consumed one-shot task. */
+function nextText(next: NextFire): string {
+    switch (next.kind) {
+        case "at":
+            return formatLocal(next.date);
+        case "consumed":
+            return "—";
+        case "unschedulable":
+            return "invalid";
     }
 }
 
@@ -242,25 +261,51 @@ interface ListRow {
     cron: string;
     schedule: string;
     enabled: boolean;
+    once: boolean;
     next: string;
     last: string;
     state: string;
-    markers: string[];
+    missed: boolean;
 }
 
-function onceMarker(task: Task, runs: ReturnType<typeof listRuns>): string | undefined {
-    if (!task.once) return undefined;
-    const watermark = readWatermark(task.id);
-    if (watermark.lastSlotConsumed === null) return undefined;
-    const newest = runs[0];
-    if (!newest) return "consumed (missed)";
-    const failed =
-        newest.effective !== "exited" ||
-        (typeof newest.metadata.exitCode === "number" && newest.metadata.exitCode !== 0);
-    return failed ? "consumed (last run failed)" : "consumed";
+/**
+ * First slot the task owed but never ran, or undefined when it is up to date
+ * (or currently busy).
+ *
+ * The read side deliberately does not look at the watermark: a missed tick
+ * pushes the watermark to `now`, destroying the evidence within one cycle. The
+ * newest run's `startedAt` — and `createdAt` before the first run — is the
+ * stable proof of what actually happened.
+ */
+export function missedSince(
+    task: Task,
+    newest: ActiveRun | undefined,
+    now = new Date(),
+): Date | undefined {
+    if (!task.enabled) return undefined;
+    // A run in flight is not a missed slot, even after the 10-minute catch-up
+    // window: `first` drops out of the window while the task is still working.
+    // A `stale` claim is a dispatch that was accounted for but never picked up;
+    // reporting it as `missed` would hide the real fault behind the schedule.
+    if (newest && (isActive(newest.effective) || newest.effective === "stale")) return undefined;
+    const base = newest ? Date.parse(newest.metadata.startedAt) : Date.parse(task.createdAt);
+    if (!Number.isFinite(base)) return undefined;
+    try {
+        const verdict = slotVerdict(task.cron, new Date(base), now);
+        return verdict.kind === "missed" ? verdict.first : undefined;
+    } catch {
+        return undefined;
+    }
 }
 
-function buildRows(): ListRow[] {
+/** `LAST` column: a missed slot overrides the newest run, and `—` means none. */
+function lastText(missed: Date | undefined, newest: ActiveRun | undefined): string {
+    if (missed) return `missed · ${relativeTime(missed.toISOString())}`;
+    if (!newest) return "—";
+    return `${describeState(newest.effective, newest.metadata)} · ${relativeTime(newest.metadata.startedAt)}`;
+}
+
+export function buildRows(now = new Date()): ListRow[] {
     const rows: ListRow[] = [];
     for (const entry of listTasks()) {
         const { task, id } = entry;
@@ -271,18 +316,17 @@ function buildRows(): ListRow[] {
                 cron: "—",
                 schedule: "—",
                 enabled: false,
+                once: false,
                 next: "—",
                 last: "—",
                 state: "corrupt",
-                markers: [entry.error ?? "corrupt task definition"],
+                missed: false,
             });
             continue;
         }
         const runs = listRuns(id);
         const newest = runs[0];
-        const markers: string[] = [];
-        const once = onceMarker(task, runs);
-        if (once) markers.push(once);
+        const missed = missedSince(task, newest, now);
         const next = nextFireOf(task);
         rows.push({
             id: shortId(id),
@@ -290,10 +334,11 @@ function buildRows(): ListRow[] {
             cron: task.cron,
             schedule: cronToHuman(task.cron),
             enabled: task.enabled,
-            next: next ? formatLocal(next) : "—",
-            last: newest ? `${describeState(newest.effective, newest.metadata)} · ${relativeTime(newest.metadata.startedAt)}` : "—",
+            once: Boolean(task.once),
+            next: nextText(next),
+            last: lastText(missed, newest),
             state: newest ? describeState(newest.effective, newest.metadata) : "idle",
-            markers,
+            missed: missed !== undefined,
         });
     }
     return rows;
@@ -311,7 +356,7 @@ function printList(rows: ListRow[]): void {
         row.enabled ? "yes" : "no",
         row.next,
         row.last,
-        row.schedule,
+        row.once ? `${row.schedule} · once` : row.schedule,
     ]);
     const widths = header.map((cell, column) =>
         Math.max(displayWidth(cell), ...body.map((line) => displayWidth(line[column]))),
@@ -319,10 +364,8 @@ function printList(rows: ListRow[]): void {
     const render = (line: string[]): string =>
         line.map((cell, column) => pad(cell, widths[column])).join("  ").trimEnd();
     process.stdout.write(`${render(header)}\n`);
-    for (const [index, line] of body.entries()) {
+    for (const line of body) {
         process.stdout.write(`${render(line)}\n`);
-        const markers = rows[index].markers;
-        if (markers.length > 0) process.stdout.write(`         ⚠ ${markers.join(", ")}\n`);
     }
 }
 
@@ -376,7 +419,7 @@ function cmdAdd(args: ParsedArgs): number {
     const next = nextFireOf(task);
     process.stdout.write(
         `added ${task.id}  ${task.name}  (${cronToHuman(task.cron)})\n` +
-            `next: ${next ? formatLocal(next) : "—"}\n` +
+            `next: ${nextText(next)}\n` +
             `model: ${describeRoute(resolveSubagentRoute(task.cwd))}\n`,
     );
     return 0;
@@ -395,10 +438,9 @@ function cmdToggle(args: ParsedArgs, enabled: boolean): number {
     const task = requireTask(args.positionals[0]);
     const next = setTaskEnabled(task.id, enabled);
     if (!next) fail(`could not update task: ${task.id}`);
-    const nextFire = enabled ? nextFireOf(next) : undefined;
     process.stdout.write(
         `${enabled ? "enabled" : "disabled"} ${next.id}  ${next.name}\n` +
-            (enabled ? `next: ${nextFire ? formatLocal(nextFire) : "—"}\n` : ""),
+            (enabled ? `next: ${nextText(nextFireOf(next))}\n` : ""),
     );
     return 0;
 }
@@ -411,12 +453,23 @@ function cliPath(): string {
     return fileURLToPath(import.meta.url);
 }
 
-async function waitForMetadata(dir: string, timeoutMs = 1000): Promise<RunMetadata | undefined> {
+/**
+ * Poll until `ready` accepts the run's metadata, or the timeout expires.
+ *
+ * The claim itself writes a `starting` record with `pid: null`, so callers that
+ * report the pid must keep waiting until the helper has recorded one (or the
+ * run already reached a terminal state).
+ */
+async function waitForMetadata(
+    dir: string,
+    ready: (metadata: RunMetadata) => boolean = () => true,
+    timeoutMs = 1000,
+): Promise<RunMetadata | undefined> {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
         const metadata = readMetadata(dir);
-        if (metadata) return metadata;
-        if (Date.now() > deadline) return undefined;
+        if (metadata && ready(metadata)) return metadata;
+        if (Date.now() > deadline) return metadata;
         await delay(25);
     }
 }
@@ -450,11 +503,15 @@ async function cmdRun(args: ParsedArgs): Promise<number> {
     }
 
     const { promptText, route } = runInputs(task);
-    const stamp = stampOf(new Date());
+    const now = new Date();
+    const stamp = stampOf(now);
     let dir: string;
     try {
-        dir = claimRun(task.id, stamp);
-    } catch {
+        dir = claimRun(task.id, stamp, { trigger: "manual", cwd: task.cwd, startedAt: now });
+    } catch (error) {
+        if ((error as { code?: string }).code !== "EEXIST") {
+            fail(`run ${task.id}: cannot claim slot ${stamp}: ${errorMessage(error)}`);
+        }
         fail(`run ${task.id}: slot ${stamp} was claimed by another process, retry`);
     }
 
@@ -482,7 +539,10 @@ async function cmdRun(args: ParsedArgs): Promise<number> {
     });
     child.unref();
 
-    const metadata = await waitForMetadata(dir);
+    const metadata = await waitForMetadata(
+        dir,
+        (candidate) => typeof candidate.pid === "number" || !isActive(effectiveState(candidate)),
+    );
     process.stdout.write(
         `started ${task.id} run ${stamp}` +
             (metadata?.pid ? ` (pid ${metadata.pid})` : "") +
@@ -684,11 +744,28 @@ process.stdout.on("error", (error: NodeJS.ErrnoException) => {
     throw error;
 });
 
-main()
-    .then((code) => {
-        process.exitCode = code;
-    })
-    .catch((error: unknown) => {
-        process.stderr.write(`${errorMessage(error)}\n`);
-        process.exitCode = 1;
-    });
+/**
+ * True when this module is the process entry point (directly, or through the
+ * `~/.pi/agent/bin/schedule` symlink). Tests import `buildRows`/`missedSince`
+ * from here, so importing must not run the CLI.
+ */
+function isEntryPoint(): boolean {
+    const entry = process.argv[1];
+    if (!entry) return false;
+    try {
+        return realpathSync(entry) === realpathSync(fileURLToPath(import.meta.url));
+    } catch {
+        return false;
+    }
+}
+
+if (isEntryPoint()) {
+    main()
+        .then((code) => {
+            process.exitCode = code;
+        })
+        .catch((error: unknown) => {
+            process.stderr.write(`${errorMessage(error)}\n`);
+            process.exitCode = 1;
+        });
+}

@@ -77,7 +77,8 @@ export interface RunMetadata {
     taskId: string;
     trigger: RunTrigger;
     state: RunState;
-    pid?: number;
+    /** null for a bare claim: nobody has spawned pi yet. */
+    pid?: number | null;
     /** Process-group id; equals `pid` for detached runs, null when foreground. */
     pgid?: number | null;
     /** `/proc/<pid>/stat` field 22 — defeat pid reuse. */
@@ -172,16 +173,42 @@ export function outputLogPath(dir: string): string {
     return join(dir, "output.log");
 }
 
+export interface ClaimOptions {
+    /** Task cwd; recorded in the claim metadata and in the launch line. */
+    cwd: string;
+    trigger?: RunTrigger;
+    /** Accounting instant; defaults to the wall clock (tick passes its `now`). */
+    startedAt?: Date;
+}
+
 /**
  * Claim a run slot. The non-recursive `mkdir` is the atomic claim: two ticks in
  * the same second cannot both win (`EEXIST` for the loser).
+ *
+ * The claim immediately becomes a visible `starting` run: without metadata a
+ * dispatch that never reaches the helper (spawn error, helper killed) would be
+ * skipped by `listRuns()`, and `list` would blame the schedule with `missed`
+ * instead of showing the failed dispatch. A claim nobody picks up turns into
+ * `stale` once it ages past `staleStartMs()`.
  */
-export function claimRun(taskId: string, stamp: string): string {
+export function claimRun(taskId: string, stamp: string, options: ClaimOptions): string {
     if (!validateTaskId(taskId)) throw new Error(`invalid task id: ${taskId}`);
     if (!validateRunStamp(stamp)) throw new Error(`invalid run stamp: ${stamp}`);
     ensureDir(taskRunsDir(taskId));
     const dir = runDirOf(taskId, stamp);
     mkdirSync(dir, { mode: 0o700 });
+    const starting: RunMetadata = {
+        version: 1,
+        taskId,
+        trigger: options.trigger ?? "scheduled",
+        state: "starting",
+        pid: null,
+        startedAt: (options.startedAt ?? new Date()).toISOString(),
+        sessionFile: sessionPath(dir),
+        cwd: options.cwd,
+        launchArgs: buildLaunchArgs({ taskId, runDir: dir }),
+    };
+    writeMetadata(dir, starting);
     return dir;
 }
 

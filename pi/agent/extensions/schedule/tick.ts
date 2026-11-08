@@ -11,16 +11,17 @@
  * watermark, so a machine that was off for four hours does not re-fire an
  * every-minute task forever, and GC pressure cannot shift the schedule.
  *
- * pi-free on purpose (node built-ins + ./cron.ts ./store.ts ./run.ts only).
+ * pi-free on purpose (node built-ins + ./cron.ts ./slots.ts ./store.ts
+ * ./run.ts only).
  */
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { nextCron, parseCron, type CronFields } from "./cron.ts";
 import { activeRun, claimRun } from "./run.ts";
+import { slotVerdict, type SlotVerdict } from "./slots.ts";
 import {
     atomicWriteJson,
     ensureDir,
@@ -49,14 +50,8 @@ import type { Task } from "./store.ts";
  */
 export const TICK_SCHEDULE = "* * * * *";
 
-/** A slot older than this is recorded as missed instead of being dispatched. */
-export const CATCHUP_MS = 10 * 60 * 1000;
-
 /** tick.log is rotated to tick.log.1 past this size. */
 const TICK_LOG_MAX_BYTES = 1024 * 1024;
-
-/** Hard stop for the fast-forward loop (a year of minutes, plus slack). */
-const MAX_FAST_FORWARD_STEPS = 600_000;
 
 export const CRON_BLOCK_BEGIN = "# >>> pi-schedule >>>";
 export const CRON_BLOCK_END = "# <<< pi-schedule <<<";
@@ -104,7 +99,7 @@ function rotateTickLogIfNeeded(): void {
 export function appendTickLog(line: string): void {
     rotateTickLogIfNeeded();
     ensureDir(getScheduleDir());
-    writeFileSync(tickLogPath(), `${new Date().toISOString()} ${line}\n`, { encoding: "utf8" });
+    appendFileSync(tickLogPath(), `${new Date().toISOString()} ${line}\n`, { encoding: "utf8" });
 }
 
 /**
@@ -144,10 +139,14 @@ function taskTimestamp(task: Task): number {
  * One scheduler pass.
  *
  * For every enabled task:
- *   active run (any trigger)         → skipped (change-logged only)
- *   slots older than CATCHUP_MS      → missed, watermark advanced
- *   slot due now                     → claim → watermark → dispatch
- *   `once` with a watermark          → skipped
+ *   active run (any trigger)         → skipped (change-logged only, no watermark write)
+ *   `once` with a watermark          → skipped (guard, before any verdict)
+ *   no slot reached `now`            → pending, nothing written
+ *   slots owed but all out of window → missed, watermark advanced to `now`
+ *   at least one slot in the window  → watermark advanced to `now` → claim → dispatch
+ *
+ * The watermark is written *before* the claim so a crash after accounting can
+ * lose a slot but never dispatch one twice (at-most-once).
  */
 export function runTick(options: TickOptions = {}): TickResult {
     const now = options.now ?? new Date();
@@ -178,86 +177,66 @@ export function runTick(options: TickOptions = {}): TickResult {
             continue;
         }
         const watermark = readWatermark(id);
-        const anchor = watermark.lastSlotConsumed === null
-            ? new Date(taskTimestamp(task))
-            : new Date(watermark.lastSlotConsumed);
-        if (Number.isNaN(anchor.getTime())) {
-            noticeOnce(id, "bad-anchor", `[${id}] unusable scheduling anchor; skipping`, log);
+
+        // `once` is derived, not stored in the definition: it fires only while
+        // the watermark is still empty. A slot that was accounted for as missed
+        // also counts as consumed. This guard must stay *before* the verdict:
+        // for a high-frequency cron the first slot after the anchor is still in
+        // the past after consumption, so the watermark is the only stop.
+        if (task.once && watermark.accountedThrough !== null) {
+            noticeOnce(id, "once-consumed", `[${id}] once task already consumed; not firing again`, log);
             continue;
         }
 
-        // Parse once: the fast-forward loop reuses the fields for every slot.
-        let fields: CronFields;
-        let candidate: Date;
+        // The anchor is the highest instant already accounted for: the
+        // watermark, or the creation time before the first accounting.
+        const anchorMs = watermark.accountedThrough === null
+            ? taskTimestamp(task)
+            : Date.parse(watermark.accountedThrough);
+        if (!Number.isFinite(anchorMs)) {
+            noticeOnce(id, "bad-anchor", `[${id}] unusable scheduling anchor; skipping`, log);
+            continue;
+        }
+        const anchor = new Date(anchorMs);
+
+        let verdict: SlotVerdict;
         try {
-            fields = parseCron(task.cron);
-            candidate = nextCron(fields, anchor);
+            verdict = slotVerdict(task.cron, anchor, now);
         } catch (error) {
             const message = errorMessage(error);
             noticeOnce(id, `cron:${message}`, `[${id}] cron '${task.cron}' is not schedulable: ${message}`, log);
             continue;
         }
 
-        // Walk every slot up to `now`:
-        //   * older than CATCHUP_MS → reported once as missed, watermark advances
-        //   * inside the catch-up window → remembered, but **coalesced** into a
-        //     single dispatch (a `* * * * *` task after 9 minutes of downtime
-        //     must run once, not nine times a second apart)
-        const cutoff = now.getTime() - CATCHUP_MS;
-        let lastMissed: Date | undefined;
-        let due: Date | undefined;
-        let steps = 0;
-        while (candidate.getTime() <= now.getTime()) {
-            if (candidate.getTime() <= cutoff) {
-                log(`[${id}] missed slot ${candidate.toISOString()} (cron '${task.cron}')`);
-                result.missed += 1;
-                lastMissed = candidate;
-            } else {
-                due = candidate;
-            }
-            steps += 1;
-            if (steps > MAX_FAST_FORWARD_STEPS) {
-                log(`[${id}] fast-forward aborted after ${steps} slots`);
-                break;
-            }
-            try {
-                candidate = nextCron(fields, candidate);
-            } catch (error) {
-                log(`[${id}] no further slot: ${errorMessage(error)}`);
-                break;
-            }
-        }
+        if (verdict.kind === "pending") continue;
 
-        const alreadyConsumed = watermark.lastSlotConsumed !== null;
+        // Account first, dispatch second: at-most-once, not at-least-once.
+        writeWatermark(id, now.toISOString());
 
-        // `once` is derived, not stored in the definition: it fires only while
-        // the watermark is still empty. A slot that was fast-forwarded as
-        // missed also counts as consumed, which `list` surfaces.
-        if (task.once && alreadyConsumed) {
-            noticeOnce(id, "once-consumed", `[${id}] once task already consumed; not firing again`, log);
+        if (verdict.kind === "missed") {
+            if (task.once) {
+                noticeOnce(id, "once-missed", `[${id}] once task consumed by a missed slot; not firing`, log);
+            }
+            log(`[${id}] behind since ${anchor.toISOString()} (cron '${task.cron}')`);
+            result.missed += 1;
             continue;
         }
-
-        const consumed = due ?? lastMissed;
-        if (consumed) writeWatermark(id, consumed.toISOString());
-
-        if (task.once && !due) {
-            noticeOnce(id, "once-missed", `[${id}] once task consumed by a missed slot; not firing`, log);
-            continue;
-        }
-
-        if (!due) continue;
 
         const stamp = stampOf(now);
         try {
-            claimRun(id, stamp);
-        } catch {
-            // EEXIST: another tick in the same second already took this slot.
+            claimRun(id, stamp, { cwd: task.cwd, startedAt: now });
+        } catch (error) {
+            // EEXIST is benign: another tick in the same second took the slot.
+            // Anything else (the claim's metadata write) must not vanish: the
+            // slot is already accounted for, so it will never be retried.
+            if ((error as { code?: string }).code !== "EEXIST") {
+                log(`[${id}] claim failed for run ${stamp}: ${errorMessage(error)}`);
+            }
             continue;
         }
         try {
             dispatch(id, stamp);
-            log(`[${id}] dispatched run ${stamp} (slot ${due.toISOString()})`);
+            log(`[${id}] dispatched run ${stamp}`);
             result.dispatched.push(id);
         } catch (error) {
             log(`[${id}] dispatch failed for run ${stamp}: ${errorMessage(error)}`);

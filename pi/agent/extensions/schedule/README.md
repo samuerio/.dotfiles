@@ -7,14 +7,18 @@
 
 ## 心智模型
 
-- **task 是定义，run 是一次执行。** `tasks/<id>.json`（git 跟踪，跨机同步），
+- **task 是定义，run 是一次执行。** `tasks/<id>.json`（本机产物，已 gitignore：`cwd` 是绝对路径，
+  跨机不可复用），
   `runs/<id>/<stamp>/`（会被 GC：保留最新 10 个 **或** 14 天内的，两者取并集；每个任务的
   最新 run 与 `state.json` 永不删）。
 - **调度权与执行权分离。** tick 只做三件事：读配置、算到期、`mkdir` claim 槽位，然后派生
   helper 立刻退出。helper 拥有完整生命周期（spawn pi、超时、信号升级、回写元数据）。
-- **槽位由 watermark 记账。** `runs/<id>/state.json` 的 `lastSlotConsumed` 记着「上次消费到
-  哪个槽位」，原子写、永不回收。关机期间的槽位不会被永久记成「没跑」，也不会在开机后补跑
-  一串。
+- **槽位由 watermark 记账。** `runs/<id>/state.json` 的 `accountedThrough` 记着「已经处理到
+  哪个时刻」（不一定正好是 cron 槽位），原子写、永不回收。关机期间的槽位不会被永久记成
+  「没跑」，也不会在开机后补跑一串。
+- **有没有漏跑，看 run 而不是 watermark。** `list` 拿最新 run 的 `startedAt`（从未跑过时用
+  `createdAt`）和 cron 对着算：该跑的槽位全部跌出 10 分钟窗口，就在 `LAST` 显示
+  `missed · <age>`。tick 判定 missed 后会把水位推到当下，所以读侧不能依赖它。
 
 ## 一次上手
 
@@ -62,7 +66,8 @@ schedule install-cron / uninstall-cron  # 装/卸 crontab 块
 ```
 
 `--prompt` 的值以 `-` 开头时用 `--prompt=-foo` 或改用 `--prompt-file`。
-`list --json` 输出 `{tasks:[{id,name,cron,schedule,enabled,next,last,state,markers}]}`。
+`list --json` 输出 `{tasks:[{id,name,cron,schedule,enabled,once,next,last,state,missed}]}`。
+`missed` 是布尔值（`LAST` 是否被 missed 覆盖），`last` 是渲染好的文本。
 
 ## 用哪个模型
 
@@ -160,16 +165,22 @@ env -i PATH=/home/zhe/.npm-global/bin:/usr/local/bin:/usr/bin:/bin HOME=$HOME \
 | `starting` / `stale` | 已 claim 但还没记 pid / claim 之后没走完（超 60s 算 stale） |
 | `exited` / `killed` / `error` | 终态：跑完 / 被 30 分钟超时杀掉 / 起不来 |
 | `idle` | 从没跑过 |
+| `missed` | **不是 run 状态**：该跑却没跑。`LAST` 显示 `missed · <age>`，覆盖 run 状态 |
 
-`skipped` / `missed` 是 tick 当时的决策，不是 run 目录，只出现在
+`missed` 是读侧算出来的：最新 run 的 `startedAt`（从未跑过则 `createdAt`）之后、跌出
+catch-up 窗口且没有新 run 的槽位；`running` / `starting` / `orphan` / `stale`（claim 之后没人
+接手，这本身就是故障信号）和 `disable` 的任务不参与判定。`skipped` 仍然是 tick 当时的决策（有 active run），只出现在
 `~/.pi/agent/schedule/tick.log`。
 
 ## 一次性与停机
 
-- `--once`：只消费第一个调度槽位，之后 `list` 标记 `⚠ consumed`，再触发也不会跑。
+- `--once`：只消费第一个调度槽位，之后 `NEXT` 显示 `—`、`SCHEDULE` 带 `· once`，再触发也不会跑。
+  没有 `⚠` 附属行：跑没跑只看 `LAST`。成功消费是 `exited (code 0) · <age>`；失败是
+  `exited (code 1)` 一类的失败状态；槽位被整个漏掉（没有 run）则持续显示 `missed · <age>`。
   **手动 `run` 不消耗它。** 唯一一次机会失败不重试：`remove` 再 `add`。
 - **catch-up 窗口 10 分钟**：开机/休眠恢复时，窗口内的槽位合并成**一次**派发（不会 9 分钟
-  补起 9 个进程）；窗口外的槽位记为 `missed` 直接跳过。
+  补起 9 个进程）；窗口外的欠账跳过不补跑。整段欠账都跌出窗口时，tick 记一次
+  `behind since`，列表显示 `missed`。
 - **超时 30 分钟**：先 SIGTERM，10 秒后 SIGKILL。detached 运行按进程组杀。
 
 ## 看结果的三条路
@@ -218,8 +229,8 @@ schedule uninstall-cron
 tail -f ~/.pi/agent/schedule/tick.log
 ```
 
-`tick.log` 只记行为不记噪音：`dispatched run`、`missed slot`、`dispatch failed`、
-以及 `once` 任务被 missed 消费这类一次性通告（同一事件只记一次）。
+`tick.log` 只记行为不记噪音：`dispatched run`、`behind since`（整段欠账都跌出窗口）、
+`dispatch failed`，以及 `once` 任务被 missed 消费这类一次性通告（同一事件只记一次）。
 
 **不要手改 `tasks/*.json`**：原子写、id 校验、cwd/prompt 检查全在 CLI 里。
 

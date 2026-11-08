@@ -101,7 +101,7 @@ test("launch: foreground and detached share argv/cwd, differing only in spawn op
         const dumpForeground = join(root, "dump-foreground.txt");
 
         process.env.FAKE_PI_DUMP = dumpDetached;
-        const dirDetached = claimRun(TASK, STAMP_A);
+        const dirDetached = claimRun(TASK, STAMP_A, { cwd: root });
         const codeDetached = await executeRun({
             taskId: TASK,
             stamp: STAMP_A,
@@ -112,7 +112,7 @@ test("launch: foreground and detached share argv/cwd, differing only in spawn op
         });
 
         process.env.FAKE_PI_DUMP = dumpForeground;
-        const dirForeground = claimRun(TASK, STAMP_B);
+        const dirForeground = claimRun(TASK, STAMP_B, { cwd: root });
         const codeForeground = await executeRun({
             taskId: TASK,
             stamp: STAMP_B,
@@ -222,7 +222,7 @@ test("executeRun records the route in metadata", async () => {
     });
     try {
         writeFakePi(root, DUMP_BODY);
-        claimRun(TASK, STAMP_A);
+        claimRun(TASK, STAMP_A, { cwd: root });
         const route = {
             provider: "engy",
             modelId: "deepseek-v4.1-flash",
@@ -259,7 +259,7 @@ test("prompt over MAX_ARG_STRLEN is delivered through the file, not argv", async
     try {
         writeFakePi(root, DUMP_BODY);
         const prompt = `HEAD${"y".repeat(200_000)}TAIL`;
-        claimRun(TASK, STAMP_A);
+        claimRun(TASK, STAMP_A, { cwd: root });
         const code = await executeRun({
             taskId: TASK,
             stamp: STAMP_A,
@@ -292,7 +292,7 @@ test("timeout: state becomes killed before the signal, and killed is terminal", 
         // On SIGTERM the fake pi exits 0: the run must stay `killed`, and the
         // observed exit code is recorded underneath that terminal state.
         writeFakePi(root, `trap 'exit 0' TERM\nsleep 60`);
-        const dir = claimRun(TASK, STAMP_A);
+        const dir = claimRun(TASK, STAMP_A, { cwd: root });
         const code = await executeRun({
             taskId: TASK,
             stamp: STAMP_A,
@@ -324,7 +324,7 @@ test("timeout: escalates to SIGKILL after the grace period", async () => {
     });
     try {
         writeFakePi(root, `trap '' TERM\nsleep 60`);
-        const dir = claimRun(TASK, STAMP_A);
+        const dir = claimRun(TASK, STAMP_A, { cwd: root });
         const startedAt = Date.now();
         const code = await executeRun({
             taskId: TASK,
@@ -355,7 +355,7 @@ test("foreground timeout kills the pid only, never the caller's process group", 
     const sentinel = spawn("sleep", ["30"], { stdio: "ignore" });
     try {
         writeFakePi(root, `exec sleep 60`);
-        const dir = claimRun(TASK, STAMP_A);
+        const dir = claimRun(TASK, STAMP_A, { cwd: root });
         const code = await executeRun({
             taskId: TASK,
             stamp: STAMP_A,
@@ -399,7 +399,7 @@ test("containment: a tool child that starts its own session escapes the group ki
         // pi's own SIGTERM handler, not our group kill — this test pins the
         // limitation instead of pretending otherwise.
         writeFakePi(root, `setsid sleep 30 &\necho $! > "$FAKE_PI_GRANDCHILD"\nsleep 60`);
-        claimRun(TASK, STAMP_A);
+        claimRun(TASK, STAMP_A, { cwd: root });
         const code = await executeRun({
             taskId: TASK,
             stamp: STAMP_A,
@@ -431,7 +431,7 @@ test("effectiveState: dead helper with live pi is an orphan, not a running job",
     const root = makeScratch();
     const pi = spawn("sleep", ["30"], { stdio: "ignore" });
     try {
-        const dir = claimRun(TASK, STAMP_A);
+        const dir = claimRun(TASK, STAMP_A, { cwd: root });
         const deadHelper = spawn("sleep", ["30"], { stdio: "ignore" });
         try {
             assert.ok(typeof pi.pid === "number" && typeof deadHelper.pid === "number");
@@ -501,7 +501,7 @@ test("activeRun: any trigger holds the task, terminal runs do not", async () => 
     const pi = spawn("sleep", ["30"], { stdio: "ignore" });
     try {
         assert.ok(typeof pi.pid === "number");
-        const dirA = claimRun(TASK, STAMP_A);
+        const dirA = claimRun(TASK, STAMP_A, { cwd: root });
         const base: RunMetadata = {
             version: 1,
             taskId: TASK,
@@ -517,7 +517,7 @@ test("activeRun: any trigger holds the task, terminal runs do not", async () => 
         assert.equal(listRuns(TASK).length, 1);
 
         // A live manual run must block the scheduler as well.
-        const dirB = claimRun(TASK, STAMP_B);
+        const dirB = claimRun(TASK, STAMP_B, { cwd: root });
         writeMetadata(dirB, {
             ...base,
             trigger: "manual",
@@ -548,11 +548,32 @@ test("activeRun: any trigger holds the task, terminal runs do not", async () => 
 test("claimRun: the same second can only be claimed once", () => {
     const root = makeScratch();
     try {
-        const dir = claimRun(TASK, STAMP_A);
+        const dir = claimRun(TASK, STAMP_A, { cwd: root });
         assert.ok(existsSync(dir));
-        assert.throws(() => claimRun(TASK, STAMP_A), /EEXIST/);
-        assert.throws(() => claimRun("../../etc", STAMP_A), /invalid task id/);
-        assert.throws(() => claimRun(TASK, "../escape"), /invalid run stamp/);
+        assert.throws(() => claimRun(TASK, STAMP_A, { cwd: root }), /EEXIST/);
+        assert.throws(() => claimRun("../../etc", STAMP_A, { cwd: root }), /invalid task id/);
+        assert.throws(() => claimRun(TASK, "../escape", { cwd: root }), /invalid run stamp/);
+    } finally {
+        cleanupScratch(root);
+    }
+});
+
+test("claimRun: the claim is immediately a visible `starting` run", () => {
+    const root = makeScratch();
+    try {
+        const dir = claimRun(TASK, STAMP_A, { trigger: "scheduled", cwd: root });
+        const metadata = readMetadata(dir);
+        if (!metadata) throw new Error("metadata exists right after the claim");
+        assert.equal(metadata.state, "starting");
+        assert.equal(metadata.trigger, "scheduled");
+        assert.equal(metadata.pid, null);
+        assert.equal(metadata.cwd, root);
+        assert.equal(metadata.sessionFile, sessionPath(dir));
+        assert.ok(Number.isFinite(Date.parse(metadata.startedAt)));
+        assert.ok(metadata.launchArgs.includes(`@${join(dir, "prompt.md")}`));
+        // No helper picked it up: eventually the claim must read as stale.
+        const effective = effectiveState(metadata, new Date(Date.parse(metadata.startedAt) + 61_000));
+        assert.equal(effective, "stale");
     } finally {
         cleanupScratch(root);
     }
@@ -649,7 +670,7 @@ test("readRunSummary: reports effective state and last assistant text", async ()
             message: { role: "assistant", content: [{ type: "text", text: "done" }] },
         })}\n`;
         writeFakePi(root, `exit 7`);
-        const dir = claimRun(TASK, STAMP_A);
+        const dir = claimRun(TASK, STAMP_A, { cwd: root });
         const code = await executeRun({
             taskId: TASK,
             stamp: STAMP_A,
@@ -680,7 +701,7 @@ test("executeRun: spawn failure is recorded as error, not thrown", async () => {
     });
     try {
         mkdirSync(join(root, "schedule"), { recursive: true });
-        const dir = claimRun(TASK, STAMP_A);
+        const dir = claimRun(TASK, STAMP_A, { cwd: root });
         const code = await executeRun({
             taskId: TASK,
             stamp: STAMP_A,

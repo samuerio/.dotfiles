@@ -47,8 +47,10 @@ function humanCron(expr: string): string {
 
 function nextFireText(task: Task): string {
     const watermark = readWatermark(task.id);
-    const base = watermark.lastSlotConsumed
-        ? new Date(watermark.lastSlotConsumed)
+    // Same one meaning as the CLI's NEXT column: `—` is a consumed one-shot.
+    if (task.once && watermark.accountedThrough !== null) return "—";
+    const base = watermark.accountedThrough
+        ? new Date(watermark.accountedThrough)
         : new Date(task.createdAt);
     try {
         return nextCron(task.cron, base).toLocaleString();

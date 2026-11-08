@@ -78,11 +78,11 @@ This machine fixes it in `~/.pi/agent/auth.json` with `api_key` entries whose `k
 
 ## One-Shot Tasks
 
-Use `--once`: the task fires exactly once and is then consumed (the definition file stays, marked consumed, so it remains auditable).
+Use `--once`: the task fires exactly once and is then consumed (the definition file stays, with `NEXT` showing `—` and `SCHEDULE` carrying `· once`, so it remains auditable).
 
 Do not implement one-shot behaviour with "remember to remove it afterwards": nobody removes it.
 
-Warn the user that a `--once` task gets exactly one attempt. If that attempt fails, it is not retried automatically; `schedule list` marks it `consumed (last run failed)` and they can `remove` it and re-add.
+Warn the user that a `--once` task gets exactly one attempt. If that attempt fails, it is not retried automatically; `LAST` shows the failure (`exited (code 1)`, `error`, ...) and they can `remove` it and re-add. If its slot was never run at all, `LAST` keeps showing `missed · <age>`.
 
 ## Safety
 
@@ -107,10 +107,13 @@ A scheduled run's result lives in its session transcript: `~/.pi/agent/schedule/
 |---|---|
 | `running` | process alive, helper alive, timeout enforced |
 | `orphan` | the pi process is alive but its supervisor died, so the timeout no longer applies; the scheduler may reap it |
-| `starting` / `stale` | claimed but no pid recorded yet / claim never completed |
+| `starting` / `stale` | claimed but no pid recorded yet / claim never completed (a dispatch that never reached the helper stays visible here) |
 | `exited` / `killed` / `error` | terminal: finished, killed by the 30-minute timeout, or failed to start |
+| `missed` | not a run state: the task owed a slot that never ran. `LAST` shows `missed · <age>` and overrides the run state |
 
-`skipped` and `missed` are tick-time decisions and are not run directories: they only appear in `~/.pi/agent/schedule/tick.log`. A slot missed during downtime longer than the 10-minute catch-up window is deliberately not replayed.
+`missed` is computed on the read side from the newest run's `startedAt` (or `createdAt` before the first run): only when every owed slot has left the 10-minute catch-up window. A task that is `running` / `starting` / `orphan` / `stale` (a claim nobody picked up, which is its own fault signal), or `disabled`, is never reported as missed. Missed slots are deliberately not replayed.
+
+`skipped` is a tick-time decision (an active run already holds the task) and is not a run directory: it only appears in `~/.pi/agent/schedule/tick.log`. The write-side watermark (`accountedThrough` in `runs/<id>/state.json`) is written even for a missed slot, which is exactly why `list` does not rely on it.
 
 ## Arming the Scheduler
 

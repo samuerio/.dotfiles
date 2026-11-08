@@ -52,10 +52,16 @@ node --test --test-name-pattern="uninstall" \
 node --test --watch pi/agent/extensions/schedule/tests/
 ```
 
-当前基线：`cron 19 / store 28 / run 15 / tick 31 = 93 pass, 0 fail`。
+当前基线：`cli 11 / cron 19 / routing 8 / runs-view 7 / run 18 / slots 7 / store 30 /
+tick 36 = 136 pass, 0 fail`。
 
 读测试的顺序建议：`cron.test.ts` 看语义契约 → `run.test.ts` 看状态机 →
-`tick.test.ts` 看调度决策。这三份是规格，改实现前先看它们期望什么。
+`slots.test.ts` 看读写共用的槽位判定 → `tick.test.ts` 看写侧决策 →
+`cli.test.ts` 看读侧（`LAST` / `NEXT` / `missed`）。这几份是规格，改实现前先看
+它们期望什么。
+
+`slots.test.ts` 里那条「anchor 12:00 / now 12:40 / `*/5` 仍判 due」是防回归用例：只算
+`first` 会把「窗口内还有可补槽位」错判成 missed，进而让 tick 丢掉一次该有的派发。
 
 ## 第 2 层：CLI 端到端
 
@@ -155,7 +161,9 @@ cat /tmp/sched-t/agent/schedule/tick.log
 `dispatched` 只是「claim 成功并派生 helper」，helper 是 detached 的，跑完要等几秒才在
 `list` 里变成终态。别在 tick 后立刻断言 `exited`。
 
-`once` 任务跨过第一个槽位后 `list` 会多一行 `⚠ consumed`，再 tick 不派发。
+`once` 任务跨过第一个槽位后 `NEXT` 变成 `—`（`SCHEDULE` 带 `· once`），再 tick 不派发。
+读侧的 `missed` 要等槽位跌出 10 分钟窗口才会出现；想立刻验，用第 1 层里带注入时钟的
+`cli.test.ts`（或 `slots.test.ts`），不要靠等真时钟。
 
 ## 第 4 层：crontab（不要碰真 crontab）
 

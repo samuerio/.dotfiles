@@ -14,7 +14,6 @@ import { activeRun, claimRun, patchMetadata, readMetadata, writeMetadata } from 
 import type { RunMetadata } from "../run.ts";
 import { addTask, readWatermark, runDir, taskRunsDir, tasksDir, writeWatermark } from "../store.ts";
 import {
-    CATCHUP_MS,
     CRON_BLOCK_BEGIN,
     CRON_BLOCK_END,
     TICK_SCHEDULE,
@@ -90,7 +89,7 @@ function makeTask(options: { cron?: string; once?: boolean; createdAt?: Date; en
 
 /** A metadata document that claims an active run without any real process. */
 function writeFakeRunningRun(taskId: string, stamp: string, patch: Partial<RunMetadata> = {}): string {
-    const dir = claimRun(taskId, stamp);
+    const dir = claimRun(taskId, stamp, { cwd: tmpdir() });
     const metadata: RunMetadata = {
         version: 1,
         taskId,
@@ -119,21 +118,54 @@ describe("tick: catch-up", () => {
         assert.equal(result.dispatched.length, 1);
         assert.equal(result.missed, 0);
         assert.equal(harness.dispatches[0].taskId, task.id);
-        // The *current* slot wins, not the oldest due slot.
-        assert.equal(Date.parse(String(readWatermark(task.id).lastSlotConsumed)), at(6, 8, 3).getTime());
+        // The *current* slot wins, not the oldest due slot, and the watermark
+        // records the accounted instant (the tick's now), not the slot.
+        assert.equal(Date.parse(String(readWatermark(task.id).accountedThrough)), at(6, 8, 3, 10).getTime());
     });
 
-    test("downtime longer than CATCHUP_MS records every old slot as missed but fires once", () => {
+    test("a long downtime with a slot still in the window fires once and counts no miss", () => {
         const task = makeTask({ createdAt: at(6, 7, 52, 30) });
         const harness = newHarness();
         const result = tickAt(at(6, 8, 3, 10), harness);
 
-        // 07:53..07:53 are >10min old at 08:03:10 → all missed, coalesced into
-        // one dispatch for the current slot.
+        // 07:53..08:03 are all due, but 08:03 is inside the window → the
+        // backlog is coalesced into one dispatch, not one missed per slot.
         assert.equal(result.dispatched.length, 1);
-        assert.ok(result.missed > 0, "old slots are reported as missed");
-        assert.equal(Date.parse(String(readWatermark(task.id).lastSlotConsumed)), at(6, 8, 3).getTime());
-        assert.ok(harness.logs.some((line) => line.includes("missed slot")));
+        assert.equal(result.missed, 0);
+        assert.equal(Date.parse(String(readWatermark(task.id).accountedThrough)), at(6, 8, 3, 10).getTime());
+        assert.ok(!harness.logs.some((line) => line.includes("behind since")));
+    });
+
+    test("a backlog entirely outside the window counts one missed and dispatches nothing", () => {
+        const task = makeTask({ cron: "0 * * * *", createdAt: at(6, 7, 0) });
+        const harness = newHarness();
+        const result = tickAt(at(6, 8, 20), harness);
+
+        // 08:00 is owed but >10 minutes old, and the next slot is 09:00.
+        assert.equal(result.dispatched.length, 0);
+        assert.equal(result.missed, 1);
+        assert.equal(Date.parse(String(readWatermark(task.id).accountedThrough)), at(6, 8, 20).getTime());
+        assert.ok(harness.logs.some((line) => line.includes("behind since")));
+    });
+
+    test("regression: a stale watermark with a slot still in the window is due, not missed", () => {
+        // The plan's counter-example: */5, anchor 12:00, now 12:40, cutoff 12:30.
+        // first = 12:05 is out of the window, but nextCron(12:30) = 12:35 is not.
+        const task = makeTask({ cron: "*/5 * * * *", createdAt: at(6, 11, 0) });
+        writeWatermark(task.id, at(6, 12, 0).toISOString());
+        const harness = newHarness();
+        const result = tickAt(at(6, 12, 40), harness);
+
+        assert.equal(result.dispatched.length, 1, "dispatches exactly once");
+        assert.equal(result.missed, 0);
+        assert.equal(Date.parse(String(readWatermark(task.id).accountedThrough)), at(6, 12, 40).getTime());
+    });
+
+    test("a pending slot writes no watermark", () => {
+        const task = makeTask({ cron: "0 9 * * *", createdAt: at(6, 8, 0) });
+        const harness = newHarness();
+        tickAt(at(6, 8, 59), harness);
+        assert.equal(readWatermark(task.id).accountedThrough, null);
     });
 
     test("a long downtime does not wedge the task: the next tick sees a fresh watermark", () => {
@@ -152,7 +184,7 @@ describe("tick: catch-up", () => {
         const third = newHarness();
         tickAt(at(6, 8, 4, 10), third);
         assert.equal(third.dispatches.length, 1);
-        assert.equal(Date.parse(String(readWatermark(task.id).lastSlotConsumed)), at(6, 8, 4).getTime());
+        assert.equal(Date.parse(String(readWatermark(task.id).accountedThrough)), at(6, 8, 4, 10).getTime());
     });
 
     test("a future slot is not fired early", () => {
@@ -182,6 +214,8 @@ describe("tick: cross-second dedupe and mutual exclusion", () => {
         assert.equal(harness.dispatches.length, 0);
         assert.deepEqual(result.skipped, [task.id]);
         assert.ok(activeRun(task.id), "the fake run still holds the task");
+        // A skipped slot is not a missed slot: the watermark must not move.
+        assert.equal(readWatermark(task.id).accountedThrough, null);
     });
 
     test("a terminal run does not block the scheduler", () => {
@@ -215,7 +249,26 @@ describe("tick: once", () => {
         const second = newHarness();
         tickAt(at(7, 9, 0, 10), second);
         assert.equal(second.dispatches.length, 0);
-        assert.equal(Date.parse(String(readWatermark(task.id).lastSlotConsumed)), at(6, 9, 0).getTime());
+        assert.equal(Date.parse(String(readWatermark(task.id).accountedThrough)), at(6, 9, 0, 10).getTime());
+    });
+
+    test("the consumed guard runs before the verdict for a high-frequency once task", () => {
+        const task = makeTask({
+            cron: "* * * * *",
+            once: true,
+            createdAt: at(6, 8, 0),
+        });
+        const first = newHarness();
+        tickAt(at(6, 8, 1, 10), first);
+        assert.equal(first.dispatches.length, 1);
+
+        // Ten minutes later the slot after the anchor is still in the past
+        // (verdict would be `due`); only the watermark stops a second fire.
+        const second = newHarness();
+        tickAt(at(6, 8, 11, 10), second);
+        assert.equal(second.dispatches.length, 0);
+        assert.ok(second.logs.some((line) => line.includes("already consumed")));
+        assert.equal(Date.parse(String(readWatermark(task.id).accountedThrough)), at(6, 8, 1, 10).getTime());
     });
 
     test("a once task consumed by a missed slot never fires and logs the reason", () => {
@@ -228,8 +281,8 @@ describe("tick: once", () => {
         const result = tickAt(at(6, 12, 0), harness);
 
         assert.equal(harness.dispatches.length, 0);
-        assert.ok(result.missed > 0);
-        assert.equal(Date.parse(String(readWatermark(task.id).lastSlotConsumed)), at(6, 9, 0).getTime());
+        assert.equal(result.missed, 1);
+        assert.equal(Date.parse(String(readWatermark(task.id).accountedThrough)), at(6, 12, 0).getTime());
         assert.ok(harness.logs.some((line) => line.includes("consumed by a missed slot")));
     });
 });
@@ -312,6 +365,16 @@ describe("tick: log and helpers", () => {
         const path = join(scratch, "agent", "schedule", "tick.log");
         assert.ok(existsSync(path));
         assert.match(readFileSync(path, "utf8"), /hello\n$/);
+    });
+
+    test("appendTickLog appends instead of truncating the previous tick's lines", () => {
+        appendTickLog("first");
+        appendTickLog("second");
+        const path = join(scratch, "agent", "schedule", "tick.log");
+        const content = readFileSync(path, "utf8").trimEnd().split("\n");
+        assert.equal(content.length, 2);
+        assert.match(content[0], /first$/);
+        assert.match(content[1], /second$/);
     });
 });
 
@@ -541,15 +604,22 @@ describe("install-cron", () => {
 });
 
 describe("tick: run integration", () => {
-    test("a dispatched slot leaves a claim directory behind", () => {
+    test("a dispatched slot leaves a visible `starting` claim behind", () => {
         const task = makeTask({ createdAt: at(6, 8, 0, 30) });
         const harness = newHarness();
         tickAt(at(6, 8, 4, 10), harness);
         const stamps = readdirSync(taskRunsDir(task.id)).filter((entry) => entry.includes("-"));
         assert.equal(stamps.length, 1);
         assert.equal(stamps[0], harness.dispatches[0].stamp);
-        // The helper has not written metadata yet: the claim alone is enough to
-        // block a second dispatch of the same slot.
-        assert.equal(readMetadata(runDir(task.id, stamps[0])), undefined);
+        // Stage 0: the claim itself is a run record, so a dispatch that never
+        // reaches the helper shows up as stale instead of being mistaken for a
+        // missed slot.
+        const metadata = readMetadata(runDir(task.id, stamps[0]));
+        if (!metadata) throw new Error("claim metadata exists");
+        assert.equal(metadata.state, "starting");
+        assert.equal(metadata.trigger, "scheduled");
+        assert.equal(metadata.cwd, tmpdir());
+        assert.equal(metadata.pid, null);
+        assert.ok(Number.isFinite(Date.parse(metadata.startedAt)));
     });
 });
