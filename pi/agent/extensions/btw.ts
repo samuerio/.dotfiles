@@ -39,7 +39,6 @@ import {
 	type KeybindingsManager,
 	type OverlayHandle,
 	type TuiMouseEvent,
-	type TuiMouseEventResult,
 	type Component,
 	type TUI,
 	ScrollView,
@@ -128,11 +127,9 @@ type ToolCallInfo = {
 	status: "running" | "done" | "error";
 };
 
+/** Drop pi's trailing dynamic footer (date/cwd lines) as one contiguous block. */
 function stripDynamicSystemPromptFooter(systemPrompt: string): string {
-	return systemPrompt
-		.replace(/\nCurrent date and time:[^\n]*(?:\nCurrent working directory:[^\n]*)?$/u, "")
-		.replace(/\nCurrent working directory:[^\n]*$/u, "")
-		.trim();
+	return systemPrompt.replace(/(?:\nCurrent (?:date and time|working directory):[^\n]*)+$/u, "").trim();
 }
 
 function createBtwResourceLoader(ctx: ExtensionContext, appendSystemPrompt: string[] = [BTW_SYSTEM_PROMPT]): ResourceLoader {
@@ -152,31 +149,28 @@ function createBtwResourceLoader(ctx: ExtensionContext, appendSystemPrompt: stri
 	};
 }
 
-function extractText(parts: AssistantMessage["content"]): string {
+/** Join text blocks from both trusted LLM responses and untrusted event payloads. */
+function joinTextParts(parts: unknown): string {
+	if (!Array.isArray(parts)) return "";
 	return parts
-		.filter((part) => part.type === "text")
+		.filter((part): part is { type: "text"; text: string } => {
+			return (
+				!!part &&
+				typeof part === "object" &&
+				(part as { type?: unknown }).type === "text" &&
+				typeof (part as { text?: unknown }).text === "string"
+			);
+		})
 		.map((part) => part.text)
 		.join("\n")
 		.trim();
 }
 
 function extractEventAssistantText(message: unknown): string {
-	if (!message || typeof message !== "object") {
-		return "";
-	}
-
+	if (!message || typeof message !== "object") return "";
 	const maybeMessage = message as { role?: unknown; content?: unknown };
-	if (maybeMessage.role !== "assistant" || !Array.isArray(maybeMessage.content)) {
-		return "";
-	}
-
-	return maybeMessage.content
-		.filter((part): part is { type: "text"; text: string } => {
-			return !!part && typeof part === "object" && (part as { type?: unknown }).type === "text";
-		})
-		.map((part) => part.text)
-		.join("\n")
-		.trim();
+	if (maybeMessage.role !== "assistant") return "";
+	return joinTextParts(maybeMessage.content);
 }
 
 function getLastAssistantMessage(session: AgentSession): AssistantMessage | null {
@@ -205,9 +199,12 @@ const BTW_TEXT_LIMIT = 32768;
 
 let transcriptDetail: TranscriptDetail = "preview";
 
-/** Ctrl+O cycle: full → preview → compact → full. */
+/** Ctrl+O cycle: full → preview → compact → full. Tool and thread-item renders
+ * both key off the detail level, so a cycle invalidates both caches. */
 function cycleTranscriptDetail(): void {
 	transcriptDetail = DETAIL_CYCLE[(DETAIL_CYCLE.indexOf(transcriptDetail) + 1) % DETAIL_CYCLE.length];
+	transcriptCache = new WeakMap<BtwDetails, ThreadItemCacheEntry>();
+	pendingToolCache.clear();
 }
 
 /** Fully cover the overlay slot; only trusted renderers emit terminal sequences. */
@@ -222,6 +219,10 @@ function fillViewport(lines: string[], width: number, height: number): string[] 
 	return result;
 }
 
+/** Side padding keeps headings, bodies, tool bands and chrome off the hard
+ * terminal edge; fillViewport clips and right-pads the rest. */
+const pad2 = (lines: string[]): string[] => lines.map((line) => (line ? ` ${line} ` : " "));
+
 /** Sanitize untrusted text before any renderer or wrapper interpolates it. */
 function stripUnsafeTerminalText(value: string): string {
 	return stripTerminalSequences(value)
@@ -232,15 +233,19 @@ function stripUnsafeTerminalText(value: string): string {
 /** ANSI-aware wrapping for plain text (flush-left, no padding per BTW spec). */
 function wrapPlain(value: string, width: number): string[] {
 	const safe = stripUnsafeTerminalText(value);
-	const bounded = safe.length > BTW_TEXT_LIMIT ? safe.slice(0, BTW_TEXT_LIMIT) : safe;
+	const bounded = safe.slice(0, BTW_TEXT_LIMIT);
 	return bounded.split("\n").flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width)));
 }
 
-/** Sanitized tools snapshot for a finished turn; aborted calls freeze as errored. */
+/**
+ * Sanitized tools snapshot for a finished turn; aborted calls freeze as errored.
+ * Every entry is copied: thread-item caches key on snapshot identity, so a frozen
+ * snapshot must never share mutable state with the live pending array.
+ */
 function snapshotToolCalls(calls: ToolCallInfo[]): ToolCallInfo[] {
-	return calls.map((tool) =>
-		tool.status === "running" ? { ...tool, isError: true, status: "error" as const } : tool,
-	);
+	return calls.map((tool) => {
+		return tool.status === "running" ? { ...tool, isError: true, status: "error" as const } : { ...tool };
+	});
 }
 
 /** Same themed markdown (incl. code highlighting) as pi's main transcript. */
@@ -263,31 +268,27 @@ function markdownToLines(value: string, width: number, theme: BtwTheme, thinking
 
 type ThreadItemCacheEntry = {
 	width: number;
-	detail: TranscriptDetail;
-	toolsKey: string;
+	tools: ToolCallInfo[];
 	lines: string[];
 };
-const transcriptCache = new WeakMap<BtwDetails, ThreadItemCacheEntry>();
+/** Stable identity for thread items with no tool calls (cache key). */
+const NO_TOOLS: ToolCallInfo[] = [];
+let transcriptCache = new WeakMap<BtwDetails, ThreadItemCacheEntry>();
 
 /**
  * One Q&A turn as rhythm rows: `you` heading + question, blank line,
  * `assistant` heading + this turn's tool boxes + markdown answer, blank line.
  * Flush-left, no padding.
  */
-function renderThreadItem(
-	item: BtwDetails,
-	theme: BtwTheme,
-	width: number,
-	detail: TranscriptDetail,
-	tools: ToolCallInfo[],
-): string[] {
-	const toolsKey = tools.map((tc) => `${tc.toolCallId}:${tc.status}`).join(",");
+function renderThreadItem(item: BtwDetails, theme: BtwTheme, width: number, tools: ToolCallInfo[]): string[] {
 	const cached = transcriptCache.get(item);
-	if (cached && cached.width === width && cached.detail === detail && cached.toolsKey === toolsKey) {
+	if (cached && cached.width === width && cached.tools === tools) {
 		return cached.lines;
 	}
 	// Agent-manager semantics: detail cycles affect only thinking and tool boxes;
-	// question/answer text renders full at every level.
+	// question/answer text renders full at every level. Tool snapshots are
+	// immutable, so identity is a sufficient key; cycleTranscriptDetail() drops
+	// this cache when the detail level changes.
 	const lines: string[] = [
 		theme.fg("accent", "you"),
 		...wrapPlain(item.question, width),
@@ -297,7 +298,7 @@ function renderThreadItem(
 		...markdownToLines(item.answer, width, theme),
 		"",
 	];
-	transcriptCache.set(item, { width, detail, toolsKey, lines });
+	transcriptCache.set(item, { width, tools, lines });
 	return lines;
 }
 
@@ -312,7 +313,7 @@ function collapseRendered(lines: string[], theme: BtwTheme, ellipsis: string): s
 
 /**
  * Rendered tool boxes cached by toolCallId, serving both the in-flight turn and
- * finished history turns; ids absent from the latest pass are evicted.
+ * finished history turns. Invalidated at turn boundaries and on detail cycles.
  */
 type PendingToolCacheEntry = {
 	args: unknown;
@@ -334,7 +335,6 @@ function renderToolInfos(toolCalls: ToolCallInfo[], width: number): string[] {
 	if (toolCalls.length === 0) {
 		return [];
 	}
-	const liveIds = new Set(toolCalls.map((tc) => tc.toolCallId));
 	const lines: string[] = [];
 	for (const tc of toolCalls) {
 		const running = tc.status === "running";
@@ -372,9 +372,9 @@ function renderToolInfos(toolCalls: ToolCallInfo[], width: number): string[] {
 			lines: rendered,
 		});
 	}
-	for (const id of pendingToolCache.keys()) {
-		if (!liveIds.has(id)) pendingToolCache.delete(id);
-	}
+	// No per-paint eviction: each thread item renders its own tool boxes, so a
+	// sweep here would discard boxes another item just cached on the same paint.
+	// resetPendingTurn() and cycleTranscriptDetail() own the invalidation.
 	return lines;
 }
 
@@ -679,8 +679,6 @@ class BtwOverlay extends Container implements Focusable {
 		}
 		if (matchesKey(data, Key.ctrl("o"))) {
 			cycleTranscriptDetail();
-			// Cached tool renders are keyed by detail, so the cycle drops them all.
-			pendingToolCache.clear();
 			this.tui.requestRender();
 			return;
 		}
@@ -734,10 +732,6 @@ class BtwOverlay extends Container implements Focusable {
 		// sanitized row so a newline cannot evict hint/input from the frame.
 		const statusLine = this.theme.fg(statusColor(status), wrapPlain(status, columns)[0] ?? "");
 		const inputLine = this.input.render(columns)[0] ?? "";
-
-		// LiveAgentView-style side padding keeps headings, bodies, tool bands and
-		// chrome off the hard terminal edge; fillViewport clips the rest.
-		const pad2 = (lines: string[]): string[] => lines.map((line) => (line ? ` ${line} ` : " "));
 
 		// Under four rows there is no body: the input survives, then the header, then the hint.
 		if (height === 1) return fillViewport(pad2([inputLine]), width, height);
@@ -812,11 +806,11 @@ export default function (pi: ExtensionAPI) {
 
 		const lines: string[] = [];
 		for (const item of thread) {
-			// Items hit the (item, width, detail, toolsKey) cache; a flying tool
-			// status flip re-renders only the owning item. One throwing renderer
+			// Finished items cache by width + immutable tool snapshot, so only the
+			// pending turn re-renders as tools stream. One throwing renderer
 			// degrades to one line instead of hiding the whole transcript.
 			try {
-				lines.push(...renderThreadItem(item, theme, width, transcriptDetail, threadTools.get(item) ?? []));
+				lines.push(...renderThreadItem(item, theme, width, threadTools.get(item) ?? NO_TOOLS));
 			} catch (error) {
 				const label = stripUnsafeTerminalText(item.question).slice(0, 40);
 				lines.push(theme.fg("error", `[render error: ${label}] ${error instanceof Error ? error.message : String(error)}`));
@@ -929,17 +923,15 @@ export default function (pi: ExtensionAPI) {
 		}
 	}
 
-	async function resetThread(ctx: ExtensionContext | ExtensionCommandContext, persist = true): Promise<void> {
+	async function resetThread(): Promise<void> {
 		thread = [];
 		resetPendingTurn();
 		sideBusy = false;
 		setOverlayDraft("");
 		setOverlayStatus("Ready");
 		await disposeSideSession();
-		if (persist) {
-			const details: BtwResetDetails = { timestamp: Date.now() };
-			pi.appendEntry(BTW_RESET_TYPE, details);
-		}
+		const details: BtwResetDetails = { timestamp: Date.now() };
+		pi.appendEntry(BTW_RESET_TYPE, details);
 		syncOverlay();
 	}
 
@@ -1177,7 +1169,7 @@ export default function (pi: ExtensionAPI) {
 		return activeSideSession;
 	}
 
-	async function ensureOverlay(ctx: ExtensionCommandContext | ExtensionContext): Promise<void> {
+	async function ensureOverlay(ctx: ExtensionCommandContext): Promise<void> {
 		if (!ctx.hasUI) {
 			return;
 		}
@@ -1300,7 +1292,7 @@ export default function (pi: ExtensionAPI) {
 				throw new Error(response.errorMessage || "Summary request failed.");
 			}
 
-			return extractText(response.content) || "(No summary generated)";
+			return joinTextParts(response.content) || "(No summary generated)";
 		} finally {
 			try {
 				await session.abort();
@@ -1327,7 +1319,7 @@ export default function (pi: ExtensionAPI) {
 				pi.sendUserMessage(message, { deliverAs: "followUp" });
 			}
 
-			await resetThread(ctx);
+			await resetThread();
 			notify(ctx, "Injected BTW summary into main chat.", "info");
 		} catch (error) {
 			notify(ctx, error instanceof Error ? error.message : String(error), "error");
@@ -1385,7 +1377,6 @@ export default function (pi: ExtensionAPI) {
 			resetPendingTurn();
 			pendingQuestion = question;
 			setOverlayStatus("Streaming side response...");
-			syncOverlay();
 
 			await side.session.prompt(question, { source: "extension" });
 			const response = getLastAssistantMessage(side.session);
@@ -1399,7 +1390,7 @@ export default function (pi: ExtensionAPI) {
 				throw new Error(response.errorMessage || "BTW request failed.");
 			}
 
-			const answer = extractText(response.content) || "(No text response)";
+			const answer = joinTextParts(response.content) || "(No text response)";
 			pendingAnswer = answer;
 			const details: BtwDetails = {
 				question,
@@ -1434,7 +1425,7 @@ export default function (pi: ExtensionAPI) {
 		}
 	}
 
-	async function submitFromOverlay(ctx: ExtensionContext | ExtensionCommandContext, rawValue: string): Promise<void> {
+	async function submitFromOverlay(ctx: ExtensionCommandContext, rawValue: string): Promise<void> {
 		const question = rawValue.trim();
 		if (!question) {
 			setOverlayStatus("Enter a question first.");
@@ -1442,11 +1433,6 @@ export default function (pi: ExtensionAPI) {
 		}
 
 		setOverlayDraft("");
-		if (!("waitForIdle" in ctx)) {
-			setOverlayStatus("BTW submit requires command context. Re-open with /btw.");
-			return;
-		}
-
 		await runBtwPrompt(ctx, question);
 	}
 
@@ -1465,13 +1451,13 @@ export default function (pi: ExtensionAPI) {
 						setOverlayStatus("Continuing BTW thread.");
 						await ensureOverlay(ctx);
 					} else if (choice === "Start fresh") {
-						await resetThread(ctx, true);
+						await resetThread();
 						setOverlayStatus("Ready");
 						await ensureOverlay(ctx);
 					}
 					// null = user cancelled (Esc), do nothing
 				} else {
-					await resetThread(ctx, true);
+					await resetThread();
 					setOverlayStatus("Ready");
 					await ensureOverlay(ctx);
 				}
