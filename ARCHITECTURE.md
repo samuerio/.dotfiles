@@ -49,8 +49,11 @@ Enter 上下文敏感：词干净时注入选中命中、词改动时重扫，Es
 `roles.subagents` pin（provider/model/thinkingLevel），供 `answer`、`handoff`、`compact-worker` 与 `goal` 的
 verifier 发起一次性 LLM 请求时使用；`lib/session-common.ts`：session JSONL 解析管线（读/解析分离：readSessionText 供预滤、
 parseSessionText 供解析），供 `read-session` 与 `find-session` 共用；
-`lib/session-preview.ts`：会话预览 overlay + read_session 风格转录格式化，供 `find-session`（ctrl+o 全文预览）
-与 `worktree-task`（preview 动作）共用；`lib/session-picker.ts`：内置 /resume 选择器的
+`lib/session-preview.ts`：满屏会话预览 overlay（逐项懒渲染 + 滚动/细节档）+ read_session 风格转录格式化，
+供 `find-session`（ctrl+o 全文预览）、`worktree-task`（preview 动作）与 `schedule`（run 会话预览）共用，
+其内容来自 `lib/transcript-items.ts`（会话消息 → 视图模型，pi-free，可单测）、
+`lib/transcript-render.ts`（视图模型 → 终端行，正文走 pi 的 markdown、工具走 pi 的渲染器）与
+`lib/transcript-tool.ts`（工具调用渲染 fork，btw 与预览共用）；`lib/session-picker.ts`：内置 /resume 选择器的
 ctrl+o 预览子类封装（pickSession），供 `worktree-task` 挑选会话；
 `lib/review-target.ts`：ReviewTarget 模型 + git 基础设施
 （merge base、分支/提交列表、PR checkout）+ preset 选择器（可选附加项）+ 直参解析，

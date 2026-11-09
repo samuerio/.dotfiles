@@ -7,6 +7,9 @@ import {
 	type Theme,
 } from "@earendil-works/pi-coding-agent";
 import { loadSessionEntries, textOf } from "./session-common.ts";
+import type { TranscriptItem } from "./transcript-items.ts";
+import { loadTranscriptItems, renderItem, type TranscriptDocument } from "./transcript-render.ts";
+import type { Detail } from "./transcript-tool.ts";
 import {
 	Key,
 	Markdown,
@@ -123,23 +126,45 @@ export function loadSessionTranscript(sessionFile: string): string {
 
 // ─── Session Preview Overlay ──────────────────────────────────────
 
+// Frame chrome around the content rows: title, path and a blank above; a blank
+// and the actions row below; one border row on each side.
+const HEADER_ROWS = 3;
+const FOOTER_ROWS = 2;
+const BORDER_ROWS = 2;
+
+/** Ctrl+O order for the preview: preview → full → compact. */
+const DETAIL_CYCLE: Detail[] = ["preview", "full", "compact"];
+
 /**
- * Session preview overlay: self-contained copy of viewer.ts's markdown
- * viewer (scroll / half-page / page / fullscreen). Renders the transcript
- * text through the Markdown component so ## headers get heading styles.
+ * Session preview overlay: whole-terminal transcript viewer (scroll / half-page
+ * / page / top / bottom). Content is a list of transcript items rendered lazily
+ * item by item, so an 800-message session paints its first screen without
+ * rendering the tail; tool calls go through pi's own renderers with the
+ * session's cwd.
  */
 class SessionPreviewOverlay {
 	private readonly title: string;
 	private readonly filePath: string;
-	private readonly markdown: Markdown;
-	private scrollOffset = 0;
-	private viewHeight = 0;
-	private totalLines = 0;
 	private readonly tui: TUI;
 	private readonly theme: Theme;
 	private readonly keybindings: KeybindingsManager;
 	private readonly onClose: () => void;
-	private fullscreen = false;
+	private readonly onError: (message: string) => void;
+
+	private items: TranscriptItem[];
+	private cwd: string;
+	private detail: Detail = "preview";
+	/** Item index → rendered rows, including each item's trailing separator row. */
+	private readonly cache = new Map<number, string[]>();
+	/** heights[i] = rows contributed by items 0..i-1, so heights.length - 1 items are rendered. */
+	private heights: number[] = [0];
+	private renderWidth = 0;
+	private scrollOffset = 0;
+	private viewHeight = 0;
+	private totalLines = 0;
+	/** True once every item has been rendered, i.e. totalLines is the real total. */
+	private fullyRendered = false;
+	private readonly reportedErrors = new Set<string>();
 
 	constructor(
 		tui: TUI,
@@ -147,22 +172,45 @@ class SessionPreviewOverlay {
 		keybindings: KeybindingsManager,
 		title: string,
 		filePath: string,
-		content: string,
+		loaded: TranscriptDocument,
 		onClose: () => void,
+		onError: (message: string) => void,
 	) {
 		this.tui = tui;
 		this.theme = theme;
 		this.keybindings = keybindings;
 		this.title = title;
 		this.filePath = filePath;
+		this.items = loaded.items;
+		this.cwd = loaded.cwd;
 		this.onClose = onClose;
-		this.markdown = new Markdown(content.trim() ? content : "_Empty session._", 1, 0, getMarkdownTheme());
+		this.onError = onError;
 	}
 
 	handleInput(keyData: string): void {
 		const kb = this.keybindings;
 		if (kb.matches(keyData, "tui.select.cancel") || kb.matches(keyData, "tui.select.confirm")) {
 			this.onClose();
+			return;
+		}
+		if (matchesKey(keyData, Key.ctrl("o"))) {
+			this.cycleDetail();
+			return;
+		}
+		if (matchesKey(keyData, "r")) {
+			this.reload();
+			return;
+		}
+		if (matchesKey(keyData, "g")) {
+			this.scrollOffset = 0;
+			this.tui.requestRender();
+			return;
+		}
+		if (matchesKey(keyData, Key.shift("g"))) {
+			// The tail is normally unrendered, so the real total needs a full pass.
+			this.ensureLines(Number.POSITIVE_INFINITY);
+			this.scrollOffset = Math.max(0, this.knownLines() - this.viewHeight);
+			this.tui.requestRender();
 			return;
 		}
 		if (kb.matches(keyData, "tui.select.up")) {
@@ -189,11 +237,6 @@ class SessionPreviewOverlay {
 			this.scrollBy(-Math.floor(this.viewHeight / 2) || -1);
 			return;
 		}
-		if (matchesKey(keyData, "f")) {
-			this.fullscreen = !this.fullscreen;
-			this.tui.requestRender();
-			return;
-		}
 		if (kb.matches(keyData, "tui.select.pageUp") || matchesKey(keyData, Key.left)) {
 			this.scrollBy(-this.viewHeight || -1);
 			return;
@@ -205,35 +248,31 @@ class SessionPreviewOverlay {
 	}
 
 	render(width: number): string[] {
-		const maxHeight = Math.max(10, Math.floor((this.tui.terminal.rows || 24) * 0.88));
-		const headerLines = this.fullscreen ? 0 : 3;
-		const footerLines = this.fullscreen ? 0 : 2;
+		// The overlay already owns the whole terminal, so take every row.
+		const maxHeight = Math.max(10, this.tui.terminal.rows || 24);
 		const innerWidth = Math.max(10, width - 2);
-		const contentHeight = Math.max(1, maxHeight - headerLines - footerLines - 2);
-
-		const markdownLines = this.markdown.render(innerWidth);
-		this.totalLines = markdownLines.length;
+		const contentHeight = Math.max(1, maxHeight - HEADER_ROWS - FOOTER_ROWS - BORDER_ROWS);
 		this.viewHeight = contentHeight;
-		const maxScroll = Math.max(0, this.totalLines - contentHeight);
-		this.scrollOffset = Math.max(0, Math.min(this.scrollOffset, maxScroll));
 
-		const visibleLines = markdownLines.slice(this.scrollOffset, this.scrollOffset + contentHeight);
-		const lines: string[] = [];
-		if (!this.fullscreen) {
-			lines.push(this.buildTitleLine(innerWidth));
-			lines.push(this.buildMetaLine(innerWidth));
+		if (innerWidth !== this.renderWidth) {
+			// Rows are wrapped at render time, so a resize invalidates every cached one.
+			this.renderWidth = innerWidth;
+			this.resetCache();
+		}
+
+		this.ensureLines(this.scrollOffset + contentHeight);
+		this.totalLines = this.knownLines();
+		this.scrollOffset = Math.max(0, Math.min(this.scrollOffset, Math.max(0, this.totalLines - contentHeight)));
+
+		const visibleLines =
+			this.items.length === 0
+				? new Markdown("_Empty session._", 1, 0, getMarkdownTheme()).render(innerWidth)
+				: this.sliceLines(this.scrollOffset, contentHeight);
+		const lines = [this.buildTitleLine(innerWidth), this.buildMetaLine(innerWidth), "", ...visibleLines];
+		while (lines.length < HEADER_ROWS + contentHeight) {
 			lines.push("");
 		}
-		for (const line of visibleLines) {
-			lines.push(truncateToWidth(line, innerWidth));
-		}
-		while (lines.length < headerLines + contentHeight) {
-			lines.push("");
-		}
-		if (!this.fullscreen) {
-			lines.push("");
-			lines.push(this.buildActionLine(innerWidth));
-		}
+		lines.push("", this.buildActionLine(innerWidth));
 
 		const borderColor = (text: string) => this.theme.fg("borderMuted", text);
 		const top = borderColor(`┌${"─".repeat(innerWidth)}┐`);
@@ -247,12 +286,128 @@ class SessionPreviewOverlay {
 	}
 
 	invalidate(): void {
-		// Content never changes while open; kept for Component compatibility.
+		// pi invalidates on a live theme change, and cached rows carry the old
+		// theme's ANSI codes; refilling lazily keeps this cheap.
+		this.resetCache();
 	}
 
 	private scrollBy(delta: number): void {
-		const maxScroll = Math.max(0, this.totalLines - this.viewHeight);
-		this.scrollOffset = Math.max(0, Math.min(this.scrollOffset + delta, maxScroll));
+		// While the tail is unrendered the real total is unknown, so the only cap
+		// that can be trusted here is the top; render() extends and re-clamps.
+		this.scrollOffset = Math.max(0, this.scrollOffset + delta);
+		if (this.fullyRendered) {
+			this.scrollOffset = Math.min(this.scrollOffset, Math.max(0, this.totalLines - this.viewHeight));
+		}
+	}
+
+	/** Rendered item count (heights has one entry per boundary). */
+	private renderedItems(): number {
+		return this.heights.length - 1;
+	}
+
+	/** Rows known so far; the tail may still be unrendered. */
+	private knownLines(): number {
+		return this.heights[this.heights.length - 1];
+	}
+
+	/**
+	 * Drop every cached row. Scroll position survives so a reload or a detail
+	 * switch keeps the reader where they were (render() re-clamps the end).
+	 */
+	private resetCache(): void {
+		this.cache.clear();
+		this.heights = [0];
+		this.fullyRendered = false;
+	}
+
+	/** Render items in order until the prefix covers `uptoLine` rows. */
+	private ensureLines(uptoLine: number): void {
+		let index = this.renderedItems();
+		while (index < this.items.length && this.heights[index] < uptoLine) {
+			const lines = this.renderItemLines(index);
+			this.cache.set(index, lines);
+			this.heights[index + 1] = this.heights[index] + lines.length;
+			index++;
+		}
+		if (index >= this.items.length) this.fullyRendered = true;
+	}
+
+	private renderItemLines(index: number): string[] {
+		const item = this.items[index];
+		try {
+			return renderItem(item, {
+				width: this.renderWidth,
+				detail: this.detail,
+				cwd: this.cwd,
+				theme: this.theme,
+			});
+		} catch (error) {
+			// One broken item (huge diff, odd tool payload) must not blank the preview.
+			const message = error instanceof Error ? error.message : String(error);
+			this.reportError(`Failed to render ${item.kind} item: ${message}`);
+			return [this.theme.fg("error", `⚠ failed to render ${item.kind} item`), ""];
+		}
+	}
+
+	/** Report a failure once per distinct message; the same item re-renders often. */
+	private reportError(message: string): void {
+		if (this.reportedErrors.has(message)) return;
+		this.reportedErrors.add(message);
+		this.onError(message);
+	}
+
+	/** Index of the item containing `line` (binary search over the prefix table). */
+	private itemAt(line: number): number {
+		const rendered = this.renderedItems();
+		if (rendered === 0) return 0;
+		let low = 0;
+		let high = rendered - 1;
+		while (low < high) {
+			const mid = (low + high + 1) >> 1;
+			if (this.heights[mid] <= line) low = mid;
+			else high = mid - 1;
+		}
+		return low;
+	}
+
+	/**
+	 * Rows [from, from+count) assembled from the cached items that intersect that
+	 * window only — never from a fully concatenated document.
+	 */
+	private sliceLines(from: number, count: number): string[] {
+		const rows: string[] = [];
+		const end = from + count;
+		const rendered = this.renderedItems();
+		for (let index = this.itemAt(from); index < rendered && this.heights[index] < end; index++) {
+			const itemLines = this.cache.get(index);
+			if (!itemLines) continue;
+			const base = this.heights[index];
+			const first = Math.max(0, from - base);
+			const last = Math.min(itemLines.length, end - base);
+			for (let i = first; i < last; i++) rows.push(itemLines[i]);
+		}
+		return rows;
+	}
+
+	private cycleDetail(): void {
+		this.detail = DETAIL_CYCLE[(DETAIL_CYCLE.indexOf(this.detail) + 1) % DETAIL_CYCLE.length];
+		this.resetCache();
+		this.tui.requestRender();
+	}
+
+	/** Re-read the session file: a live run keeps appending after the preview opens. */
+	private reload(): void {
+		let loaded: TranscriptDocument;
+		try {
+			loaded = loadTranscriptItems(this.filePath);
+		} catch (error) {
+			this.onError(`Failed to read session: ${error instanceof Error ? error.message : String(error)}`);
+			return;
+		}
+		this.items = loaded.items;
+		this.cwd = loaded.cwd;
+		this.resetCache();
+		this.tui.requestRender();
 	}
 
 	private buildTitleLine(width: number): string {
@@ -275,14 +430,22 @@ class SessionPreviewOverlay {
 	}
 
 	private buildActionLine(width: number): string {
+		// Narrow terminals cut the line from the right, so close and the detail
+		// switch (the two keys people hunt for) lead; the rest degrade away.
 		const close = this.theme.fg("accent", "esc") + this.theme.fg("dim", " close");
-		const full = this.theme.fg("accent", "f") + this.theme.fg("dim", " fullscreen");
-		const nav = this.theme.fg("dim", "j/k: scroll. ctrl+d/u: half page. ←/→: page.");
-		let line = [close, full, nav].join(this.theme.fg("muted", " • "));
+		const detail = this.theme.fg("accent", "ctrl+o") + this.theme.fg("dim", ` ${this.detail}`);
+		const scroll = this.theme.fg("accent", "j/k") + this.theme.fg("dim", " scroll");
+		const halfPage = this.theme.fg("accent", "ctrl+d/u") + this.theme.fg("dim", " half page");
+		const page = this.theme.fg("accent", "←/→") + this.theme.fg("dim", " page");
+		const ends = this.theme.fg("accent", "g/G") + this.theme.fg("dim", " top/bottom");
+		let line = [close, detail, scroll, halfPage, page, ends].join(this.theme.fg("muted", " • "));
 		if (this.totalLines > this.viewHeight) {
 			const start = Math.min(this.totalLines, this.scrollOffset + 1);
 			const end = Math.min(this.totalLines, this.scrollOffset + this.viewHeight);
-			line += this.theme.fg("dim", ` ${start}-${end}/${this.totalLines}`);
+			// A provisional total (tail not rendered yet) would read as "you are at
+			// the end" while most of the session is below: show it as open-ended.
+			const total = this.fullyRendered ? `/${this.totalLines}` : "+";
+			line += this.theme.fg("dim", ` ${start}-${end}${total}`);
 		}
 		return truncateToWidth(line, width);
 	}
@@ -293,12 +456,23 @@ async function openSessionPreview(
 	ctx: ExtensionCommandContext,
 	title: string,
 	filePath: string,
-	content: string,
+	loaded: TranscriptDocument,
 ): Promise<void> {
+	const reportError = (message: string) => ctx.ui.notify(message, "error");
 	await ctx.ui.custom<void>(
 		(tui, theme, keybindings, done) =>
-			new SessionPreviewOverlay(tui, theme, keybindings, title, filePath, content, done),
-		{ overlay: true, overlayOptions: { width: "80%", anchor: "center" } },
+			new SessionPreviewOverlay(tui, theme, keybindings, title, filePath, loaded, done, reportError),
+		{
+			overlay: true,
+			overlayOptions: {
+				width: "100%",
+				maxHeight: "100%",
+				row: 0,
+				col: 0,
+				margin: 0,
+			},
+			onHandle: (handle) => handle.focus(),
+		},
 	).catch((error) => {
 		ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
 	});
@@ -314,12 +488,12 @@ export async function previewSessionFile(
 		ctx.ui.notify("Session preview requires interactive mode", "error");
 		return;
 	}
-	let text: string;
+	let loaded: TranscriptDocument;
 	try {
-		text = loadSessionTranscript(sessionFile);
+		loaded = loadTranscriptItems(sessionFile);
 	} catch (error) {
 		ctx.ui.notify(`Failed to read session: ${error instanceof Error ? error.message : String(error)}`, "error");
 		return;
 	}
-	await openSessionPreview(ctx, title, sessionFile, text);
+	await openSessionPreview(ctx, title, sessionFile, loaded);
 }

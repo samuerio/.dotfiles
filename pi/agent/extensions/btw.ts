@@ -7,16 +7,6 @@ import {
 	createAgentSession,
 	createExtensionRuntime,
 	getMarkdownTheme,
-	ToolExecutionComponent,
-	createBashToolDefinition,
-	createEditToolDefinition,
-	createFindToolDefinition,
-	createGrepToolDefinition,
-	createLsToolDefinition,
-	createPowerShellToolDefinition,
-	createReadToolDefinition,
-	createWriteToolDefinition,
-	type ToolDefinition,
 	SessionManager,
 	type AgentSession,
 	type AgentSessionEvent,
@@ -28,7 +18,6 @@ import {
 import { type AssistantMessage, type Message, type ThinkingLevel as AiThinkingLevel } from "@earendil-works/pi-ai";
 import {
 	Container,
-	Text,
 	Input,
 	Key,
 	Markdown,
@@ -42,9 +31,14 @@ import {
 	type Component,
 	type TUI,
 	ScrollView,
-	stripTerminalSequences,
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
+import {
+	TRANSCRIPT_TEXT_LIMIT,
+	renderTranscriptTool,
+	stripUnsafeTerminalText,
+	type Detail,
+} from "./lib/transcript-tool.ts";
 
 /** Fork files for side sessions land here and are deleted on side-session dispose. */
 const SIDE_SESSION_DIR = join(tmpdir(), "pi-btw-side");
@@ -185,19 +179,17 @@ function getLastAssistantMessage(session: AgentSession): AssistantMessage | null
 }
 
 // ---------------------------------------------------------------------------
-// Rendering core — forked from subagent-manager/src/ui/live-agent-view.ts
-// (upstream commit 0f0349a). Kept inline in this file; if a second consumer
-// ever appears, lift this whole section into pi/agent/extensions/lib/.
+// Rendering core: thread-item rendering forked from
+// subagent-manager/src/ui/live-agent-view.ts (upstream commit 0f0349a), kept
+// inline because only btw renders Q&A turns. Tool boxes are shared with the
+// session preview through lib/transcript-tool.ts.
 // ---------------------------------------------------------------------------
 
-/** Transcript detail level cycled by Ctrl+O: full → preview → compact. */
-type TranscriptDetail = "full" | "preview" | "compact";
-const DETAIL_CYCLE: TranscriptDetail[] = ["full", "preview", "compact"];
+/** Detail levels in Ctrl+O cycle order: full → preview → compact. */
+const DETAIL_CYCLE: Detail[] = ["full", "preview", "compact"];
 const BTW_PREVIEW_ROWS = 3;
-/** Source-size bound before rendering collapsed content. */
-const BTW_TEXT_LIMIT = 32768;
 
-let transcriptDetail: TranscriptDetail = "preview";
+let transcriptDetail: Detail = "preview";
 
 /** Ctrl+O cycle: full → preview → compact → full. Tool and thread-item renders
  * both key off the detail level, so a cycle invalidates both caches. */
@@ -223,17 +215,10 @@ function fillViewport(lines: string[], width: number, height: number): string[] 
  * terminal edge; fillViewport clips and right-pads the rest. */
 const pad2 = (lines: string[]): string[] => lines.map((line) => (line ? ` ${line} ` : " "));
 
-/** Sanitize untrusted text before any renderer or wrapper interpolates it. */
-function stripUnsafeTerminalText(value: string): string {
-	return stripTerminalSequences(value)
-		.replace(/\r\n?/g, "\n")
-		.replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "");
-}
-
 /** ANSI-aware wrapping for plain text (flush-left, no padding per BTW spec). */
 function wrapPlain(value: string, width: number): string[] {
 	const safe = stripUnsafeTerminalText(value);
-	const bounded = safe.slice(0, BTW_TEXT_LIMIT);
+	const bounded = safe.slice(0, TRANSCRIPT_TEXT_LIMIT);
 	return bounded.split("\n").flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width)));
 }
 
@@ -321,7 +306,7 @@ type PendingToolCacheEntry = {
 	isError: boolean;
 	running: boolean;
 	width: number;
-	detail: TranscriptDetail;
+	detail: Detail;
 	lines: string[];
 };
 
@@ -360,6 +345,7 @@ function renderToolInfos(toolCalls: ToolCallInfo[], width: number): string[] {
 			running,
 			transcriptDetail,
 			width,
+			process.cwd(),
 		);
 		lines.push(...rendered);
 		pendingToolCache.set(tc.toolCallId, {
@@ -455,139 +441,6 @@ function notify(ctx: ExtensionContext | ExtensionCommandContext, message: string
 	if (ctx.hasUI) {
 		ctx.ui.notify(message, level);
 	}
-}
-
-// ---------------------------------------------------------------------------
-// Tool rendering — verbatim fork of subagent-manager/src/ui/transcript-tool.ts
-// (upstream commit 0f0349a). Renders live tool calls through pi's own
-// ToolExecutionComponent and trusted built-in tool renderers, with the
-// observer-safety patches kept intact:
-//   * TUI stub: no execution-lifecycle clock.
-//   * edit.renderCall(argsComplete: false): never re-read today's file per
-//     paint; use the recorded result diff.
-//   * image blocks replaced with text placeholders (no Kitty conversion).
-//   * args/content/details all sanitized; unknown tools use a bounded fallback.
-// ---------------------------------------------------------------------------
-
-/** Only trusted pi built-ins: observing a transcript must never execute extension renderers. */
-type RendererPair = Pick<ToolDefinition<any, any>, "renderCall" | "renderResult">;
-const transcriptToolRenderers = new Map<string, RendererPair>(
-	[
-		createBashToolDefinition(process.cwd()),
-		createPowerShellToolDefinition(process.cwd()),
-		createReadToolDefinition(process.cwd()),
-		createEditToolDefinition(process.cwd()),
-		createWriteToolDefinition(process.cwd()),
-		createGrepToolDefinition(process.cwd()),
-		createFindToolDefinition(process.cwd()),
-		createLsToolDefinition(process.cwd()),
-	].map((tool) => [
-		tool.name,
-		{ renderCall: tool.renderCall, renderResult: tool.renderResult } as RendererPair,
-	]),
-);
-
-// Native edit call previews otherwise read today's file asynchronously. An observer must
-// use the recorded result.diff, not inspect a possibly different worktree on every paint.
-const transcriptToolEdit = transcriptToolRenderers.get("edit")!;
-const transcriptToolEditCall = transcriptToolEdit.renderCall!;
-transcriptToolEdit.renderCall = (args, theme, context) =>
-	transcriptToolEditCall(args, theme, { ...context, argsComplete: false });
-
-const transcriptToolGeneric: RendererPair = {
-	renderResult(result, options, theme) {
-		const output = result.content
-			.filter((block) => block.type === "text")
-			.map((block) => block.text)
-			.join("\n");
-		const bounded = options.expanded ? output : output.slice(0, BTW_TEXT_LIMIT);
-		const component = new Text(theme.fg("toolOutput", bounded), 0, 0);
-		return {
-			invalidate() {
-				component.invalidate();
-			},
-			render(width) {
-				const rows = component.render(width);
-				if (options.expanded || (rows.length <= 5 && bounded.length === output.length)) return rows;
-				return [...rows.slice(0, 5), theme.fg("muted", "… more lines (Ctrl+O to expand)")];
-			},
-		};
-	},
-};
-
-/** Sanitize args, content AND details before trusted renderers interpolate them. */
-function sanitizeToolValue(value: unknown, seen = new WeakSet<object>(), depth = 0): any {
-	if (typeof value === "string") return stripUnsafeTerminalText(value);
-	if (!value || typeof value !== "object") return typeof value === "bigint" ? String(value) : value;
-	if (seen.has(value)) return "[Circular]";
-	if (depth > 64) return "[Nested data omitted]";
-	seen.add(value);
-	const safe = Array.isArray(value)
-		? value.map((item) => sanitizeToolValue(item, seen, depth + 1))
-		: Object.fromEntries(
-			Object.entries(value).map(([key, item]) => [
-				stripUnsafeTerminalText(key),
-				sanitizeToolValue(item, seen, depth + 1),
-			]),
-		);
-	seen.delete(value);
-	return safe;
-}
-
-function renderTranscriptTool(
-	name: string,
-	id: string,
-	args: unknown,
-	result: unknown,
-	isError: boolean,
-	running: boolean,
-	detail: TranscriptDetail,
-	width: number,
-): string[] {
-	// Pi's tool component owns elapsed-time intervals after markExecutionStarted().
-	// An observer has no execution lifecycle to dispose, so don't start that clock.
-	const ui = { requestRender() {} } as TUI;
-	const component = new ToolExecutionComponent(
-		stripUnsafeTerminalText(name),
-		stripUnsafeTerminalText(id),
-		sanitizeToolValue(args),
-		{ showImages: false },
-		transcriptToolRenderers.get(name) ?? transcriptToolGeneric,
-		ui,
-		process.cwd(),
-	);
-	const data = result && typeof result === "object" ? (result as Record<string, unknown>) : undefined;
-	const content = data?.content ?? result;
-	component.updateResult(
-		{
-			content: (Array.isArray(content) ? content : content === undefined ? [] : [content]).map(
-				(block) => {
-					// Never hand image payloads to pi (even showImages:false can trigger Kitty conversion).
-					if (block && typeof block === "object" && (block as { type?: string }).type === "image")
-						return { type: "text", text: "[Image — text-only observer]" };
-					if (block && typeof block === "object" && (block as { type?: string }).type === "text")
-						return {
-							type: "text",
-							text: stripUnsafeTerminalText(String((block as { text?: unknown }).text ?? "")),
-						};
-					return {
-						type: "text",
-						text: stripUnsafeTerminalText(
-							typeof block === "string" ? block : (JSON.stringify(sanitizeToolValue(block)) ?? ""),
-						),
-					};
-				},
-			),
-			details: sanitizeToolValue(data?.details),
-			isError: isError || data?.isError === true,
-		},
-		running,
-	);
-	component.setExpanded(detail === "full");
-	const lines = component.render(Math.max(3, width));
-	if (detail === "compact")
-		return lines.filter((line) => stripTerminalSequences(line).trim()).slice(0, 1);
-	return lines;
 }
 
 /** Status-row tone: idle is muted, a failure is an error, anything in flight warns. */
