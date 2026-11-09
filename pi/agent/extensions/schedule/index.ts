@@ -8,8 +8,10 @@
  * does not resolve.
  *
  * The extension is a thin observation surface only:
- * - `/schedule` lists tasks (this project's by default, every task with
- *   `--all`), then their runs, and previews the chosen run's session transcript.
+ * - `/schedule` is a three-level navigator: tasks (this project's by default,
+ *   every task with `--all`) → runs of one task → what to do with that run
+ *   (preview its transcript, or put its result / session into the editor).
+ *   Esc walks one level back, so several runs can be inspected in one visit.
  * - a widget shows runs that are currently active.
  * Task management stays in the CLI (`schedule add/remove/enable/disable/run/logs`).
  */
@@ -25,8 +27,27 @@ import { Container, Text, type Theme, type TUI } from "@earendil-works/pi-tui";
 
 import { previewSessionFile } from "../lib/session-preview.ts";
 import { cronToHuman } from "./cron.ts";
-import { effectiveState, isActive, latestRun, listRuns, type ActiveRun } from "./run.ts";
-import { buildRows, elapsedSince, elidePath, matchesScope, runOptions, taskRowLines } from "./runs-view.ts";
+import {
+    effectiveState,
+    isActive,
+    latestRun,
+    listRuns,
+    readLatestAssistant,
+    type ActiveRun,
+} from "./run.ts";
+import {
+    RUN_ACTION_LABELS,
+    buildRows,
+    elapsedSince,
+    elidePath,
+    isSettledState,
+    matchesScope,
+    resultPromptText,
+    runActions,
+    runOptions,
+    sessionPromptText,
+    taskRowLines,
+} from "./runs-view.ts";
 import { listTasks, readTask, type Task } from "./store.ts";
 
 const COMMAND_NAME = "schedule";
@@ -135,7 +156,7 @@ export default function scheduleExtension(pi: ExtensionAPI): void {
 
     pi.registerCommand(COMMAND_NAME, {
         description:
-            "List scheduled tasks, pick a run of one, and preview its session transcript",
+            "List scheduled tasks, pick a run of one, and preview it or add its result/session to the prompt",
         handler: async (args, ctx) => {
             if (!ctx.hasUI) {
                 throw new Error(`/${COMMAND_NAME} requires TUI or RPC mode.`);
@@ -168,16 +189,63 @@ async function runSchedulePicker(
         return;
     }
 
+    // Esc at the task list is the only way out of this loop: every deeper Esc
+    // comes back here, so one invocation can inspect several tasks. The menu is
+    // rebuilt on every pass rather than once — it stays on screen while the user
+    // drills into runs, and `last`, `missed` and `next` must not freeze at the
+    // moment the command started.
+    while (true) {
+        const menu = buildTaskMenu(scope.all);
+        if (!menu) {
+            ctx.ui.notify(
+                "No scheduled tasks. Add one with `schedule add …` from a shell.",
+                "info",
+            );
+            return;
+        }
+
+        const choice = await ctx.ui.select(menu.title, menu.labels);
+        if (!choice) return;
+
+        // A corrupt file renders a row but has no definition behind it; a task
+        // removed while the menu was open lands in the same branch. Exiting is
+        // the honest end here: the fix is a CLI command, not another menu.
+        const taskId = menu.idByLabel.get(choice);
+        const task = taskId ? readTask(taskId) : undefined;
+        if (!task) {
+            ctx.ui.notify(
+                "This task file is corrupt. Re-create it with `schedule add`.",
+                "error",
+            );
+            return;
+        }
+
+        // Only a written editor ends the command; every other outcome means
+        // "there is still a list above this", so the task menu comes back.
+        if ((await runTaskFlow(ctx, task)) === "done") return;
+    }
+}
+
+/** One frame of the task list: what to show, and what selects each row. */
+type TaskMenu = {
+    title: string;
+    labels: string[];
+    idByLabel: Map<string, string>;
+};
+
+/**
+ * Build the task list: the rows `schedule list` prints, narrowed to this project
+ * unless `all` is set.
+ *
+ * Rebuilt on every pass of the picker loop, which can stay open for as long as
+ * the user keeps drilling into runs. `undefined` means there is nothing left to
+ * select — at startup, or after the last task was removed.
+ */
+function buildTaskMenu(all: boolean): TaskMenu | undefined {
     // Same derivation `schedule list` prints, so the two surfaces cannot
     // disagree about schedule, last run or next fire.
     const rows = buildRows();
-    if (rows.length === 0) {
-        ctx.ui.notify(
-            "No scheduled tasks. Add one with `schedule add …` from a shell.",
-            "info",
-        );
-        return;
-    }
+    if (rows.length === 0) return undefined;
 
     // `/schedule` is a view of the current project by default: the tasks defined
     // for exactly this directory. `matchesScope` canonicalizes both sides, so a
@@ -189,7 +257,7 @@ async function runSchedulePicker(
 
     let visible = rows;
     let title = "Scheduled tasks";
-    if (!scope.all) {
+    if (!all) {
         const scoped = rows.filter((row) => {
             // A corrupt file has no cwd to match; hiding it would hide the one
             // row whose fix (re-add or delete) has no other reminder.
@@ -210,53 +278,132 @@ async function runSchedulePicker(
     }
 
     // The shortId prefix is what makes the mapping unambiguous; two tasks can
-    // share name, cron and state, and a joined label would collide here.
+    // share name, cron and state, and a joined label would collide here. The map
+    // is built from the same frame as the labels it keys.
     const labels = taskRowLines(visible);
     const idByLabel = new Map<string, string>();
     labels.forEach((label, index) => idByLabel.set(label, visible[index].id));
 
-    const choice = await ctx.ui.select(title, labels);
-    if (!choice) return;
+    return { title, labels, idByLabel };
+}
 
-    // A corrupt file renders a row but has no definition behind it; a task
-    // removed while the menu was open lands in the same branch.
-    const taskId = idByLabel.get(choice);
-    const task = taskId ? readTask(taskId) : undefined;
-    if (!task) {
-        ctx.ui.notify(
-            "This task file is corrupt. Re-create it with `schedule add`.",
-            "error",
+/** How the run-level loop ends: back to the task list, or done with the command. */
+/** How the run-level loop ends: back to the task list, or done with the command. */
+type FlowEnd = "back" | "done";
+
+/**
+ * Levels two and three: the run list and the action menu, looped.
+ *
+ * `back` is every "the level above still has something to show" exit — Esc at
+ * the run list, a task without runs, a run whose transcript is gone. `done`
+ * means the editor was written: the user is about to type, so there is nothing
+ * left to select.
+ */
+async function runTaskFlow(
+    ctx: ExtensionCommandContext,
+    task: Task,
+): Promise<FlowEnd> {
+    while (true) {
+        const run = await pickRun(ctx, task);
+        // Undefined covers Esc and "no runs yet" alike; both belong to the task
+        // list, which is where the other tasks are.
+        if (!run) return "back";
+
+        const sessionFile = run.metadata.sessionFile;
+        if (!sessionFile || !existsSync(sessionFile)) {
+            // The only surface for this branch: nothing else describes the run.
+            // Stay in the run list — the task's other runs are still readable.
+            ctx.ui.notify(
+                `${describeRun(task, run)}\nNo session transcript (the run never started, or its session file was removed).`,
+                "info",
+            );
+            continue;
+        }
+
+        // Read the answer once, for both the gate and the pasted text. Settled
+        // states only: a live run's transcript can be megabytes and cannot hold
+        // a final answer yet (a pre-created `session.jsonl` proves nothing).
+        const resultText = isSettledState(run.effective)
+            ? readLatestAssistant(sessionFile)
+            : undefined;
+        // `hasSession: true` is the branch above asserted: the transcript file
+        // exists, which is all preview and the session mention need, so the menu
+        // always has at least those two entries.
+        const actions = runActions(run.effective, {
+            hasSession: true,
+            hasResult: Boolean(resultText),
+        });
+
+        // Same words as the preview title: stamp and state are what distinguish
+        // one run of a task from the others.
+        const title = `${task.name} · ${run.ts} · ${run.effective}`;
+        const choice = await ctx.ui.select(
+            title,
+            actions.map((action) => RUN_ACTION_LABELS[action]),
         );
-        return;
-    }
+        // Esc at the action menu walks one level up, and `pickRun` lists the
+        // runs again on the way — a run may have finished meanwhile.
+        if (!choice) continue;
 
-    const run = await pickRun(ctx, task);
-    if (!run) return;
-
-    const sessionFile = run.metadata.sessionFile;
-    if (!sessionFile || !existsSync(sessionFile)) {
-        // The only surface for this branch: nothing else describes the run.
-        ctx.ui.notify(
-            `${describeRun(task, run)}\nNo session transcript (the run never started, or its session file was removed).`,
-            "info",
+        const action = actions.find(
+            (candidate) => RUN_ACTION_LABELS[candidate] === choice,
         );
-        return;
-    }
+        if (!action) continue;
 
-    // No metadata toast here: the picker label already carries stamp, trigger,
-    // state, exit code and error head, and the overlay title repeats the rest.
-    await previewSessionFile(
-        ctx,
-        `${task.name} · ${run.ts} · ${run.effective}`,
-        sessionFile,
-    );
+        switch (action) {
+            case "preview":
+                // No metadata toast here: the menu title already carries task,
+                // stamp and state, and the overlay title repeats the rest.
+                await previewSessionFile(ctx, title, sessionFile);
+                // Overlay closed → back to the run list, fresh.
+                continue;
+            case "result":
+                // runActions only offers this for a settled run whose last
+                // assistant text is non-empty; the guard is that boundary
+                // asserted, not a second decision.
+                if (!resultText) continue;
+                writeEditor(ctx, resultPromptText(task.name, run.ts, resultText));
+                ctx.ui.notify(
+                    `Added result of ${task.name} run ${run.ts} to prompt`,
+                    "info",
+                );
+                return "done";
+            case "session":
+                writeEditor(ctx, sessionPromptText(sessionFile));
+                ctx.ui.notify(
+                    `Added session of ${task.name} run ${run.ts} to prompt`,
+                    "info",
+                );
+                return "done";
+            default: {
+                // Compile-time proof that every action id has a branch: adding
+                // one to `RunAction` without handling it fails the type check
+                // here instead of silently showing an inert menu entry.
+                const _exhaustive: never = action;
+                continue;
+            }
+        }
+    }
+}
+
+/**
+ * Append text to the editor, `worktree-task.ts`'s `addSessionToPrompt` shape:
+ * one space separates it from whatever is already typed, never a leading one,
+ * and the user's draft is preserved around it.
+ */
+function writeEditor(ctx: ExtensionCommandContext, text: string): void {
+    const current = ctx.ui.getEditorText();
+    const separator = current && !current.endsWith(" ") ? " " : "";
+    ctx.ui.setEditorText(`${current}${separator}${text}`);
 }
 
 /**
  * Second level of `/schedule`: choose which run of the task to inspect.
  *
- * A single run is opened directly — a one-item menu would just be an extra
- * keystroke. `undefined` means the user backed out.
+ * Always shown, even for a task with exactly one run: the action menu behind it
+ * is the reason to drill in, and skipping the level would make "add this run's
+ * result without previewing it first" impossible. `undefined` means the user
+ * backed out — or the task has no runs yet — and leads back to the task list.
  */
 async function pickRun(
     ctx: ExtensionCommandContext,
@@ -267,11 +414,11 @@ async function pickRun(
         ctx.ui.notify(`Task "${task.name}" has no runs yet.`, "info");
         return undefined;
     }
-    if (runs.length === 1) return runs[0];
 
     const options = runOptions(runs);
+    const count = runs.length === 1 ? "1 run" : `${runs.length} runs`;
     const choice = await ctx.ui.select(
-        `${task.name} · ${runs.length} runs`,
+        `${task.name} · ${count}`,
         options.map((option) => option.label),
     );
     if (!choice) return undefined;

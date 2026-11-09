@@ -1,8 +1,9 @@
 /**
  * runs-view.ts: the task list rows shared with `schedule list`, their menu
- * labels, and the label→run mapping behind `/schedule`'s run picker. Pure
- * formatting, so these tests build ListRow / ActiveRun objects by hand instead
- * of touching the filesystem.
+ * labels, the label→run mapping behind `/schedule`'s run picker, and the action
+ * gating plus editor text behind its action menu. Pure formatting and decisions,
+ * so these tests build ListRow / ActiveRun objects by hand instead of touching
+ * the filesystem.
  */
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
@@ -13,14 +14,19 @@ import test, { after } from "node:test";
 import { listRuns } from "../run.ts";
 import type { ActiveRun, RunMetadata } from "../run.ts";
 import {
+    RUN_ACTION_LABELS,
     describeRunState,
     displayWidth,
     elidePath,
+    isSettledState,
     matchesScope,
+    resultPromptText,
+    runActions,
     runOptions,
+    sessionPromptText,
     taskRowLines,
 } from "../runs-view.ts";
-import type { ListRow } from "../runs-view.ts";
+import type { ListRow, RunAction } from "../runs-view.ts";
 
 const TASK = "aaaaaaaa";
 const NOW = Date.now();
@@ -123,6 +129,140 @@ test("listRuns (the picker's source) is ordered newest first", () => {
     const labels = runOptions(runs).map((option) => option.label);
     assert.ok(labels[0].startsWith("20260102-000000"));
     assert.equal(typeof listRuns, "function");
+});
+
+// ---------------------------------------------------------------------------
+// runActions: the action menu is built from facts, in a fixed order
+// ---------------------------------------------------------------------------
+
+const SETTLED = ["exited", "killed", "error", "stale"];
+const ACTIVE = ["starting", "running", "orphan"];
+
+/** The full menu: preview, then the gated result, then the session mention. */
+const ALL_ACTIONS: RunAction[] = ["preview", "result", "session"];
+
+/** Everything preview and the session mention need. */
+const PREVIEW_AND_SESSION: RunAction[] = ["preview", "session"];
+
+test("runActions: a settled run with a session and a result offers all three, in order", () => {
+    for (const state of SETTLED) {
+        assert.deepEqual(
+            runActions(state, { hasSession: true, hasResult: true }),
+            ALL_ACTIONS,
+            state,
+        );
+    }
+});
+
+test("runActions: a live run never offers its result, whatever the facts say", () => {
+    // A running run's session.jsonl exists from the moment it is created, so a
+    // file on disk is not an answer: the settled gate has to hold on its own.
+    for (const state of ACTIVE) {
+        assert.deepEqual(
+            runActions(state, { hasSession: true, hasResult: true }),
+            PREVIEW_AND_SESSION,
+            state,
+        );
+    }
+});
+
+test("runActions: a settled run without assistant text offers no result action", () => {
+    // Exit 0 with an empty transcript (or a crash before the first message) is
+    // real: pasting "… result:\n\n" into the editor would be worse than nothing.
+    for (const state of SETTLED) {
+        assert.deepEqual(
+            runActions(state, { hasSession: true, hasResult: false }),
+            PREVIEW_AND_SESSION,
+            state,
+        );
+    }
+});
+
+test("runActions: no session file means no actions at all", () => {
+    // index.ts has already reported the missing transcript, so an empty menu is
+    // not a case it can reach; the function still has to answer it honestly.
+    for (const state of [...SETTLED, ...ACTIVE, "unknown"]) {
+        assert.deepEqual(runActions(state, { hasSession: false, hasResult: true }), [], state);
+        assert.deepEqual(
+            runActions(state, { hasSession: false, hasResult: false }),
+            [],
+            state,
+        );
+    }
+});
+
+test("runActions: an unrecognised state is treated as live, never as settled", () => {
+    // The state comes from a derived enum, but a metadata file written by a
+    // newer version must not unlock the result action by accident.
+    assert.equal(isSettledState("unknown"), false);
+    assert.deepEqual(
+        runActions("unknown", { hasSession: true, hasResult: true }),
+        PREVIEW_AND_SESSION,
+    );
+});
+
+test("runActions: isSettledState matches exactly the states the result action allows", () => {
+    for (const state of [...SETTLED, ...ACTIVE, "unknown"]) {
+        assert.equal(
+            runActions(state, { hasSession: true, hasResult: true }).includes("result"),
+            isSettledState(state),
+            state,
+        );
+    }
+});
+
+test("runActions: labels are the verbatim worktree-task strings", () => {
+    // Same wording in both pickers on purpose: one vocabulary for the actions.
+    assert.deepEqual(RUN_ACTION_LABELS, {
+        preview: "Preview",
+        result: "Add result to prompt",
+        session: "Add session to prompt",
+    });
+    // Menu order is the array order, so the labels must be reachable per id.
+    assert.deepEqual(
+        ALL_ACTIONS.map((action) => RUN_ACTION_LABELS[action]),
+        ["Preview", "Add result to prompt", "Add session to prompt"],
+    );
+});
+
+// ---------------------------------------------------------------------------
+// editor text
+// ---------------------------------------------------------------------------
+
+test("resultPromptText: header, blank line, then the answer verbatim", () => {
+    assert.equal(
+        resultPromptText("daily-report", "20261106-162834", "all green"),
+        'schedule task "daily-report" run 20261106-162834 result:\n\nall green',
+    );
+});
+
+test("resultPromptText: a multi-line answer keeps its shape and is not truncated", () => {
+    // The pasted result is a pointer into the transcript, so indentation, blank
+    // lines and length all have to survive; a head-only copy would read as the
+    // complete answer.
+    const body = [
+        "## Summary",
+        "",
+        "    indented evidence",
+        "- first",
+        "- second",
+        `tail ${"x".repeat(5_000)}`,
+    ].join("\n");
+    const text = resultPromptText("task with a long name", "20261106-162834", body);
+    assert.ok(text.endsWith(`\n\n${body}`));
+    assert.ok(text.includes("\n\n    indented evidence\n"), "indentation survives");
+    assert.ok(!text.includes("Error:"), "no extra error line is invented");
+    assert.ok(!text.endsWith("…"), "nothing is elided");
+});
+
+test("sessionPromptText: one line, absolute path, no quoting or escaping", () => {
+    // A path with spaces must not be shell-quoted: the @ mention is a literal
+    // convention for pi, and the file is never inlined here.
+    assert.equal(
+        sessionPromptText("/home/zhe/my runs/aaaa/20261106-162834/session.jsonl"),
+        "read session @/home/zhe/my runs/aaaa/20261106-162834/session.jsonl",
+    );
+    assert.equal(sessionPromptText("/session.jsonl").split("\n").length, 1);
 });
 
 function makeRow(patch: Partial<ListRow> = {}): ListRow {

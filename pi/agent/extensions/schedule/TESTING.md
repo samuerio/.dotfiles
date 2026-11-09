@@ -52,13 +52,14 @@ node --test --test-name-pattern="uninstall" \
 node --test --watch pi/agent/extensions/schedule/tests/
 ```
 
-当前基线：`cli 13 / cron 19 / routing 8 / runs-view 32 / run 18 / slots 7 / store 38 /
-tick 37 = 172 pass, 0 fail`。
+当前基线：`cli 13 / cron 19 / routing 8 / runs-view 42 / run 18 / slots 7 / store 38 /
+tick 37 = 182 pass, 0 fail`。
 
 读测试的顺序建议：`cron.test.ts` 看语义契约 → `run.test.ts` 看状态机 →
 `slots.test.ts` 看读写共用的槽位判定 → `tick.test.ts` 看写侧决策 →
 `cli.test.ts` 看读侧（`LAST` / `NEXT` / `missed`）。这几份是规格，改实现前先看
-它们期望什么。
+它们期望什么。`runs-view.test.ts` 则是 `/schedule` 的规格：任务行、run 标签、动作菜单的
+门槛（哪些状态能取结果）与写进编辑器的两段文本。
 
 `slots.test.ts` 里那条「anchor 12:00 / now 12:40 / `*/5` 仍判 due」是防回归用例：只算
 `first` 会把「窗口内还有可补槽位」错判成 missed，进而让 tick 丢掉一次该有的派发。
@@ -231,10 +232,25 @@ pane 里依次验：
    可见行跨多个 cwd 时菜单最后一格从 `next …` 换成缩略后的 `cwd`。默认 scope 是**精确匹配**：
    在任务 `cwd` 的子目录里启动（例如 dotfiles 任务下的 `pi/`）应看到
    `Scheduled tasks · none for <cwd>, showing all`，而不是只列父目录的任务。
-2. 选一个跑过的任务回车，进入该 run 的摘要预览（含最后一条 assistant 文本）。
-3. 另开一个 pane 跑 `schedule run <id>`（长任务），widget 应在一行内出现，1 秒刷新。
-4. 任务结束后 widget 自动消失。
-5. `/quit` 退出（不要 Ctrl-C，TUI 可能不干净）。
+2. 选一个跑过的任务回车：进入该任务的运行列表（**只有一个 run 也照样显示**），标题
+   `<任务名> · N runs`（单个时是 `1 run`）。
+3. 选一个已结束的 run 回车：动作菜单标题 `<任务名> · <时间戳> · <状态>`，列出
+   `Preview` / `Add result to prompt` / `Add session to prompt`。挑 `Preview` 看转录；
+   关掉预览后应回到运行列表（不是退出命令）。
+4. 再选同一个 run，挑 `Add result to prompt`：编辑器里出现
+   `schedule task "<任务名>" run <时间戳> result:` + 空行 + 最后一条 assistant 文本，
+   命令结束（焦点回编辑器，可以接着打字）。编辑器里原有草稿必须保留，中间只补一个空格。
+5. 重新 `/schedule`，挑 `Add session to prompt`：编辑器里出现
+   `read session @<session 绝对路径>`，命令结束。
+6. 选一个**还在跑**的 run 回车：动作菜单只有 `Preview` 与 `Add session to prompt`，没有
+   `Add result to prompt`（它的 `session.jsonl` 已存在，但还没有结论）。一个已结束但没有
+   assistant 文本的 run 同理。
+7. Esc 逐层回退：动作菜单 Esc → 运行列表 → 任务列表 → 退出。没有 run 的任务在运行列表
+   这一级弹一句提示后回到任务列表；session 文件被删的 run 弹摘要 + 「没有会话转录」后
+   回到运行列表（两者都不退出命令）。
+8. 另开一个 pane 跑 `schedule run <id>`（长任务），widget 应在一行内出现，1 秒刷新。
+9. 任务结束后 widget 自动消失。
+10. `/quit` 退出（不要 Ctrl-C，TUI 可能不干净）。
 
 child guard 的验法：`PI_SCHEDULE_RUN_DIR=/tmp/x piw --no-session -e ...`，此时 `/schedule`
 不应注册。手工验不方便的话，直接读 `index.ts` 开头那 10 行 + 跑第 1 层里的 `run.test.ts`

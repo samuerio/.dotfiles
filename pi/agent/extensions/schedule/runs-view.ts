@@ -1,12 +1,14 @@
 /**
  * Presentation for `/schedule`: the task list rows (the same derivation
- * `schedule list` prints), their one-line menu labels, and the run labels
- * behind the second picker level.
+ * `schedule list` prints), their one-line menu labels, the run labels behind
+ * the second picker level, and the action menu (gating plus the editor text)
+ * behind the third.
  *
  * pi-free and side-effect free on purpose: `index.ts` (the only file allowed to
- * import pi packages) cannot be imported by tests, so the derivation and the
- * label logic live here where `node --test` can reach it. One `buildRows()` for
- * both surfaces is what keeps the CLI table and the TUI menu from drifting.
+ * import pi packages) cannot be imported by tests, so the derivation, the
+ * labels, the action gating and the editor text live here where `node --test`
+ * can reach them. One `buildRows()` for both surfaces is what keeps the CLI
+ * table and the TUI menu from drifting.
  */
 
 import { realpathSync } from "node:fs";
@@ -103,6 +105,82 @@ export function runOptions(runs: ActiveRun[]): RunOption[] {
         label: `${run.ts} · ${run.metadata.trigger} · ${describeRunState(run)}`,
         run,
     }));
+}
+
+// ---------------------------------------------------------------------------
+// run actions (third picker level)
+// ---------------------------------------------------------------------------
+
+/**
+ * What the action menu can do with one run. Ids rather than labels: `index.ts`
+ * maps them through `RUN_ACTION_LABELS` and switches over them, so a new action
+ * cannot be offered without a branch that knows what to do with it.
+ */
+export type RunAction = "preview" | "result" | "session";
+
+/** Menu labels, verbatim the strings `worktree-task.ts` uses for the same actions. */
+export const RUN_ACTION_LABELS: Record<RunAction, string> = {
+    preview: "Preview",
+    result: "Add result to prompt",
+    session: "Add session to prompt",
+};
+
+/**
+ * States in which a run is over and its last assistant message is final.
+ *
+ * `stale` counts as over: a claim nobody picked up has no live process and
+ * never will. `starting`/`running`/`orphan` do not — their `session.jsonl`
+ * already exists (the file is created before pi starts), so `existsSync` alone
+ * would offer a half-written answer as if it were the result.
+ */
+const SETTLED_STATES = new Set<string>(["exited", "killed", "error", "stale"]);
+
+export function isSettledState(state: string): boolean {
+    return SETTLED_STATES.has(state);
+}
+
+/**
+ * The actions the action menu offers for one run, in menu order.
+ *
+ * Gated by facts, exactly like `worktree-task.ts`'s `taskActionItems`: nothing
+ * is offered that the run cannot support. Preview and the session mention need
+ * only the transcript file; the result additionally needs a settled state with
+ * assistant text in it. `hasSession: false` yields no actions at all — the
+ * caller has already reported the missing transcript, and a menu with no
+ * entries is not an answer.
+ */
+export function runActions(
+    state: string,
+    facts: { hasSession: boolean; hasResult: boolean },
+): RunAction[] {
+    if (!facts.hasSession) return [];
+    const actions: RunAction[] = ["preview"];
+    if (isSettledState(state) && facts.hasResult) actions.push("result");
+    actions.push("session");
+    return actions;
+}
+
+/**
+ * Editor text for "Add result to prompt".
+ *
+ * The header names the task and the run stamp — a task can have many runs, and
+ * `schedule task … run <stamp>` is what makes the pasted answer traceable back
+ * to its transcript. The text itself goes in verbatim: no truncation and no
+ * `Error:` suffix, because a partial answer reads like a complete one.
+ */
+export function resultPromptText(taskName: string, ts: string, text: string): string {
+    return `schedule task "${taskName}" run ${ts} result:\n\n${text}`;
+}
+
+/**
+ * Editor text for "Add session to prompt".
+ *
+ * The `@` is a literal mention convention — it is inlined only for CLI `@file`
+ * arguments — so pointing at a 3 MB session transcript costs one line of
+ * editor text, not a copy of the file.
+ */
+export function sessionPromptText(sessionFile: string): string {
+    return `read session @${sessionFile}`;
 }
 
 // ---------------------------------------------------------------------------
