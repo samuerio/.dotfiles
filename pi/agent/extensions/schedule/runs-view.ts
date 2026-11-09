@@ -1,12 +1,27 @@
 /**
- * Presentation of a task's run history for the `/schedule` picker.
+ * Presentation for `/schedule`: the task list rows (the same derivation
+ * `schedule list` prints), their one-line menu labels, and the run labels
+ * behind the second picker level.
  *
  * pi-free and side-effect free on purpose: `index.ts` (the only file allowed to
- * import pi packages) cannot be imported by tests, so the label logic and the
- * label→run mapping live here where `node --test` can reach it.
+ * import pi packages) cannot be imported by tests, so the derivation and the
+ * label logic live here where `node --test` can reach it. One `buildRows()` for
+ * both surfaces is what keeps the CLI table and the TUI menu from drifting.
  */
 
-import { isActive, type ActiveRun } from "./run.ts";
+import { realpathSync } from "node:fs";
+import { homedir } from "node:os";
+
+import { cronToHuman, nextCron } from "./cron.ts";
+import {
+    isActive,
+    listRuns,
+    type ActiveRun,
+    type EffectiveState,
+    type RunMetadata,
+} from "./run.ts";
+import { slotVerdict } from "./slots.ts";
+import { listTasks, nextFireAnchor, readWatermark, type Task } from "./store.ts";
 
 /** How much of a run's `error` string survives in a one-line label. */
 const ERROR_LABEL_WIDTH = 48;
@@ -88,4 +103,372 @@ export function runOptions(runs: ActiveRun[]): RunOption[] {
         label: `${run.ts} · ${run.metadata.trigger} · ${describeRunState(run)}`,
         run,
     }));
+}
+
+// ---------------------------------------------------------------------------
+// Column formatting
+// ---------------------------------------------------------------------------
+
+/** Rough display width: CJK and full-width forms take two cells. */
+export function displayWidth(text: string): number {
+    let width = 0;
+    for (const char of text) {
+        const code = char.codePointAt(0) ?? 0;
+        width +=
+            (code >= 0x1100 && code <= 0x115f) ||
+            (code >= 0x2e80 && code <= 0xa4cf) ||
+            (code >= 0xac00 && code <= 0xd7a3) ||
+            (code >= 0xf900 && code <= 0xfaff) ||
+            (code >= 0xfe30 && code <= 0xfe6f) ||
+            (code >= 0xff00 && code <= 0xff60) ||
+            (code >= 0xffe0 && code <= 0xffe6)
+                ? 2
+                : 1;
+    }
+    return width;
+}
+
+export function pad(text: string, width: number): string {
+    const fill = width - displayWidth(text);
+    return fill > 0 ? text + " ".repeat(fill) : text;
+}
+
+/** How much of one path segment survives when even it alone is too wide. */
+function tailByWidth(text: string, width: number): string {
+    const chars = [...text];
+    let kept = "";
+    let used = 0;
+    // Walk from the right: the end of a segment is the part that still names it.
+    for (let index = chars.length - 1; index >= 0; index -= 1) {
+        const charWidth = displayWidth(chars[index]);
+        if (used + charWidth > width) break;
+        kept = chars[index] + kept;
+        used += charWidth;
+    }
+    return kept;
+}
+
+/**
+ * A task's cwd as a table/menu cell: `~` for the home directory, and the head
+ * of a too-long path elided instead of the tail.
+ *
+ * Later segments are what distinguish one project from another (`…/dotfiles`
+ * says more than `/home/zhe/workspa…`), so the cut happens at a segment
+ * boundary from the left and `…/` marks that the path continues upwards.
+ */
+export function elidePath(cwd: string, width = 28): string {
+    if (!cwd || cwd === "—") return "—";
+    const home = homedir();
+    const display =
+        home && home !== "/" && (cwd === home || cwd.startsWith(`${home}/`))
+            ? `~${cwd.slice(home.length)}`
+            : cwd;
+    if (displayWidth(display) <= width) return display;
+    // Longest fitting tail first, down to the last segment alone. Empty segments
+    // are dropped so the ellipsis never ends up as a bare `…/`.
+    const segments = display.split("/").filter((segment) => segment.length > 0);
+    for (let start = 0; start < segments.length; start += 1) {
+        const candidate = `…/${segments.slice(start).join("/")}`;
+        if (displayWidth(candidate) <= width) return candidate;
+    }
+    // Not even the last segment fits: keep its tail under a cell for the ellipsis.
+    const last = segments[segments.length - 1] ?? display;
+    return `…${tailByWidth(last, width - 1)}`;
+}
+
+// ---------------------------------------------------------------------------
+// default scope of /schedule
+// ---------------------------------------------------------------------------
+
+/**
+ * A cwd reduced to the form two paths can be compared in: no trailing slashes
+ * (a lone `/` is all that is left of the root) and symlinks resolved.
+ *
+ * `realpathSync` throws on a path that is gone (deleted task cwd, EACCES on a
+ * component, a broken symlink), and a menu is the wrong place to fail: the
+ * stripped string is still the best answer available, and it is exactly what
+ * the path was written as.
+ */
+function normalizeCwd(path: string): string {
+    const stripped = path.replace(/\/+$/, "") || "/";
+    try {
+        return realpathSync(stripped);
+    } catch {
+        return stripped;
+    }
+}
+
+/**
+ * Whether a task belongs to the project a session was started in: the same
+ * directory, compared on real paths.
+ *
+ * Exact match, not "the session sits inside the task's cwd": a task is a job
+ * about one directory, and a session started in a subdirectory is looking at
+ * that subdirectory (`/schedule --all` is the escape hatch).
+ *
+ * The realpath step is what makes exact matching usable at all. `addTask`
+ * stores `--cwd` verbatim (it only checks that the path exists), so a task
+ * added through a symlinked path (`~/dotfiles`) would silently stop matching a
+ * session started at the physical path (`~/workspace/.dotfiles`) — and nothing
+ * about that mismatch would be visible. Canonicalizing both sides here fixes
+ * the comparison without rewriting the stored definition, which has to keep
+ * meaning "the path the user typed" (it is what runs are launched in, and
+ * `schedule list --json` prints it).
+ */
+export function matchesScope(sessionCwd: string, taskCwd: string): boolean {
+    return normalizeCwd(sessionCwd) === normalizeCwd(taskCwd);
+}
+
+// ---------------------------------------------------------------------------
+// task list rows (shared with `schedule list`)
+// ---------------------------------------------------------------------------
+
+function shortId(id: string): string {
+    return id.slice(0, 8);
+}
+
+/**
+ * Age of `iso` as the `LAST` column words it; `—` means there is nothing.
+ *
+ * Deliberately not `relativeTime` above: run labels say `never`/`unknown` and
+ * round through `formatDuration`, while the table has always printed a bare
+ * `<n>s|m|h|d ago`. `schedule list` output is a contract, so its wording stays.
+ */
+function agoText(iso: string | undefined): string {
+    if (!iso) return "—";
+    const at = Date.parse(iso);
+    if (!Number.isFinite(at)) return "—";
+    const delta = Date.now() - at;
+    const past = delta >= 0;
+    const seconds = Math.abs(delta) / 1000;
+    const unit =
+        seconds < 60
+            ? `${Math.round(seconds)}s`
+            : seconds < 3600
+              ? `${Math.round(seconds / 60)}m`
+              : seconds < 86400
+                ? `${Math.round(seconds / 3600)}h`
+                : `${Math.round(seconds / 86400)}d`;
+    return past ? `${unit} ago` : `in ${unit}`;
+}
+
+function formatLocal(date: Date): string {
+    const pad2 = (value: number): string => String(value).padStart(2, "0");
+    return `${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}
+
+export function describeState(
+    effective: EffectiveState,
+    metadata: RunMetadata | undefined,
+): string {
+    if (!metadata) return effective;
+    if (effective === "orphan") return `orphan (pgid ${metadata.pgid ?? "?"})`;
+    if (effective === "exited") {
+        if (metadata.signal) return `exited (${metadata.signal})`;
+        if (typeof metadata.exitCode === "number") return `exited (code ${metadata.exitCode})`;
+    }
+    return effective;
+}
+
+export type NextFire =
+    | { kind: "at"; date: Date }
+    | { kind: "consumed" }
+    | { kind: "unschedulable" };
+
+export function nextFireOf(task: Task): NextFire {
+    try {
+        const watermark = readWatermark(task.id);
+        if (task.once && watermark.accountedThrough !== null) return { kind: "consumed" };
+        const anchor = nextFireAnchor(watermark.accountedThrough);
+        if (!anchor) return { kind: "unschedulable" };
+        return { kind: "at", date: nextCron(task.cron, anchor) };
+    } catch {
+        return { kind: "unschedulable" };
+    }
+}
+
+/** `NEXT` column: `—` means only one thing — a consumed one-shot task. */
+export function nextText(next: NextFire): string {
+    switch (next.kind) {
+        case "at":
+            return formatLocal(next.date);
+        case "consumed":
+            return "—";
+        case "unschedulable":
+            return "invalid";
+    }
+}
+
+export interface ListRow {
+    id: string;
+    name: string;
+    cron: string;
+    schedule: string;
+    enabled: boolean;
+    once: boolean;
+    next: string;
+    last: string;
+    state: string;
+    missed: boolean;
+    /**
+     * Absolute cwd of the task, or `—` for a corrupt file (there is no
+     * definition left to read it from). `/schedule` scopes by it, so it has to
+     * travel with the row instead of being re-derived from the task files.
+     */
+    cwd: string;
+}
+
+/**
+ * First slot the task owed but never ran, or undefined when it is up to date
+ * (or currently busy).
+ *
+ * The read side deliberately does not look at the watermark: a missed tick
+ * pushes the watermark to `now`, destroying the evidence within one cycle. The
+ * newest run's `startedAt` — and `createdAt` before the first run — is the
+ * stable proof of what actually happened.
+ */
+export function missedSince(
+    task: Task,
+    newest: ActiveRun | undefined,
+    now = new Date(),
+): Date | undefined {
+    if (!task.enabled) return undefined;
+    // A run in flight is not a missed slot, even after the 10-minute catch-up
+    // window: `first` drops out of the window while the task is still working.
+    // A `stale` claim is a dispatch that was accounted for but never picked up;
+    // reporting it as `missed` would hide the real fault behind the schedule.
+    if (newest && (isActive(newest.effective) || newest.effective === "stale")) return undefined;
+    const base = newest ? Date.parse(newest.metadata.startedAt) : Date.parse(task.createdAt);
+    if (!Number.isFinite(base)) return undefined;
+    try {
+        const verdict = slotVerdict(task.cron, new Date(base), now);
+        return verdict.kind === "missed" ? verdict.first : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+/** `LAST` column: a missed slot overrides the newest run, and `—` means none. */
+export function lastText(missed: Date | undefined, newest: ActiveRun | undefined): string {
+    if (missed) return `missed · ${agoText(missed.toISOString())}`;
+    if (!newest) return "—";
+    return `${describeState(newest.effective, newest.metadata)} · ${agoText(newest.metadata.startedAt)}`;
+}
+
+export function buildRows(now = new Date()): ListRow[] {
+    const rows: ListRow[] = [];
+    for (const entry of listTasks()) {
+        const { task, id } = entry;
+        if (!task) {
+            rows.push({
+                id: shortId(id),
+                name: "(unreadable)",
+                cron: "—",
+                schedule: "—",
+                enabled: false,
+                once: false,
+                next: "—",
+                last: "—",
+                state: "corrupt",
+                missed: false,
+                cwd: "—",
+            });
+            continue;
+        }
+        const runs = listRuns(id);
+        const newest = runs[0];
+        const missed = missedSince(task, newest, now);
+        const next = nextFireOf(task);
+        rows.push({
+            id: shortId(id),
+            name: task.name,
+            cron: task.cron,
+            schedule: cronToHuman(task.cron),
+            enabled: task.enabled,
+            once: Boolean(task.once),
+            next: nextText(next),
+            last: lastText(missed, newest),
+            state: newest ? describeState(newest.effective, newest.metadata) : "idle",
+            missed: missed !== undefined,
+            cwd: task.cwd,
+        });
+    }
+    return rows;
+}
+
+/** Longest task name the menu shows before it is elided. */
+const TASK_NAME_WIDTH = 28;
+
+function truncateWidth(text: string, width: number): string {
+    if (displayWidth(text) <= width) return text;
+    let kept = "";
+    let used = 0;
+    // One cell is reserved for the ellipsis so the result fits `width` exactly.
+    for (const char of text) {
+        const charWidth = displayWidth(char);
+        if (used + charWidth > width - 1) break;
+        kept += char;
+        used += charWidth;
+    }
+    return `${kept}…`;
+}
+
+/** How wide the cwd cell of the multi-cwd menu is allowed to get. */
+const MENU_CWD_WIDTH = 28;
+
+/**
+ * One menu line per row, in `rows` order — `ctx.ui.select` takes a plain string
+ * per option and has no column API, so the columns are padded here instead.
+ *
+ * Every cell comes from the row the CLI prints, so the menu cannot word a task
+ * differently from `schedule list`. ENABLED has no column of its own: a
+ * disabled task carries `(disabled)` on its schedule cell, the same way `· once`
+ * rides along in SCHEDULE.
+ *
+ * When the visible rows span more than one cwd, the cwd cell replaces `next`: a
+ * menu long enough to mix projects has no room for both, and when you are
+ * browsing across projects "which project" beats "next fire" — `next` is still
+ * there in `schedule list` and again after drilling into a task. The condition
+ * is derived from the rows, so no caller has to declare whether it scoped them.
+ */
+export function taskRowLines(rows: ListRow[]): string[] {
+    // `—` (corrupt) counts as a value of its own: a corrupt file next to a real
+    // task is still "more than one place", and the cwd cell is what says so.
+    const multiCwd = new Set(rows.map((row) => row.cwd)).size > 1;
+    const cells = rows.map((row) => {
+        // A corrupt row has no definition to speak of: `—` is unreadable, not
+        // disabled, and marking it as either would misread as a real setting.
+        const marks =
+            row.state === "corrupt"
+                ? ""
+                : `${row.enabled ? "" : " (disabled)"}${row.once ? " · once" : ""}`;
+        return {
+            id: row.id,
+            name: truncateWidth(row.name, TASK_NAME_WIDTH),
+            schedule: `${row.schedule}${marks}`,
+            last: row.last,
+            tail: multiCwd ? elidePath(row.cwd, MENU_CWD_WIDTH) : `next ${row.next}`,
+        };
+    });
+    const widest = (pick: (cell: (typeof cells)[number]) => string): number =>
+        Math.max(0, ...cells.map((cell) => displayWidth(pick(cell))));
+    const [idWidth, nameWidth, scheduleWidth, lastWidth] = [
+        widest((cell) => cell.id),
+        widest((cell) => cell.name),
+        widest((cell) => cell.schedule),
+        widest((cell) => cell.last),
+    ];
+    // The tail cell (next or cwd) is last, so it needs no padding; trimEnd drops
+    // its trailing spaces when the batch is empty.
+    return cells.map((cell) =>
+        [
+            pad(cell.id, idWidth),
+            pad(cell.name, nameWidth),
+            pad(cell.schedule, scheduleWidth),
+            pad(cell.last, lastWidth),
+            cell.tail,
+        ]
+            .join("  ")
+            .trimEnd(),
+    );
 }

@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { afterEach, beforeEach, describe } from "node:test";
 
-import { buildRows, missedSince } from "../cli.ts";
+import { buildRows, missedSince } from "../runs-view.ts";
 import { claimRun, writeMetadata } from "../run.ts";
 import type { RunMetadata } from "../run.ts";
 import { addTask, readWatermark, setTaskEnabled, tasksDir, writeWatermark } from "../store.ts";
@@ -112,6 +112,10 @@ describe("missedSince", () => {
         assert.equal(listRow.missed, false);
         assert.equal(listRow.last, "—");
         assert.equal(listRow.enabled, false);
+        // The row carries the task's absolute cwd: `/schedule` scopes by it and
+        // `list --json` reports it verbatim.
+        assert.equal(listRow.cwd, task.cwd);
+        assert.equal(listRow.cwd, tmpdir());
     });
 
     test("a newest run that failed but is still new shows the failure, not missed", () => {
@@ -213,6 +217,22 @@ describe("read side after a tick", () => {
     });
 });
 
+describe("cwd", () => {
+    test("each row carries its task's own absolute cwd", () => {
+        // Two projects in one list is what `/schedule --all` and a global
+        // `schedule list` look like; the cwd is the only thing separating them.
+        const one = join(scratch, "one");
+        const two = join(scratch, "two");
+        mkdirSync(one);
+        mkdirSync(two);
+        const first = addTask({ name: "a", cron: "0 * * * *", cwd: one, prompt: "hi" });
+        const second = addTask({ name: "b", cron: "0 * * * *", cwd: two, prompt: "hi" });
+        const cwdById = new Map(buildRows(at(6, 12, 0)).map((entry) => [entry.id, entry.cwd]));
+        assert.equal(cwdById.get(first.id.slice(0, 8)), one);
+        assert.equal(cwdById.get(second.id.slice(0, 8)), two);
+    });
+});
+
 describe("corrupt task definitions", () => {
     test("a legacy promptFile task renders as corrupt instead of failing a run", () => {
         // The prompt used to live in a file path; that field is gone, so such a
@@ -234,5 +254,8 @@ describe("corrupt task definitions", () => {
         assert.equal(rows[0].id, "aaaaaaaa");
         assert.equal(rows[0].state, "corrupt");
         assert.equal(rows[0].name, "(unreadable)");
+        // No definition ⇒ no cwd to show or to scope by; `/schedule` has to keep
+        // such a row visible in every project.
+        assert.equal(rows[0].cwd, "—");
     });
 });

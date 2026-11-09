@@ -52,8 +52,8 @@ node --test --test-name-pattern="uninstall" \
 node --test --watch pi/agent/extensions/schedule/tests/
 ```
 
-当前基线：`cli 11 / cron 19 / routing 8 / runs-view 7 / run 18 / slots 7 / store 30 /
-tick 36 = 136 pass, 0 fail`。
+当前基线：`cli 13 / cron 19 / routing 8 / runs-view 32 / run 18 / slots 7 / store 38 /
+tick 37 = 172 pass, 0 fail`。
 
 读测试的顺序建议：`cron.test.ts` 看语义契约 → `run.test.ts` 看状态机 →
 `slots.test.ts` 看读写共用的槽位判定 → `tick.test.ts` 看写侧决策 →
@@ -84,7 +84,7 @@ S=~/workspace/.dotfiles/pi/agent/bin/schedule
 
 $S list                                   # 空态：No scheduled tasks.
 $S add --name smoke --cron '*/1 * * * *' --cwd /tmp --prompt 'say hello'
-$S list                                   # 表格：ID NAME ENABLED NEXT LAST SCHEDULE
+$S list                                   # 表格：ID NAME ENABLED NEXT LAST SCHEDULE CWD
 $S run <id> --fg                          # 前台跑，终端直接看到替身输出
 $S logs <id>                              # 摘要：state / 时长 / session / 最后一条 assistant
 $S logs <id> --raw                        # 原始 output.log
@@ -226,7 +226,11 @@ piw --no-session --no-extensions -e ./pi/agent/extensions/schedule/index.ts
 
 pane 里依次验：
 
-1. `/schedule` 能打开，列出任务（name、cron、effective 状态、相对时间、下次触发）。
+1. `/schedule` 能打开，列出任务（name、cron、effective 状态、相对时间、下次触发）；标题
+   写明当前 scope（`Scheduled tasks · ~/…`），`/schedule --all` 时是裸的 `Scheduled tasks`，
+   可见行跨多个 cwd 时菜单最后一格从 `next …` 换成缩略后的 `cwd`。默认 scope 是**精确匹配**：
+   在任务 `cwd` 的子目录里启动（例如 dotfiles 任务下的 `pi/`）应看到
+   `Scheduled tasks · none for <cwd>, showing all`，而不是只列父目录的任务。
 2. 选一个跑过的任务回车，进入该 run 的摘要预览（含最后一条 assistant 文本）。
 3. 另开一个 pane 跑 `schedule run <id>`（长任务），widget 应在一行内出现，1 秒刷新。
 4. 任务结束后 widget 自动消失。

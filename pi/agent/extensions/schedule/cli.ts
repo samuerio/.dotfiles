@@ -31,17 +31,14 @@ import {
     readMetadata,
     readRunSummary,
 } from "./run.ts";
-import type { ActiveRun, EffectiveState, RunMetadata } from "./run.ts";
-import { slotVerdict } from "./slots.ts";
+import type { RunMetadata } from "./run.ts";
 import {
     KEEP_MS,
     addTask,
     errorMessage,
     getScheduleDir,
     listTasks,
-    nextFireAnchor,
     readTask,
-    readWatermark,
     removeTask,
     setTaskEnabled,
     setTaskPrompt,
@@ -57,6 +54,16 @@ import {
     uninstallCron,
 } from "./tick.ts";
 import { describeRoute, resolveSubagentRoute } from "./routing.ts";
+import {
+    buildRows,
+    describeState,
+    displayWidth,
+    elidePath,
+    nextFireOf,
+    nextText,
+    pad,
+} from "./runs-view.ts";
+import type { ListRow } from "./runs-view.ts";
 
 const USAGE = `Usage:
   schedule list [--json]
@@ -160,198 +167,18 @@ function requireTask(id: string | undefined): Task {
 }
 
 // ---------------------------------------------------------------------------
-// Formatting helpers
-// ---------------------------------------------------------------------------
-
-/** Rough display width: CJK and full-width forms take two cells. */
-function displayWidth(text: string): number {
-    let width = 0;
-    for (const char of text) {
-        const code = char.codePointAt(0) ?? 0;
-        width +=
-            (code >= 0x1100 && code <= 0x115f) ||
-            (code >= 0x2e80 && code <= 0xa4cf) ||
-            (code >= 0xac00 && code <= 0xd7a3) ||
-            (code >= 0xf900 && code <= 0xfaff) ||
-            (code >= 0xfe30 && code <= 0xfe6f) ||
-            (code >= 0xff00 && code <= 0xff60) ||
-            (code >= 0xffe0 && code <= 0xffe6)
-                ? 2
-                : 1;
-    }
-    return width;
-}
-
-function pad(text: string, width: number): string {
-    const fill = width - displayWidth(text);
-    return fill > 0 ? text + " ".repeat(fill) : text;
-}
-
-function shortId(id: string): string {
-    return id.slice(0, 8);
-}
-
-function relativeTime(iso: string | undefined): string {
-    if (!iso) return "—";
-    const at = Date.parse(iso);
-    if (!Number.isFinite(at)) return "—";
-    const delta = Date.now() - at;
-    const past = delta >= 0;
-    const seconds = Math.abs(delta) / 1000;
-    const unit =
-        seconds < 60
-            ? `${Math.round(seconds)}s`
-            : seconds < 3600
-              ? `${Math.round(seconds / 60)}m`
-              : seconds < 86400
-                ? `${Math.round(seconds / 3600)}h`
-                : `${Math.round(seconds / 86400)}d`;
-    return past ? `${unit} ago` : `in ${unit}`;
-}
-
-function formatLocal(date: Date): string {
-    const pad2 = (value: number): string => String(value).padStart(2, "0");
-    return `${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
-}
-
-function describeState(effective: EffectiveState, metadata: RunMetadata | undefined): string {
-    if (!metadata) return effective;
-    if (effective === "orphan") return `orphan (pgid ${metadata.pgid ?? "?"})`;
-    if (effective === "exited") {
-        if (metadata.signal) return `exited (${metadata.signal})`;
-        if (typeof metadata.exitCode === "number") return `exited (code ${metadata.exitCode})`;
-    }
-    return effective;
-}
-
-type NextFire =
-    | { kind: "at"; date: Date }
-    | { kind: "consumed" }
-    | { kind: "unschedulable" };
-
-function nextFireOf(task: Task): NextFire {
-    try {
-        const watermark = readWatermark(task.id);
-        if (task.once && watermark.accountedThrough !== null) return { kind: "consumed" };
-        const anchor = nextFireAnchor(watermark.accountedThrough);
-        if (!anchor) return { kind: "unschedulable" };
-        return { kind: "at", date: nextCron(task.cron, anchor) };
-    } catch {
-        return { kind: "unschedulable" };
-    }
-}
-
-/** `NEXT` column: `—` means only one thing — a consumed one-shot task. */
-function nextText(next: NextFire): string {
-    switch (next.kind) {
-        case "at":
-            return formatLocal(next.date);
-        case "consumed":
-            return "—";
-        case "unschedulable":
-            return "invalid";
-    }
-}
-
-// ---------------------------------------------------------------------------
 // list
 // ---------------------------------------------------------------------------
 
-interface ListRow {
-    id: string;
-    name: string;
-    cron: string;
-    schedule: string;
-    enabled: boolean;
-    once: boolean;
-    next: string;
-    last: string;
-    state: string;
-    missed: boolean;
-}
-
-/**
- * First slot the task owed but never ran, or undefined when it is up to date
- * (or currently busy).
- *
- * The read side deliberately does not look at the watermark: a missed tick
- * pushes the watermark to `now`, destroying the evidence within one cycle. The
- * newest run's `startedAt` — and `createdAt` before the first run — is the
- * stable proof of what actually happened.
- */
-export function missedSince(
-    task: Task,
-    newest: ActiveRun | undefined,
-    now = new Date(),
-): Date | undefined {
-    if (!task.enabled) return undefined;
-    // A run in flight is not a missed slot, even after the 10-minute catch-up
-    // window: `first` drops out of the window while the task is still working.
-    // A `stale` claim is a dispatch that was accounted for but never picked up;
-    // reporting it as `missed` would hide the real fault behind the schedule.
-    if (newest && (isActive(newest.effective) || newest.effective === "stale")) return undefined;
-    const base = newest ? Date.parse(newest.metadata.startedAt) : Date.parse(task.createdAt);
-    if (!Number.isFinite(base)) return undefined;
-    try {
-        const verdict = slotVerdict(task.cron, new Date(base), now);
-        return verdict.kind === "missed" ? verdict.first : undefined;
-    } catch {
-        return undefined;
-    }
-}
-
-/** `LAST` column: a missed slot overrides the newest run, and `—` means none. */
-function lastText(missed: Date | undefined, newest: ActiveRun | undefined): string {
-    if (missed) return `missed · ${relativeTime(missed.toISOString())}`;
-    if (!newest) return "—";
-    return `${describeState(newest.effective, newest.metadata)} · ${relativeTime(newest.metadata.startedAt)}`;
-}
-
-export function buildRows(now = new Date()): ListRow[] {
-    const rows: ListRow[] = [];
-    for (const entry of listTasks()) {
-        const { task, id } = entry;
-        if (!task) {
-            rows.push({
-                id: shortId(id),
-                name: "(unreadable)",
-                cron: "—",
-                schedule: "—",
-                enabled: false,
-                once: false,
-                next: "—",
-                last: "—",
-                state: "corrupt",
-                missed: false,
-            });
-            continue;
-        }
-        const runs = listRuns(id);
-        const newest = runs[0];
-        const missed = missedSince(task, newest, now);
-        const next = nextFireOf(task);
-        rows.push({
-            id: shortId(id),
-            name: task.name,
-            cron: task.cron,
-            schedule: cronToHuman(task.cron),
-            enabled: task.enabled,
-            once: Boolean(task.once),
-            next: nextText(next),
-            last: lastText(missed, newest),
-            state: newest ? describeState(newest.effective, newest.metadata) : "idle",
-            missed: missed !== undefined,
-        });
-    }
-    return rows;
-}
-
+// The cwd is the one column `/schedule` filters by and `list --json` reports in
+// full, so the table carries an elided form: without it, two tasks that differ
+// only by project are indistinguishable from their counts alone.
 function printList(rows: ListRow[]): void {
     if (rows.length === 0) {
         process.stdout.write(`No scheduled tasks. Create one with \`schedule add ...\`.\n`);
         return;
     }
-    const header = ["ID", "NAME", "ENABLED", "NEXT", "LAST", "SCHEDULE"];
+    const header = ["ID", "NAME", "ENABLED", "NEXT", "LAST", "SCHEDULE", "CWD"];
     const body = rows.map((row) => [
         row.id,
         row.name,
@@ -359,6 +186,7 @@ function printList(rows: ListRow[]): void {
         row.next,
         row.last,
         row.once ? `${row.schedule} · once` : row.schedule,
+        elidePath(row.cwd, 28),
     ]);
     const widths = header.map((cell, column) =>
         Math.max(displayWidth(cell), ...body.map((line) => displayWidth(line[column]))),
@@ -769,8 +597,8 @@ process.stdout.on("error", (error: NodeJS.ErrnoException) => {
 
 /**
  * True when this module is the process entry point (directly, or through the
- * `~/.pi/agent/bin/schedule` symlink). Tests import `buildRows`/`missedSince`
- * from here, so importing must not run the CLI.
+ * `~/.pi/agent/bin/schedule` symlink). Importing this module must not run the
+ * CLI: `runs-view.ts` imports `cronToHuman`/`nextCron` for the shared rows.
  */
 function isEntryPoint(): boolean {
     const entry = process.argv[1];

@@ -55,7 +55,7 @@ logs: schedule logs 4c3c7a6e
 ## 命令速查
 
 ```
-schedule list [--json]                  # 全部任务 + effective 状态 + 下次触发
+schedule list [--json]                  # 全部任务 + effective 状态 + 下次触发 + 项目 cwd
 schedule add --name <n> --cron <expr> --cwd <abs>
               (--prompt <t> | --prompt-file <p>) [--once]
 schedule remove <id>                    # 只删定义，run 历史留给 GC
@@ -71,8 +71,15 @@ schedule install-cron / uninstall-cron  # 装/卸 crontab 块
 `--prompt` 的值以 `-` 开头时用 `--prompt=-foo` 或改用 `--prompt-file`。
 `--prompt-file` 只在 `add` / `set-prompt` **当时读一次**：正文被内联进任务定义，路径不落盘。
 之后改或删那个文件都不影响已建好的任务；要换内容再跑一次 `set-prompt`。
-`list --json` 输出 `{tasks:[{id,name,cron,schedule,enabled,once,next,last,state,missed}]}`。
-`missed` 是布尔值（`LAST` 是否被 missed 覆盖），`last` 是渲染好的文本。
+`list --json` 输出 `{tasks:[{id,name,cron,schedule,enabled,once,next,last,state,missed,cwd}]}`。
+`missed` 是布尔值（`LAST` 是否被 missed 覆盖），`last` 是渲染好的文本，`cwd` 是任务的
+**完整绝对路径**。
+
+表格的最后一列 `CWD` 是同一路径的缩略形式：家目录压成 `~`，仍然超宽时保留尾部（越靠后的
+路径段越能区分项目）并用前缀 `…/` 表示向上省略，最宽 28 列。所以表格能解释「为什么这个目录
+下 `/schedule` 只看到 1 个任务」而不必把终端撑爆；需要完整路径（写脚本、`cp`、诊断）时用
+`list --json`。corrupt 的任务文件没有定义，这一列显示 `—`，`/schedule` 也把它当作「任何项目
+下都可见」——否则唯一提醒你去修它的那一行就没了。
 
 ## 用哪个模型
 
@@ -197,12 +204,31 @@ schedule logs <id> --raw    # stdout/stderr；加 -f 跟随到运行结束
 schedule logs <id> --raw -f # 跟随输出直到这次运行结束（对已结束的 run 打印完就返回）
 ```
 
-在 pi 里敲 `/schedule`：两级只读选择器。第一级列任务（cron、effective 状态、下次触发），
-第二级列该任务的历史运行（时间戳、trigger、状态、exit code、错误摘要），选中后看那次运行的
-摘要 + 会话预览。任务是唯一一个 run 时直接跳过第二级。历史深度受 GC 限制（最新 10 个 **或**
-14 天内），跑得勤的任务可能只覆盖最近几小时。
+在 pi 里敲 `/schedule`：两级只读选择器。第一级和 `schedule list` 是同一份派生数据，压成
+单行菜单（短 id、任务名、cron、最近一次运行、下次触发）；**默认只列当前项目的任务**——任务的
+`cwd` 与当前目录是**同一个目录**才算（精确匹配，不是「当前目录在任务 `cwd` 下面」的子树匹配），
+`/schedule --all` 列全部。比较两端都先过一次 realpath：`schedule add --cwd ~/dotfiles` 写下的
+符号链接路径，和从物理路径 `~/workspace/.dotfiles` 启动的会话照样互相匹配（任务里存的仍是当初
+敲的那个路径，不会被改写成 realpath）。反过来，在任务 `cwd` 的**子目录**里启动会话不算匹配，
+于是退回显示全部。标题写明当前范围，例如 `Scheduled tasks · ~/workspace/.dotfiles`（路径按
+`CWD` 列的规则缩略，宽度 40）；当前目录一个都没有时退回显示全部，标题变成
+`Scheduled tasks · none for <cwd>, showing all`（而不是给一个空菜单；在任务的子目录里启动就
+属于这种情况），`--all` 时标题就只有 `Scheduled tasks`。菜单没有单独的 ENABLED 列，disabled
+的任务在 cron 那一格带 `(disabled)` 后缀。
 
-有运行中的任务时，界面底部会出现一行 widget（1 秒刷新）。
+菜单里的 `cwd` 位置是条件性的：**所有可见行的 `cwd` 相同时**（正常情况，尤其是默认 scope）
+最后一格是 `next <时间>`；**跨多个 `cwd` 时**（例如 `--all` 列出了好几个项目的任务）
+最后一格换成缩略后的 `cwd`，并且**去掉 `next`**——菜单一行只有这么宽，跨项目浏览时「这是哪个项目」
+比「下次什么时候跑」更有用，而 `next` 在 `schedule list` 里、进了任务之后都还能看到。这条规则
+由行数据自己推导，不靠调用方传参；corrupt 行的 `—` 也照常参与「是否多个 cwd」的判断。
+
+第二级列该任务的历史运行（时间戳、trigger、状态、exit code、错误摘要），选中后直接打开那次
+运行的会话预览（标题就是任务名 + 时间戳 + 状态，没有多余的摘要弹窗；只有会话文件缺失时才
+退回弹一条摘要说明）。任务是唯一一个 run 时直接跳过第二级。历史深度受 GC 限制（最新 10 个
+**或** 14 天内），跑得勤的任务可能只覆盖最近几小时。
+
+有运行中的任务时，界面底部会出现一行 widget（1 秒刷新）。它**不受 `/schedule` 的 cwd 范围
+影响**：任何目录下正在跑的任务都照常显示。
 
 单次运行目录里有什么：
 

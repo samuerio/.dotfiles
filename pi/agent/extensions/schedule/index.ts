@@ -8,8 +8,8 @@
  * does not resolve.
  *
  * The extension is a thin observation surface only:
- * - `/schedule` lists tasks, then their runs, and previews the chosen run's
- *   session transcript.
+ * - `/schedule` lists tasks (this project's by default, every task with
+ *   `--all`), then their runs, and previews the chosen run's session transcript.
  * - a widget shows runs that are currently active.
  * Task management stays in the CLI (`schedule add/remove/enable/disable/run/logs`).
  */
@@ -24,10 +24,10 @@ import {
 import { Container, Text, type Theme, type TUI } from "@earendil-works/pi-tui";
 
 import { previewSessionFile } from "../lib/session-preview.ts";
-import { cronToHuman, nextCron } from "./cron.ts";
+import { cronToHuman } from "./cron.ts";
 import { effectiveState, isActive, latestRun, listRuns, type ActiveRun } from "./run.ts";
-import { describeRunState, elapsedSince, runOptions } from "./runs-view.ts";
-import { errorMessage, listTasks, nextFireAnchor, readWatermark, type Task } from "./store.ts";
+import { buildRows, elapsedSince, elidePath, matchesScope, runOptions, taskRowLines } from "./runs-view.ts";
+import { listTasks, readTask, type Task } from "./store.ts";
 
 const COMMAND_NAME = "schedule";
 const WIDGET_KEY = "schedule-running";
@@ -42,20 +42,6 @@ function humanCron(expr: string): string {
         return cronToHuman(expr);
     } catch {
         return expr;
-    }
-}
-
-function nextFireText(task: Task): string {
-    const watermark = readWatermark(task.id);
-    // Same one meaning as the CLI's NEXT column: `—` is a consumed one-shot.
-    if (task.once && watermark.accountedThrough !== null) return "—";
-    // Same anchor as the CLI's NEXT column, so the two cannot disagree.
-    const anchor = nextFireAnchor(watermark.accountedThrough);
-    if (!anchor) return "unavailable (bad watermark timestamp)";
-    try {
-        return nextCron(task.cron, anchor).toLocaleString();
-    } catch (error) {
-        return `unavailable (${errorMessage(error)})`;
     }
 }
 
@@ -150,18 +136,42 @@ export default function scheduleExtension(pi: ExtensionAPI): void {
     pi.registerCommand(COMMAND_NAME, {
         description:
             "List scheduled tasks, pick a run of one, and preview its session transcript",
-        handler: async (_args, ctx) => {
+        handler: async (args, ctx) => {
             if (!ctx.hasUI) {
                 throw new Error(`/${COMMAND_NAME} requires TUI or RPC mode.`);
             }
-            await runSchedulePicker(ctx);
+            await runSchedulePicker(ctx, args);
         },
     });
 }
 
-async function runSchedulePicker(ctx: ExtensionCommandContext): Promise<void> {
-    const entries = listTasks();
-    if (entries.length === 0) {
+/** `/schedule` takes exactly one flag; anything else is a typo, not a filter. */
+function parseScope(rawArgs: string): { all: boolean; unknown: string | undefined } {
+    let all = false;
+    for (const token of rawArgs.trim().split(/\s+/).filter(Boolean)) {
+        if (token !== "--all") return { all, unknown: token };
+        all = true;
+    }
+    return { all, unknown: undefined };
+}
+
+async function runSchedulePicker(
+    ctx: ExtensionCommandContext,
+    rawArgs: string,
+): Promise<void> {
+    const scope = parseScope(rawArgs);
+    if (scope.unknown) {
+        ctx.ui.notify(
+            `/${COMMAND_NAME}: unknown option "${scope.unknown}". Use /${COMMAND_NAME} or /${COMMAND_NAME} --all.`,
+            "error",
+        );
+        return;
+    }
+
+    // Same derivation `schedule list` prints, so the two surfaces cannot
+    // disagree about schedule, last run or next fire.
+    const rows = buildRows();
+    if (rows.length === 0) {
         ctx.ui.notify(
             "No scheduled tasks. Add one with `schedule add …` from a shell.",
             "info",
@@ -169,32 +179,49 @@ async function runSchedulePicker(ctx: ExtensionCommandContext): Promise<void> {
         return;
     }
 
-    // Display strings carry everything the user needs to choose; the map keeps
-    // us from parsing them back (same pattern as worktree-task).
-    const labelToTask = new Map<string, Task | undefined>();
-    for (const entry of entries) {
-        const task = entry.task;
-        if (!task) {
-            labelToTask.set(`${entry.id} (corrupt task file)`, undefined);
-            continue;
+    // `/schedule` is a view of the current project by default: the tasks defined
+    // for exactly this directory. `matchesScope` canonicalizes both sides, so a
+    // task added through a symlinked path still matches the physical one. The
+    // row carries the task's cwd, so the scope test needs neither a second pass
+    // over the task files nor a shortId→cwd map that could drift from the ids.
+    const cwd = process.cwd();
+    const scopeCwd = elidePath(cwd, 40);
+
+    let visible = rows;
+    let title = "Scheduled tasks";
+    if (!scope.all) {
+        const scoped = rows.filter((row) => {
+            // A corrupt file has no cwd to match; hiding it would hide the one
+            // row whose fix (re-add or delete) has no other reminder.
+            return row.cwd === "—" || matchesScope(cwd, row.cwd);
+        });
+        // "Nothing for this project" and "only corrupt files for this project"
+        // are different answers: only the first one falls back to the full list.
+        if (scoped.some((row) => row.cwd !== "—")) {
+            visible = scoped;
+            // The title is the only place that says which project a menu with
+            // no cwd cell belongs to.
+            title = `Scheduled tasks · ${scopeCwd}`;
+        } else {
+            // An empty menu would read as "no tasks at all": show everything and
+            // let the title say why the scope was dropped.
+            title = `Scheduled tasks · none for ${scopeCwd}, showing all`;
         }
-        const latest = latestRun(entry.id);
-        const label = [
-            task.name,
-            task.enabled ? humanCron(task.cron) : `${humanCron(task.cron)} (disabled)`,
-            latest ? describeRunState(latest) : "no runs yet",
-            `next ${nextFireText(task)}`,
-        ].join(" · ");
-        labelToTask.set(label, task);
     }
 
-    const choice = await ctx.ui.select(
-        "Scheduled tasks",
-        Array.from(labelToTask.keys()),
-    );
+    // The shortId prefix is what makes the mapping unambiguous; two tasks can
+    // share name, cron and state, and a joined label would collide here.
+    const labels = taskRowLines(visible);
+    const idByLabel = new Map<string, string>();
+    labels.forEach((label, index) => idByLabel.set(label, visible[index].id));
+
+    const choice = await ctx.ui.select(title, labels);
     if (!choice) return;
 
-    const task = labelToTask.get(choice);
+    // A corrupt file renders a row but has no definition behind it; a task
+    // removed while the menu was open lands in the same branch.
+    const taskId = idByLabel.get(choice);
+    const task = taskId ? readTask(taskId) : undefined;
     if (!task) {
         ctx.ui.notify(
             "This task file is corrupt. Re-create it with `schedule add`.",
@@ -206,17 +233,18 @@ async function runSchedulePicker(ctx: ExtensionCommandContext): Promise<void> {
     const run = await pickRun(ctx, task);
     if (!run) return;
 
-    const summary = describeRun(task, run);
     const sessionFile = run.metadata.sessionFile;
     if (!sessionFile || !existsSync(sessionFile)) {
+        // The only surface for this branch: nothing else describes the run.
         ctx.ui.notify(
-            `${summary}\nNo session transcript (the run never started, or its session file was removed).`,
+            `${describeRun(task, run)}\nNo session transcript (the run never started, or its session file was removed).`,
             "info",
         );
         return;
     }
 
-    ctx.ui.notify(summary, "info");
+    // No metadata toast here: the picker label already carries stamp, trigger,
+    // state, exit code and error head, and the overlay title repeats the rest.
     await previewSessionFile(
         ctx,
         `${task.name} · ${run.ts} · ${run.effective}`,
