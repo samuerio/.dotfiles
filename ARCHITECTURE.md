@@ -24,7 +24,8 @@ fresh git worktree（branch = alias）+ tmux 子会话 + `.pi/worktree-tasks/tas
 任务存 `.pi/loop-tasks.json`，1s 自调度 tick 链按 cron 的下次触发时间到点后
 通过 sendMessage 注入当前会话；`.pi/loop-tasks.lock` 文件锁 +
 mtime 陈旧判定做多会话调度权互斥，claim-then-dispatch 毫秒级关键区）、
-`schedule`（cron 调度 + headless 执行：任务定义存 `pi/agent/schedule/tasks/*.json`，OS crontab 每分钟跑
+`schedule`（cron 调度 + headless 执行：任务定义存 `pi/agent/schedule/tasks/*.json`，prompt 正文内联其中
+（`--prompt-file` 只在 add/set-prompt 时读一次、路径不落盘，任务因此自包含），OS crontab 每分钟跑
 `schedule tick`，到期任务以非递归 `mkdir` 原子 claim 后派生 detached helper，由它启动
 `pi -p --approve --provider … --model … --thinking … --session <runDir>/session.jsonl -- @<runDir>/prompt.md`
 （模型 pin 在派发时从 `modes[currentMode].roles.subagents` 解析，任务本身不存模型）并负责 30 分钟墙钟超时

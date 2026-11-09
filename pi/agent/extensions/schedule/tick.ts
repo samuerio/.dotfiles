@@ -279,10 +279,22 @@ export function defaultRunner(
     };
 }
 
-/** Current crontab, or "" when there is none (crontab -l exits non-zero). */
+/**
+ * Current crontab, or "" when the user genuinely has none.
+ *
+ * Only `crontab -l`'s "no crontab for <user>" means empty. Every other failure
+ * (spool lock, I/O error, missing binary) must abort: callers rewrite the whole
+ * crontab from this base, so treating a failed read as empty would drop the
+ * user's entries and, because nothing looked like a previous crontab, do it
+ * without writing crontab.bak.
+ */
 function readCrontab(runner: CommandRunner): string {
     const listing = runner("crontab", ["-l"]);
-    return listing.status === 0 ? listing.stdout : "";
+    if (listing.status === 0) return listing.stdout;
+    if (/no crontab for/i.test(listing.stderr)) return "";
+    const detail =
+        listing.stderr.trim() || (listing.status === null ? "could not run crontab" : `exit ${listing.status}`);
+    throw new Error(`crontab -l failed: ${detail}`);
 }
 
 /** Back up the old body, then write the new one (or throw). */

@@ -16,13 +16,15 @@ import {
     gcRuns,
     listRunStamps,
     listTasks,
-    promptTextOf,
+    nextFireAnchor,
     readTask,
     readWatermark,
     removeTask,
+    resolvePromptText,
     runDir,
     runsRoot,
     setTaskEnabled,
+    setTaskPrompt,
     taskRunsDir,
     tasksDir,
     validateTaskId,
@@ -116,18 +118,21 @@ describe("addTask", () => {
         assert.equal(task.once, false);
         assert.equal(task.cwd, tmpdir());
         assert.equal(task.prompt, "do it");
-        assert.equal(task.promptFile, undefined);
         assert.ok(existsSync(join(tasksDir(), `${task.id}.json`)));
         assert.deepEqual(readTask(task.id), task);
     });
 
-    test("honours once and promptFile", () => {
+    test("honours once and snapshots a prompt file into the definition", () => {
         const promptPath = join(scratch, "prompt.md");
         writeFileSync(promptPath, "from file\n");
         const task = addTask({ name: "one-shot", cron: "@daily", cwd: tmpdir(), promptFile: promptPath, once: true });
         assert.equal(task.once, true);
-        assert.equal(task.promptFile, promptPath);
-        assert.equal(promptTextOf(task), "from file\n");
+        assert.equal(task.prompt, "from file\n");
+        // The path is an input, not part of the persisted definition.
+        assert.equal(readFileSync(join(tasksDir(), `${task.id}.json`), "utf8").includes("promptFile"), false);
+        // Deleting the source afterwards cannot change what the task runs.
+        rmSync(promptPath);
+        assert.equal(readTask(task.id)?.prompt, "from file\n");
     });
 
     test("retries on an id collision", () => {
@@ -163,7 +168,11 @@ describe("addTask", () => {
         writeFileSync(promptFile, "x");
         assert.throws(() => addTask({ ...base, promptFile }), /mutually exclusive/);
         assert.throws(() => addTask({ name: "n", cron: "@daily", cwd: tmpdir() }), /one of --prompt/);
-        assert.throws(() => addTask({ ...base, prompt: undefined, promptFile: join(scratch, "missing.md") }), /does not exist/);
+        assert.throws(() => addTask({ ...base, prompt: undefined, promptFile: join(scratch, "missing.md") }), /cannot read/);
+        assert.throws(() => addTask({ ...base, prompt: "  \n" }), /prompt is empty/);
+        const emptyFile = join(scratch, "empty.md");
+        writeFileSync(emptyFile, "");
+        assert.throws(() => addTask({ ...base, prompt: undefined, promptFile: emptyFile }), /prompt is empty/);
     });
 });
 
@@ -173,6 +182,18 @@ describe("readTask / listTasks", () => {
         writeTaskFile("11111111", "{ not json");
         writeTaskFile("22222222", { version: 2, id: "22222222" });
         writeTaskFile("33333333", { version: 1, id: "44444444", name: "mismatch" });
+        // Legacy shape: the prompt lived in a file path, which is no longer a task field.
+        writeTaskFile("55555555", {
+            version: 1,
+            id: "55555555",
+            name: "legacy",
+            cron: "@daily",
+            enabled: true,
+            cwd: tmpdir(),
+            promptFile: "/tmp/prompt.md",
+            once: false,
+            createdAt: new Date().toISOString(),
+        });
         writeFileSync(join(tasksDir(), "notes.txt"), "ignore me");
 
         assert.equal(readTask("11111111"), undefined);
@@ -183,9 +204,9 @@ describe("readTask / listTasks", () => {
 
         const listed = listTasks();
         const ids = listed.map((entry) => entry.id).sort();
-        assert.deepEqual(ids, [good.id, "11111111", "22222222", "33333333"].sort());
+        assert.deepEqual(ids, [good.id, "11111111", "22222222", "33333333", "55555555"].sort());
         const corrupt = listed.filter((entry) => entry.task === undefined);
-        assert.equal(corrupt.length, 3);
+        assert.equal(corrupt.length, 4);
         for (const entry of corrupt) assert.ok(entry.error && entry.error.length > 0);
         assert.equal(listed.find((entry) => entry.id === good.id)?.task?.name, "good");
     });
@@ -208,35 +229,59 @@ describe("readTask / listTasks", () => {
     });
 });
 
-describe("promptTextOf", () => {
-    const base: Task = {
-        version: 1,
-        id: "a1b2c3d4",
-        name: "n",
-        cron: "@daily",
-        enabled: true,
-        cwd: "/tmp",
-        once: false,
-        createdAt: new Date().toISOString(),
-    };
-
-    test("inline prompt wins only when it is the sole source", () => {
-        assert.equal(promptTextOf({ ...base, prompt: "inline" }), "inline");
+describe("resolvePromptText", () => {
+    test("passes inline text through untouched", () => {
+        assert.equal(resolvePromptText({ prompt: "  keep\n formatting  " }, "add"), "  keep\n formatting  ");
     });
 
-    test("promptFile is read from disk", () => {
+    test("reads a file once", () => {
         const path = join(scratch, "p.md");
         writeFileSync(path, "file body\n");
-        assert.equal(promptTextOf({ ...base, promptFile: path }), "file body\n");
+        assert.equal(resolvePromptText({ promptFile: path }, "add"), "file body\n");
     });
 
     test("both or neither is a configuration error", () => {
-        assert.throws(() => promptTextOf({ ...base, prompt: "a", promptFile: "/tmp/x" }), /exactly one/);
-        assert.throws(() => promptTextOf(base), /exactly one/);
+        assert.throws(() => resolvePromptText({ prompt: "a", promptFile: "/tmp/x" }, "add"), /mutually exclusive/);
+        assert.throws(() => resolvePromptText({}, "add"), /one of --prompt/);
     });
 
-    test("an unreadable promptFile is an error, not an empty prompt", () => {
-        assert.throws(() => promptTextOf({ ...base, promptFile: join(scratch, "missing.md") }), /cannot read promptFile/);
+    test("an unreadable or empty source is an error, not an empty prompt", () => {
+        assert.throws(() => resolvePromptText({ promptFile: join(scratch, "missing.md") }, "add"), /cannot read/);
+        const empty = join(scratch, "empty.md");
+        writeFileSync(empty, "\n \t\n");
+        assert.throws(() => resolvePromptText({ promptFile: empty }, "add"), /prompt is empty/);
+    });
+
+    test("the action name is carried into the message", () => {
+        assert.throws(() => resolvePromptText({}, "set-prompt"), /^Error: set-prompt: one of/);
+    });
+});
+
+describe("setTaskPrompt", () => {
+    test("replaces only the prompt and leaves the schedule alone", () => {
+        const task = addTask({ name: "t", cron: "@daily", cwd: tmpdir(), prompt: "old" }, { nextId: () => "aaaaaaaa" });
+        const next = setTaskPrompt(task.id, { prompt: "new" });
+        assert.equal(next?.prompt, "new");
+        assert.equal(next?.cron, task.cron);
+        assert.equal(next?.cwd, task.cwd);
+        assert.equal(next?.createdAt, task.createdAt);
+        assert.equal(readTask(task.id)?.prompt, "new");
+    });
+
+    test("a file source is snapshot, not referenced", () => {
+        const task = addTask({ name: "t", cron: "@daily", cwd: tmpdir(), prompt: "old" }, { nextId: () => "aaaaaaaa" });
+        const path = join(scratch, "p.md");
+        writeFileSync(path, "from file\n");
+        setTaskPrompt(task.id, { promptFile: path });
+        writeFileSync(path, "edited later\n");
+        assert.equal(readTask(task.id)?.prompt, "from file\n");
+    });
+
+    test("unknown task or bad input writes nothing", () => {
+        assert.equal(setTaskPrompt("deadbeef", { prompt: "x" }), undefined);
+        const task = addTask({ name: "t", cron: "@daily", cwd: tmpdir(), prompt: "old" }, { nextId: () => "aaaaaaaa" });
+        assert.throws(() => setTaskPrompt(task.id, {}), /one of --prompt/);
+        assert.equal(readTask(task.id)?.prompt, "old");
     });
 });
 
@@ -373,5 +418,26 @@ describe("gcRuns", () => {
         assert.ok(existsSync(watermarkPath("a1b2c3d4")));
         rmSync(runsRoot(), { recursive: true, force: true });
         assert.deepEqual(gcRuns().removed, []);
+    });
+});
+
+describe("nextFireAnchor", () => {
+    const now = new Date("2026-11-09T10:00:00.000Z");
+
+    test("a never-run task anchors on now", () => {
+        assert.equal(nextFireAnchor(null, now)?.toISOString(), now.toISOString());
+    });
+
+    test("a watermark in the past is clamped to now", () => {
+        // Downtime: the old anchor would label today's slot with a stale date.
+        assert.equal(nextFireAnchor("2026-11-06T03:00:00.000Z", now)?.toISOString(), now.toISOString());
+    });
+
+    test("a watermark in the future is kept", () => {
+        assert.equal(nextFireAnchor("2026-11-09T12:00:00.000Z", now)?.toISOString(), "2026-11-09T12:00:00.000Z");
+    });
+
+    test("a malformed watermark has no anchor", () => {
+        assert.equal(nextFireAnchor("not a timestamp", now), undefined);
     });
 });

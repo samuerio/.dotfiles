@@ -27,7 +27,7 @@ import { previewSessionFile } from "../lib/session-preview.ts";
 import { cronToHuman, nextCron } from "./cron.ts";
 import { effectiveState, isActive, latestRun, listRuns, type ActiveRun } from "./run.ts";
 import { describeRunState, elapsedSince, runOptions } from "./runs-view.ts";
-import { errorMessage, listTasks, readWatermark, type Task } from "./store.ts";
+import { errorMessage, listTasks, nextFireAnchor, readWatermark, type Task } from "./store.ts";
 
 const COMMAND_NAME = "schedule";
 const WIDGET_KEY = "schedule-running";
@@ -49,11 +49,11 @@ function nextFireText(task: Task): string {
     const watermark = readWatermark(task.id);
     // Same one meaning as the CLI's NEXT column: `—` is a consumed one-shot.
     if (task.once && watermark.accountedThrough !== null) return "—";
-    const base = watermark.accountedThrough
-        ? new Date(watermark.accountedThrough)
-        : new Date(task.createdAt);
+    // Same anchor as the CLI's NEXT column, so the two cannot disagree.
+    const anchor = nextFireAnchor(watermark.accountedThrough);
+    if (!anchor) return "unavailable (bad watermark timestamp)";
     try {
-        return nextCron(task.cron, base).toLocaleString();
+        return nextCron(task.cron, anchor).toLocaleString();
     } catch (error) {
         return `unavailable (${errorMessage(error)})`;
     }

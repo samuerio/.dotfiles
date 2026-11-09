@@ -514,13 +514,36 @@ describe("install-cron", () => {
             if (command === "crontab" && args[0] === "-") {
                 return { status: 1, stdout: "", stderr: "crontab: permission denied" };
             }
-            if (command === "crontab") return { status: 1, stdout: "", stderr: "" };
+            // A genuinely empty crontab: the one non-zero read that is not a failure.
+            if (command === "crontab") return { status: 1, stdout: "", stderr: "no crontab for zhe" };
             return { status: 0, stdout: "", stderr: "" };
         };
         assert.throws(
             () => installCron({ runner, scheduleBin: scheduleBin(), nodeBin: "/usr/bin/node" }),
             /permission denied/,
         );
+    });
+
+    test("a failed crontab read aborts instead of rewriting from an empty base", () => {
+        let wrote = false;
+        const runner: CommandRunner = (command, args) => {
+            if (command === "crontab" && args[0] === "-l") {
+                return { status: 1, stdout: "", stderr: "crontab: cannot open spool" };
+            }
+            if (command === "crontab") {
+                wrote = true;
+                return { status: 0, stdout: "", stderr: "" };
+            }
+            return { status: 0, stdout: "", stderr: "" };
+        };
+        assert.throws(
+            () => installCron({ runner, scheduleBin: scheduleBin(), nodeBin: "/usr/bin/node" }),
+            /cannot open spool/,
+        );
+        // Nothing may be written, and no backup may be claimed, from a base we
+        // never actually read.
+        assert.equal(wrote, false);
+        assert.equal(existsSync(join(scratch, "agent", "schedule", "crontab.bak")), false);
     });
 
     test("uninstall-cron removes only our block and keeps the user's entries", () => {

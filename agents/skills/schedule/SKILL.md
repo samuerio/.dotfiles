@@ -27,6 +27,7 @@ The agent surface is the `schedule` binary on PATH (pi prepends `~/.pi/agent/bin
 schedule list [--json]
 schedule add --name <n> --cron <expr> --cwd <abs> (--prompt <t> | --prompt-file <p>) [--once]
 schedule remove <id>
+schedule set-prompt <id> (--prompt <t> | --prompt-file <p>)
 schedule enable <id>
 schedule disable <id>
 schedule run <id> [--fg]
@@ -58,7 +59,7 @@ Day-of-month and day-of-week constrained together use OR, not AND (standard Vixi
 ## Hard Requirements
 
 1. **`cwd` must be an absolute, existing directory.** Verify with bash before adding; the scheduler does not expand `~`.
-2. **The prompt must be self-contained.** A scheduled run starts a blank session with no conversation history: state what to do, where to write output, and what counts as success. Prefer `--prompt-file` for anything long or multi-line.
+2. **The prompt must be self-contained.** A scheduled run starts a blank session with no conversation history: state what to do, where to write output, and what counts as success. Prefer `--prompt-file` for anything long or multi-line, but note it is read **once, at `add` time**: the text is stored inside the task definition and the path is not kept, so editing that file later changes nothing (use `schedule set-prompt <id> --prompt-file <p>` to re-snapshot).
 3. **`list` before `add`.** Duplicated tasks are a maintenance problem the scheduler will not catch for you.
 4. **Model routing is not per task.** A run is a one-shot worker call, so it is pinned at dispatch time to `modes[currentMode].roles.subagents` in modes.json (project `.pi/modes.json` of the task's cwd first, then `~/.pi/agent/modes.json`) and launched with `--provider … --model … --thinking …`. Change the pin in modes.json, not in the task. With no usable pin the child falls back to `settings.json` defaults. `schedule logs <id>` prints the model a run actually used; `schedule add` prints the routing the new task will get.
 5. **Credentials must reach the child.** No provider/model/API key is stored per task, and crontab runs with a minimal environment: a provider that resolves its key from an env var (e.g. `engy` → `$ENGY_API_KEY`) is unavailable under cron unless that key is also resolvable from `auth.json` (an `api_key` entry, optionally `"key": "!command"`). Symptom: `exited (code 1)` with `Use /login to log into a provider` in `schedule logs <id> --raw`. Check that before blaming the schedule.
@@ -106,7 +107,7 @@ A scheduled run's result lives in its session transcript: `~/.pi/agent/schedule/
 | State | Meaning |
 |---|---|
 | `running` | process alive, helper alive, timeout enforced |
-| `orphan` | the pi process is alive but its supervisor died, so the timeout no longer applies; the scheduler may reap it |
+| `orphan` | the pi process is alive but its supervisor died, so the timeout no longer applies; nothing reaps it, so kill the process group yourself |
 | `starting` / `stale` | claimed but no pid recorded yet / claim never completed (a dispatch that never reached the helper stays visible here) |
 | `exited` / `killed` / `error` | terminal: finished, killed by the 30-minute timeout, or failed to start |
 | `missed` | not a run state: the task owed a slot that never ran. `LAST` shows `missed · <age>` and overrides the run state |

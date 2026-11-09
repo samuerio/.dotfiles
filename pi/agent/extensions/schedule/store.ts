@@ -4,7 +4,7 @@
  * Layout (all paths derived at call time so tests can redirect via
  * PI_CODING_AGENT_DIR, exactly like pi's own getAgentDir()):
  *
- *   <agentDir>/schedule/tasks/<id>.json       task definition, git-tracked
+ *   <agentDir>/schedule/tasks/<id>.json       task definition, local (gitignored)
  *   <agentDir>/schedule/runs/<id>/state.json  tick-owned scheduling watermark
  *   <agentDir>/schedule/runs/<id>/<ts>/       one directory per run
  *
@@ -44,8 +44,12 @@ export interface Task {
     cron: string;
     enabled: boolean;
     cwd: string;
-    prompt?: string;
-    promptFile?: string;
+    /**
+     * Prompt body, always stored inline so the definition is self-contained.
+     * `--prompt-file` is an input convenience: the file is read once at
+     * `add`/`set-prompt` time and never referenced again.
+     */
+    prompt: string;
     once: boolean;
     createdAt: string;
 }
@@ -68,6 +72,7 @@ export interface AddTaskInput {
     name: string;
     cron: string;
     cwd: string;
+    /** Prompt text, or a file to snapshot now (stored inline either way). */
     prompt?: string;
     promptFile?: string;
     once?: boolean;
@@ -187,8 +192,9 @@ function parseTask(id: string, raw: string): Task | undefined {
     if (!isString(task.cwd) || task.cwd.length === 0) return undefined;
     if (typeof task.once !== "boolean") return undefined;
     if (!isString(task.createdAt)) return undefined;
-    if (task.prompt !== undefined && !isString(task.prompt)) return undefined;
-    if (task.promptFile !== undefined && !isString(task.promptFile)) return undefined;
+    // A task without a prompt has nothing to run: from here on that is a corrupt
+    // definition, not a dispatch-time error inside a detached helper.
+    if (!isString(task.prompt) || task.prompt.length === 0) return undefined;
     const parsed: Task = {
         version: 1,
         id,
@@ -196,11 +202,10 @@ function parseTask(id: string, raw: string): Task | undefined {
         cron: task.cron,
         enabled: task.enabled,
         cwd: task.cwd,
+        prompt: task.prompt,
         once: task.once,
         createdAt: task.createdAt,
     };
-    if (task.prompt !== undefined) parsed.prompt = task.prompt;
-    if (task.promptFile !== undefined) parsed.promptFile = task.promptFile;
     return parsed;
 }
 
@@ -263,6 +268,34 @@ function defaultNextId(): string {
     return randomBytes(4).toString("hex");
 }
 
+/**
+ * Prompt body from the two mutually exclusive inputs. A file source is read
+ * once here; the returned text is what gets persisted, so a later edit or
+ * deletion of that file cannot change what a task runs.
+ */
+export function resolvePromptText(input: { prompt?: string; promptFile?: string }, action: string): string {
+    if (input.prompt !== undefined && input.promptFile !== undefined) {
+        throw new Error(`${action}: --prompt and --prompt-file are mutually exclusive`);
+    }
+    if (input.prompt === undefined && input.promptFile === undefined) {
+        throw new Error(`${action}: one of --prompt or --prompt-file is required`);
+    }
+    let text: string;
+    if (input.promptFile !== undefined) {
+        const path = input.promptFile.trim();
+        if (!path) throw new Error(`${action}: --prompt-file is empty`);
+        try {
+            text = readFileSync(path, "utf8");
+        } catch (error) {
+            throw new Error(`${action}: cannot read --prompt-file ${path}: ${errorMessage(error)}`);
+        }
+    } else {
+        text = input.prompt as string;
+    }
+    if (text.trim().length === 0) throw new Error(`${action}: prompt is empty`);
+    return text;
+}
+
 export function addTask(input: AddTaskInput, options: AddTaskOptions = {}): Task {
     const name = input.name?.trim();
     if (!name) throw new Error("add: --name is required");
@@ -278,17 +311,7 @@ export function addTask(input: AddTaskInput, options: AddTaskOptions = {}): Task
         throw new Error(`add: --cwd does not exist: ${cwd}`);
     }
     if (!cwdStat.isDirectory()) throw new Error(`add: --cwd is not a directory: ${cwd}`);
-    if (input.prompt !== undefined && input.promptFile !== undefined) {
-        throw new Error("add: --prompt and --prompt-file are mutually exclusive");
-    }
-    if (input.prompt === undefined && input.promptFile === undefined) {
-        throw new Error("add: one of --prompt or --prompt-file is required");
-    }
-    if (input.promptFile !== undefined) {
-        const promptFile = input.promptFile.trim();
-        if (!promptFile) throw new Error("add: --prompt-file is empty");
-        if (!existsSync(promptFile)) throw new Error(`add: --prompt-file does not exist: ${promptFile}`);
-    }
+    const prompt = resolvePromptText(input, "add");
 
     const now = (options.now ?? (() => new Date()))();
     const nextId = options.nextId ?? defaultNextId;
@@ -305,11 +328,10 @@ export function addTask(input: AddTaskInput, options: AddTaskOptions = {}): Task
             cron,
             enabled: true,
             cwd,
+            prompt,
             once: input.once === true,
             createdAt: now.toISOString(),
         };
-        if (input.prompt !== undefined) task.prompt = input.prompt;
-        if (input.promptFile !== undefined) task.promptFile = input.promptFile.trim();
         atomicWriteJson(path, task);
         try {
             chmodSync(path, 0o600);
@@ -337,23 +359,28 @@ export function setTaskEnabled(id: string, enabled: boolean): Task | undefined {
     return next;
 }
 
+/** Replace a task's prompt. Same input shape as `add`; a file is read once. */
+export function setTaskPrompt(id: string, input: { prompt?: string; promptFile?: string }): Task | undefined {
+    const task = readTask(id);
+    if (!task) return undefined;
+    const prompt = resolvePromptText(input, "set-prompt");
+    const next: Task = { ...task, prompt };
+    atomicWriteJson(taskPath(id), next);
+    return next;
+}
+
 /**
- * Prompt text of a task. `prompt` and `promptFile` are mutually exclusive; a
- * task that has both or neither is a configuration error, not a silent default.
+ * Anchor for "when does this task fire next": the watermark, clamped to now.
+ *
+ * `accountedThrough` can sit in the past (downtime, a skipped slot) or be
+ * malformed. Anchoring on it directly would label a future slot with a stale
+ * date, so both readers (`schedule list` and `/schedule`) clamp through here
+ * instead of each inventing its own rule.
  */
-export function promptTextOf(task: Task): string {
-    const hasInline = task.prompt !== undefined;
-    const hasFile = task.promptFile !== undefined;
-    if (hasInline === hasFile) {
-        throw new Error(`task ${task.id}: exactly one of prompt / promptFile must be set`);
-    }
-    if (hasInline) return task.prompt as string;
-    const path = task.promptFile as string;
-    try {
-        return readFileSync(path, "utf8");
-    } catch (error) {
-        throw new Error(`task ${task.id}: cannot read promptFile ${path}: ${errorMessage(error)}`);
-    }
+export function nextFireAnchor(accountedThrough: string | null, now: Date = new Date()): Date | undefined {
+    if (accountedThrough === null) return now;
+    const anchor = new Date(Math.max(now.getTime(), Date.parse(accountedThrough)));
+    return Number.isNaN(anchor.getTime()) ? undefined : anchor;
 }
 
 export function readWatermark(taskId: string): Watermark {

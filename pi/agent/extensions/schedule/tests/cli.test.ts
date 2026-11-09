@@ -2,7 +2,7 @@
 // columns. `buildRows(now)` takes the clock so these assertions do not depend on
 // the wall clock; every test redirects PI_CODING_AGENT_DIR into a scratch dir.
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { afterEach, beforeEach, describe } from "node:test";
@@ -210,5 +210,29 @@ describe("read side after a tick", () => {
         assert.equal(listRow.state, "stale");
         assert.equal(listRow.missed, false);
         assert.match(listRow.last, /^stale · /);
+    });
+});
+
+describe("corrupt task definitions", () => {
+    test("a legacy promptFile task renders as corrupt instead of failing a run", () => {
+        // The prompt used to live in a file path; that field is gone, so such a
+        // file must be visible as corrupt rather than dispatch-time broken.
+        const body = {
+            version: 1,
+            id: "aaaaaaaa",
+            name: "legacy",
+            cron: "@daily",
+            enabled: true,
+            cwd: tmpdir(),
+            promptFile: "/tmp/prompt.md",
+            once: false,
+            createdAt: new Date().toISOString(),
+        };
+        writeFileSync(join(tasksDir(), "aaaaaaaa.json"), JSON.stringify(body));
+        const rows = buildRows();
+        assert.equal(rows.length, 1);
+        assert.equal(rows[0].id, "aaaaaaaa");
+        assert.equal(rows[0].state, "corrupt");
+        assert.equal(rows[0].name, "(unreadable)");
     });
 });

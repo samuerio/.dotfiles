@@ -39,11 +39,13 @@ import {
     errorMessage,
     getScheduleDir,
     listTasks,
-    promptTextOf,
+    nextFireAnchor,
     readTask,
     readWatermark,
     removeTask,
     setTaskEnabled,
+    setTaskPrompt,
+    tasksDir,
     validateTaskId,
 } from "./store.ts";
 import type { Task } from "./store.ts";
@@ -60,6 +62,7 @@ const USAGE = `Usage:
   schedule list [--json]
   schedule add --name <name> --cron <expr> --cwd <abs-dir> (--prompt <text> | --prompt-file <path>) [--once]
   schedule remove <id>
+  schedule set-prompt <id> (--prompt <text> | --prompt-file <path>)
   schedule enable <id>
   schedule disable <id>
   schedule run <id> [--fg]
@@ -71,7 +74,8 @@ const USAGE = `Usage:
 Options:
   --prompt <text>     inline prompt; use --prompt=<text> or --prompt-file for
                       text that starts with a dash
-  --prompt-file <p>   read the prompt from a file at every run
+  --prompt-file <p>   read the prompt from a file now, at add/set-prompt time;
+                      the task stores the text itself, never the path
   --once              fire only for the first scheduled slot, then stop
   --fg                run in the foreground (shares your terminal and process group)
   --raw               show the raw output.log instead of the run summary
@@ -229,10 +233,8 @@ function nextFireOf(task: Task): NextFire {
     try {
         const watermark = readWatermark(task.id);
         if (task.once && watermark.accountedThrough !== null) return { kind: "consumed" };
-        const anchor = watermark.accountedThrough === null
-            ? new Date()
-            : new Date(Math.max(Date.now(), Date.parse(watermark.accountedThrough)));
-        if (Number.isNaN(anchor.getTime())) return { kind: "unschedulable" };
+        const anchor = nextFireAnchor(watermark.accountedThrough);
+        if (!anchor) return { kind: "unschedulable" };
         return { kind: "at", date: nextCron(task.cron, anchor) };
     } catch {
         return { kind: "unschedulable" };
@@ -367,6 +369,14 @@ function printList(rows: ListRow[]): void {
     for (const line of body) {
         process.stdout.write(`${render(line)}\n`);
     }
+    // A corrupt file is otherwise invisible: it renders as "(unreadable)" and
+    // the fix (re-add or delete it) is not something the table can express.
+    const corrupt = rows.filter((row) => row.state === "corrupt").length;
+    if (corrupt > 0) {
+        process.stdout.write(
+            `\n${corrupt} corrupt task definition(s): re-add with \`schedule add\`, or delete the bad file under ${tasksDir()}\n`,
+        );
+    }
 }
 
 function cmdList(args: ParsedArgs): number {
@@ -380,7 +390,7 @@ function cmdList(args: ParsedArgs): number {
 }
 
 // ---------------------------------------------------------------------------
-// add / remove / enable / disable
+// add / remove / set-prompt / enable / disable
 // ---------------------------------------------------------------------------
 
 function cmdAdd(args: ParsedArgs): number {
@@ -434,6 +444,23 @@ function cmdRemove(args: ParsedArgs): number {
     return 0;
 }
 
+function cmdSetPrompt(args: ParsedArgs): number {
+    const task = requireTask(args.positionals[0]);
+    let next: Task | undefined;
+    try {
+        next = setTaskPrompt(task.id, {
+            prompt: flag(args, "--prompt"),
+            promptFile: flag(args, "--prompt-file"),
+        });
+    } catch (error) {
+        fail(errorMessage(error));
+    }
+    if (!next) fail(`could not update task: ${task.id}`);
+    // No NEXT line: only the prompt body changed, the schedule is untouched.
+    process.stdout.write(`set prompt for ${next.id}  ${next.name} (${next.prompt.length} chars)\n`);
+    return 0;
+}
+
 function cmdToggle(args: ParsedArgs, enabled: boolean): number {
     const task = requireTask(args.positionals[0]);
     const next = setTaskEnabled(task.id, enabled);
@@ -479,15 +506,9 @@ function runInputs(task: Task): {
     promptText: string;
     route: ReturnType<typeof resolveSubagentRoute>;
 } {
-    let promptText: string;
-    try {
-        promptText = promptTextOf(task);
-    } catch (error) {
-        fail(errorMessage(error));
-    }
     // Runs are one-shot worker calls: follow the active mode's
     // roles.subagents pin instead of whichever provider pi falls back to.
-    return { promptText, route: resolveSubagentRoute(task.cwd) };
+    return { promptText: task.prompt, route: resolveSubagentRoute(task.cwd) };
 }
 
 async function cmdRun(args: ParsedArgs): Promise<number> {
@@ -714,6 +735,8 @@ async function main(): Promise<number> {
         case "remove":
         case "rm":
             return cmdRemove(args);
+        case "set-prompt":
+            return cmdSetPrompt(args);
         case "enable":
             return cmdToggle(args, true);
         case "disable":
