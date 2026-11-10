@@ -5,19 +5,21 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
-    __testReset,
-    buildMissedTaskNotification,
     computeNextCronRun,
     cronToHuman,
     findMissedTasks,
     jitteredNextCronRunMs,
-    legacyToStored,
     nextCronRunMs,
     oneShotJitteredNextCronRunMs,
     parseCronDetailed,
-} from "../../loop.ts";
+} from "../cron.ts"
+import {
+    __testReset,
+    buildMissedTaskNotification,
+    legacyToStored,
+} from "../index.ts";
 
-// loop.ts's file IO uses module state set via __testReset.
+// index.ts's file IO uses module state set via __testReset.
 
 async function withScratchRepoAsync(
     body: (root: string) => Promise<void>,
@@ -148,7 +150,7 @@ test("file IO: missing file reads empty, create/delete round-trips, no tmp lefto
     await withScratchRepoAsync(async (root) => {
         const file = join(root, ".pi", "loop-tasks.json");
         assert.ok(!existsSync(file));
-        const { mutateTaskFile, readTaskFile } = await import("../../loop.ts");
+        const { mutateTaskFile, readTaskFile } = await import("../index.ts");
         await mutateTaskFile((tasks) => {
             tasks.push({ id: "aabbccdd", cron: "*/5 * * * *", prompt: "hi", createdAt: 1, recurring: true });
         });
@@ -171,7 +173,7 @@ test("file IO: missing file reads empty, create/delete round-trips, no tmp lefto
 
 test("owner lock: same live pid under a new session id re-acquires (session replacement)", async () => {
     await withScratchRepoAsync(async (root) => {
-        const { __testReset, tryAcquireOwnerLock } = await import("../../loop.ts");
+        const { __testReset, tryAcquireOwnerLock } = await import("../index.ts");
         const lockFile = join(root, ".pi", "loop-tasks.lock");
         // Simulate a /new-style replacement: the previous session released
         // nothing, so the lock names OUR live pid under the OLD session id.
@@ -190,7 +192,7 @@ test("owner lock: same live pid under a new session id re-acquires (session repl
 
 test("owner lock: live foreign pid is never stolen", async () => {
     await withScratchRepoAsync(async (root) => {
-        const { __testReset, tryAcquireOwnerLock } = await import("../../loop.ts");
+        const { __testReset, tryAcquireOwnerLock } = await import("../index.ts");
         const { spawn } = await import("node:child_process");
         const child = spawn("sleep", ["10"]);
         try {
@@ -215,7 +217,7 @@ test("file IO: corrupt JSON throws (never silently overwritten)", async () => {
         const file = join(root, ".pi", "loop-tasks.json");
         mkdirSync(join(root, ".pi"), { recursive: true });
         writeFileSync(file, "{not json");
-        const { mutateTaskFile } = await import("../../loop.ts");
+        const { mutateTaskFile } = await import("../index.ts");
         await assert.rejects(() => mutateTaskFile(() => {}));
         assert.equal(readFileSync(file, "utf8"), "{not json");
     });
@@ -232,7 +234,7 @@ test("file IO: shape-invalid entries are preserved verbatim on write-back", asyn
                 tasks: [{ id: "ok1", cron: "* * * * *", prompt: "fine", createdAt: 1 }, { garbage: true }],
             }),
         );
-        const { mutateTaskFile, readTaskFile } = await import("../../loop.ts");
+        const { mutateTaskFile, readTaskFile } = await import("../index.ts");
         await mutateTaskFile((tasks) => {
             tasks.push({ id: "new1", cron: "0 9 * * *", prompt: "x", createdAt: 2, recurring: true });
         });
@@ -276,7 +278,7 @@ test("migration: v1 → v2 stamps recurring lastFiredAt (anti-herd) and is idemp
             ],
         };
         writeFileSync(file, JSON.stringify(v1));
-        const { migrateTaskFile } = await import("../../loop.ts");
+        const { migrateTaskFile } = await import("../index.ts");
         await migrateTaskFile();
 
         const migrated = JSON.parse(readFileSync(file, "utf8"));
@@ -302,7 +304,7 @@ test("migration: leaves corrupt files alone (read/mutate fail loudly later)", as
         const file = join(root, ".pi", "loop-tasks.json");
         mkdirSync(join(root, ".pi"), { recursive: true });
         writeFileSync(file, "{broken");
-        const { migrateTaskFile } = await import("../../loop.ts");
+        const { migrateTaskFile } = await import("../index.ts");
         await migrateTaskFile();
         assert.equal(readFileSync(file, "utf8"), "{broken");
     });

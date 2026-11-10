@@ -1,4 +1,4 @@
-// Renderer formatter tests: pure string format* functions from loop.ts,
+// Renderer formatter tests: pure string format* functions from renderers.ts,
 // exercised with a passthrough theme (no TUI involved).
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -11,7 +11,7 @@ import {
     formatListResult,
     type LoopCreateDetails,
     type LoopListDetails,
-} from "../../loop.ts";
+} from "../renderers.ts";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 
 /** Passthrough theme: asserts see plain strings, colors don't interfere. */

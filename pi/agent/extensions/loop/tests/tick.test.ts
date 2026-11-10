@@ -52,7 +52,7 @@ async function startHarness(sessionId: string): Promise<Harness> {
         ui: { notify: () => {} },
     };
 
-    const mod = await import("../../loop.ts");
+    const mod = await import("../index.ts");
     mod.__testReset({ repoRoot: root, sessionId });
     mod.default(pi);
     await handlers.get("session_start")!({ type: "session_start" }, ctx);
@@ -74,7 +74,7 @@ async function startHarness(sessionId: string): Promise<Harness> {
 test("recurring session task fires once, not once per turn", async () => {
     const h = await startHarness("tick-s1");
     try {
-        const { __testAddSessionTask } = await import("../../loop.ts");
+        const { __testAddSessionTask } = await import("../index.ts");
         __testAddSessionTask({
             id: "aabbccdd",
             cron: "* * * * *",

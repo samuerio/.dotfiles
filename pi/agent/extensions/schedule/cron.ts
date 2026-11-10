@@ -6,7 +6,7 @@
  * imports — those only resolve through pi's own extension loader.
  *
  * Semantics deliberately mirror the cron core that already lives in
- * `extensions/loop.ts` (see its "Cron core" block and the DST block in
+ * `extensions/loop/cron.ts` (see its "Cron core" block and the DST block in
  * `computeNextCronRun`), so the session scheduler and the OS scheduler can
  * never disagree about when a task fires:
  *
@@ -18,7 +18,7 @@
  *   fall-back overlap fires once
  * - next-fire search is bounded at 366 days (sparse crons must not hang)
  *
- * Documented divergences from `loop.ts`:
+ * Documented divergences from `loop/cron.ts`:
  * - `nextCron` throws instead of returning null (no nullable return in the
  *   callers: tick treats "no match" as a config error, `list` as "—").
  *   A `CronParseError` carries the offending `field` name for `add`.
@@ -81,7 +81,7 @@ type ExpandResult = { values: number[] } | { error: string };
 
 /**
  * Parse one cron field. Same grammar and same rejections as
- * `loop.ts#expandField` (a step larger than the field span is an error
+ * `loop/cron.ts#expandField` (a step larger than the field span is an error
  * rather than silently collapsing to the field minimum).
  */
 function expandField(field: string, index: number): ExpandResult {
@@ -184,7 +184,7 @@ export function isValidCron(expr: string): boolean {
  * Next local-time match strictly after `after`, minute-by-minute, bounded at
  * 366 days of wall clock. DoM/DoW constrained simultaneously → OR.
  *
- * DST (same behavior as `loop.ts#computeNextCronRun`, which this is a
+ * DST (same behavior as `loop/cron.ts#computeNextCronRun`, which this is a
  * port of): fixed-hour crons targeting a spring-forward gap skip the
  * transition day, wildcard-hour crons fire at the first valid minute after
  * the gap, fall-back repeats fire once.
@@ -285,7 +285,7 @@ function formatLocalTime(minute: number, hour: number): string {
 /**
  * Human-readable schedule for common shapes; anything else falls back to the
  * raw input (`@monthly` stays `@monthly`). Wording matches
- * `loop.ts#cronToHuman` so `schedule list` and `loop_list` read the same.
+ * `loop/cron.ts#cronToHuman` so `schedule list` and `loop_list` read the same.
  */
 export function cronToHuman(expr: string): string {
     const raw = expr.trim();
@@ -300,8 +300,8 @@ export function cronToHuman(expr: string): string {
         string,
     ];
 
-    // Intentional divergence from loop.ts: a bare `* * * * *` reads as
-    // "Every minute" instead of being echoed back verbatim (loop.ts only
+    // Intentional divergence from loop/cron.ts: a bare `* * * * *` reads as
+    // "Every minute" instead of being echoed back verbatim (loop/cron.ts only
     // recognizes the `*/1` spelling).
     if (parts.every((part) => part === "*")) return "Every minute";
 

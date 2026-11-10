@@ -1,5 +1,5 @@
 // cron.ts tests: parsing, next-fire computation, DST behavior, and semantic
-// parity with the cron core already living in `extensions/loop.ts`.
+// parity with the cron core already living in `extensions/loop/cron.ts`.
 //
 // TZ is pinned to a DST-observing zone before any Date is constructed so the
 // spring-forward / fall-back cases are deterministic. `process.env.TZ` is the
@@ -14,7 +14,7 @@ import {
     computeNextCronRun,
     cronToHuman as loopCronToHuman,
     parseCronDetailed,
-} from "../../loop.ts";
+} from "../../loop/cron.ts";
 
 /** True when the TZ assignment above actually took effect. */
 const TZ_EFFECTIVE = new Date("2026-07-01T12:00:00Z").getHours() === 8;
@@ -250,9 +250,9 @@ test(
     },
 );
 
-// ─── parity with loop.ts ──────────────────────────────────────────
+// ─── parity with loop/cron.ts ──────────────────────────────────────────
 
-test("nextCron matches loop.ts on a broad expression/instant matrix", () => {
+test("nextCron matches loop/cron.ts on a broad expression/instant matrix", () => {
     const expressions = [
         "* * * * *",
         "*/5 * * * *",
@@ -301,7 +301,7 @@ test("nextCron matches loop.ts on a broad expression/instant matrix", () => {
     }
 });
 
-test("parseCron agrees with loop.ts on validity", () => {
+test("parseCron agrees with loop/cron.ts on validity", () => {
     const expressions = [
         "* * * * *",
         "*/15 0-6 * * 1-5",
@@ -347,8 +347,8 @@ test("cronToHuman formats macros and falls back to the raw input", () => {
     assert.equal(cronToHuman("not a cron"), "not a cron");
 });
 
-test("cronToHuman wording matches loop.ts for non-macro expressions", () => {
-    // `* * * * *` is excluded: we render it as "Every minute" while loop.ts
+test("cronToHuman wording matches loop/cron.ts for non-macro expressions", () => {
+    // `* * * * *` is excluded: we render it as "Every minute" while loop/cron.ts
     // echoes the raw string back. That divergence is intentional and asserted
     // in the previous test.
     const expressions = [
