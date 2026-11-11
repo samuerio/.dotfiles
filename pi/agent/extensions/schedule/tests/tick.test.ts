@@ -417,7 +417,7 @@ describe("install-cron", () => {
         const block = renderCronBlock({
             piDir: "/opt/pi/bin",
             nodeBin: "/usr/bin/node",
-            scheduleBin: "/home/zhe/.pi/agent/bin/schedule",
+            scheduleBin: "/usr/local/bin/schedule",
             logPath: "/home/zhe/.pi/agent/schedule/tick.log",
         });
         const lines = block.split("\n");
@@ -425,7 +425,7 @@ describe("install-cron", () => {
         assert.equal(lines[1], "PATH=/opt/pi/bin:/usr/local/bin:/usr/bin:/bin");
         assert.equal(
             lines[2],
-            `${TICK_SCHEDULE} /usr/bin/node /home/zhe/.pi/agent/bin/schedule tick >> /home/zhe/.pi/agent/schedule/tick.log 2>&1`,
+            `${TICK_SCHEDULE} /usr/bin/node /usr/local/bin/schedule tick >> /home/zhe/.pi/agent/schedule/tick.log 2>&1`,
         );
         assert.equal(lines[3], CRON_BLOCK_END);
     });
@@ -489,7 +489,7 @@ describe("install-cron", () => {
         });
         assert.ok(result.warnings.some((line) => line.includes("no cron daemon")));
         assert.ok(result.warnings.some((line) => line.includes("schedule entry point not found")));
-        assert.ok(result.warnings.some((line) => line.includes("~/.pi/agent/bin")));
+        assert.ok(result.warnings.some((line) => line.includes("install.sh")));
     });
 
     test("smoke-tests the tick under a cron-like env and reports failures", () => {
