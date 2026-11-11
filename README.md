@@ -106,6 +106,33 @@ git submodule update pi/agent/extensions/subagent-manager pi/agent/extensions/co
 - `agents/skills/`：可复用 agent skills，每个 skill 是独立目录，包含 `SKILL.md` 与可选辅助脚本。
 - `opencode/`：OpenCode 配置中心，包含 provider、模型与 TUI 键位配置。
 
+### 私有运行时配置（换机器需手工重建）
+
+`~/.pi/agent/` 下有三个文件不进 git（被 `pi/.gitignore` 忽略），也不在 `scripts/backup-pi.sh` 的打包范围内：
+
+- `settings.json`、`telegram.json`：`install.sh` 从 `~/Dropbox/Conf/pi-coding-agent/` 软链过来（外部链接，同样不在仓库内）。
+- `auth.json`：`install.sh` 完全不管，只能手工重建。
+
+`auth.json` 中 `openai-codex`、`xai` 两条是 `/login` 产生的 OAuth 记录，其余 provider 在本机只有环境变量（`~/.zshenv`），因此必须补一条 `api_key` 记录：cron 任务、headless 子进程等最小环境进程读不到 shell 变量，会以 `Use /login to log into a provider` 失败。`key` 用 `!command` 在取用时才去读 dotfile，密钥不进入子进程 env（否则 agent 的 bash 工具能直接打印出来）。
+
+| provider | 取 key 的环境变量（来自 `~/.zshenv`） |
+|---|---|
+| `engy` | `ENGY_API_KEY` |
+| `deepseek` | `DEEPSEEK_API_KEY` |
+| `opencode` | `OPENCODE_API_KEY` |
+| `opencode-go` | `OPENCODE_API_KEY` |
+
+```json
+{
+  "engy": {
+    "type": "api_key",
+    "key": "!zsh -c 'source ~/.zshenv >/dev/null 2>&1; printf %s \"${ENGY_API_KEY}\"'"
+  }
+}
+```
+
+其余三条同构，改 provider 名与变量名即可。验证最小环境下的可认证性：`env -i PATH="$PATH" HOME="$HOME" pi auth check --provider engy --json`，输出 `ready` / `api_key` 即通过。机制细节见 pi 的 `docs/providers.md`（"Load an API key from a command"）。
+
 ## 许可
 
 个人配置仓库，按需参考与自定义。
