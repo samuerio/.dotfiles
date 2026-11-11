@@ -2,10 +2,10 @@
 /**
  * `schedule` — the management CLI for scheduled pi runs.
  *
- * Deliberately a plain executable on PATH (`~/.pi/agent/bin/schedule`, which pi
- * prepends to the bash tool's PATH) and not a pi flag and not a model tool:
- * every verb is one short-lived `node` process, so crontab, the agent's bash
- * tool and a human shell all drive the same state.
+ * Deliberately a plain executable on PATH (`/usr/local/bin/schedule`, linked by
+ * ./install.sh) and not a pi flag and not a model tool: every verb is one
+ * short-lived `node` process, so crontab, the agent's bash tool and a human
+ * shell all drive the same state.
  *
  * pi-free on purpose (node built-ins + ./cron.ts ./slots.ts ./store.ts ./run.ts ./tick.ts).
  * The CLI must run under a bare `node`, which cannot resolve `@earendil-works/*`
@@ -597,7 +597,7 @@ process.stdout.on("error", (error: NodeJS.ErrnoException) => {
 
 /**
  * True when this module is the process entry point (directly, or through the
- * `~/.pi/agent/bin/schedule` symlink). Importing this module must not run the
+ * `/usr/local/bin/schedule` symlink). Importing this module must not run the
  * CLI: `runs-view.ts` imports `cronToHuman`/`nextCron` for the shared rows.
  */
 function isEntryPoint(): boolean {

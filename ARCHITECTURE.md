@@ -31,7 +31,7 @@ mtime 陈旧判定做多会话调度权互斥，claim-then-dispatch 毫秒级关
 （模型 pin 在派发时从 `modes[currentMode].roles.subagents` 解析，任务本身不存模型）并负责 30 分钟墙钟超时
 （SIGTERM → 10s → SIGKILL 进程组）与两段式 metadata 状态机；调度锚点是 tick 独占的
 `runs/<id>/state.json` watermark（dispatched 与 missed 都消耗 slot），占用判定走 effectiveState
-派生而非 pid 注册表；管理面为独立 CLI `bin/schedule` → `extensions/schedule/cli.ts`，不注册模型工具））、
+派生而非 pid 注册表；管理面为独立 CLI `/usr/local/bin/schedule` → `extensions/schedule/cli.ts`，不注册模型工具））、
 TUI 工具与编辑（`preview`、`view-image`、`files`、
 `context`、`unified-edit`、`review`、`security-review`（安全审查：高置信漏洞识别 +
 并行子代理误报过滤，rubric 改编自 Claude Code 的 security-review）、`answer`、`btw`（在主会话旁开启独立旁路线程））、
@@ -79,9 +79,10 @@ agent 全局设置（不再使用 `packages` 声明第三方扩展包）；子�
 远程交互通道；`auth.json` 管理 API 密钥；`trust.json` 记录项目信任状态；`prompts/` 存放可复用
 提示词模板（`prototype.md`、`simplify.md`、`clarify.md`、`summary.md`、`translate-paragraph.md`）。
 `AGENTS.md` 定义 agent 行为规范。
-`sessions/`、`tmux-subagents/` 与 `bin/`（内置 `fd` 二进制、`schedule` 软链指向
-`extensions/schedule/cli.ts`）为运行时与工具产物，随使用生成（`bin/` 被 `pi/.gitignore` 忽略，该软链由
-`install.sh` 重建而非随仓库分发）。`schedule/tasks/*.json` 是任务定义，但 `cwd` 是绝对路径、
+`sessions/`、`tmux-subagents/` 与 `bin/`（pi 自己下载的 `fd` 等工具二进制）为运行时与工具产物，随使用生成
+（`bin/` 被 `pi/.gitignore` 忽略）。`schedule` CLI 不属于这里：它由
+`extensions/schedule/install.sh` 软链到 `/usr/local/bin/schedule`（需 root，脚本自行给出 `sudo` 命令），
+因此不在仓库内、也不在 `~/.pi/agent/bin` 里。`schedule/tasks/*.json` 是任务定义，但 `cwd` 是绝对路径、
 跨机不可复用，因此与 `schedule/runs/`（含 watermark `state.json`）、`schedule/tick.log`、
 `schedule/crontab.bak` 一样属于本机运行产物，已 gitignore。
 
@@ -151,7 +152,8 @@ IDE/编辑器配置。`vscode/` 区分 macOS 与 Windows 的键位与设置；`i
 
 ## Cross-Cutting Concerns
 
-- **配置部署：** `install.sh` 是整个仓库的统一部署入口，按平台条件将各子目录软链接到 `~/.config/`、`~/.pi/`、`~/.agents/` 等标准路径，是环境搭建的唯一编排器。
+- **配置部署：** `install.sh` 是整个仓库的统一部署入口，按平台条件将各子目录软链接到 `~/.config/`、`~/.pi/`、`~/.agents/` 等标准路径，是环境搭建的唯一编排器。需要 root 的
+组件把安装逻辑留在自己目录里（如 `pi/agent/extensions/schedule/install.sh`），由顶层脚本调用并兜住失败。
 - **AI 集成：** Neovim（`opencode.nvim`）、pi 扩展（`pi/agent/extensions/`）、pi agent 配置（`pi/agent/`）、
 `opencode` 配置、`agents/skills` 构成三层 AI 辅助体系，分别嵌入编辑器、agent 框架与命令行。
 - **提示词迁移：** 原 `pi/agent/prompts/` 中的 explain、plan-spec、mental-map、refine 等提示词已迁移为

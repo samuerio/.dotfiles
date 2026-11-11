@@ -81,7 +81,7 @@ chmod +x /tmp/sched-t/bin/fakepi
 
 export PI_CODING_AGENT_DIR=/tmp/sched-t/agent
 export PI_SCHEDULE_PI_BIN=/tmp/sched-t/bin/fakepi
-S=~/workspace/.dotfiles/pi/agent/bin/schedule
+S=~/workspace/.dotfiles/pi/agent/extensions/schedule/cli.ts
 
 $S list                                   # 空态：No scheduled tasks.
 $S add --name smoke --cron '*/1 * * * *' --cwd /tmp --prompt 'say hello'
@@ -186,10 +186,11 @@ export PATH=/tmp/fakebin:$PATH
 printf '0 1 * * * /bin/backup.sh\n' > /tmp/fakebin/crontab.txt
 export PI_CODING_AGENT_DIR=/tmp/sched-t/agent
 
-# install-cron 把入口默认算成 <agentDir>/bin/schedule；scratch 目录里得先有它，
-# 否则会拿到 "schedule entry point not found" + 一次注定失败的冒烟。
-mkdir -p /tmp/sched-t/agent/bin
-ln -sfn "$PWD/pi/agent/extensions/schedule/cli.ts" /tmp/sched-t/agent/bin/schedule
+# install-cron 把入口默认算成 PATH 上的 schedule；先备一条假链接，
+# 否则会拿到 "not on PATH" 报错（真实机器上由 extensions/schedule/install.sh 提供）。
+mkdir -p /tmp/sched-t/bin
+ln -sfn "$PWD/pi/agent/extensions/schedule/cli.ts" /tmp/sched-t/bin/schedule
+export PATH=/tmp/sched-t/bin:$PATH
 
 $S install-cron          # 打印整份 crontab，含标记块
 cat /tmp/fakebin/crontab.txt

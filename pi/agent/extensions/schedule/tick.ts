@@ -17,7 +17,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { activeRun, claimRun } from "./run.ts";
@@ -27,7 +27,6 @@ import {
     ensureDir,
     errorMessage,
     gcRuns,
-    getAgentDir,
     getScheduleDir,
     listTasks,
     readJsonFile,
@@ -314,7 +313,7 @@ function commitCrontab(runner: CommandRunner, previous: string, next: string, la
 
 export interface InstallCronOptions {
     runner?: CommandRunner;
-    /** Defaults to `<agentDir>/bin/schedule`. */
+    /** Defaults to whatever `schedule` resolves to on PATH. */
     scheduleBin?: string;
     /** Defaults to `process.execPath`. */
     nodeBin?: string;
@@ -400,6 +399,23 @@ function cronDaemonWarning(runner: CommandRunner, warnings: string[]): void {
 }
 
 /**
+ * The `schedule` entry point as PATH resolves it, which is the same launcher a
+ * human types and the one `install.sh` in this directory creates. There is no
+ * repo-local fallback: writing a guessed path into the crontab would produce a
+ * tick that never fires.
+ */
+function resolveScheduleBin(): string {
+    for (const dir of (process.env.PATH ?? "").split(delimiter)) {
+        if (!dir) continue;
+        const candidate = join(dir, "schedule");
+        if (existsSync(candidate)) return candidate;
+    }
+    throw new Error(
+        "`schedule` is not on PATH: run pi/agent/extensions/schedule/install.sh (it links /usr/local/bin/schedule)",
+    );
+}
+
+/**
  * Install (or refresh) the tick entry in the user's crontab.
  *
  * Idempotent and block-scoped: the user's own entries are preserved verbatim,
@@ -408,13 +424,15 @@ function cronDaemonWarning(runner: CommandRunner, warnings: string[]): void {
 export function installCron(options: InstallCronOptions = {}): InstallCronResult {
     const runner = options.runner ?? defaultRunner;
     const warnings: string[] = [];
-    const scheduleBin = options.scheduleBin ?? join(getAgentDir(), "bin", "schedule");
+    const scheduleBin = options.scheduleBin ?? resolveScheduleBin();
     const nodeBin = options.nodeBin ?? process.execPath;
     const logPath = options.logPath ?? tickLogPath();
     const piDir = options.piDir ?? resolvePiDir(runner, warnings);
 
     if (!existsSync(scheduleBin)) {
-        warnings.push(`schedule entry point not found at ${scheduleBin} (is the bin symlink installed?)`);
+        warnings.push(
+            `schedule entry point not found at ${scheduleBin} (run pi/agent/extensions/schedule/install.sh)`,
+        );
     }
     cronDaemonWarning(runner, warnings);
 
@@ -437,8 +455,6 @@ export function installCron(options: InstallCronOptions = {}): InstallCronResult
     if (smoke.status !== 0) {
         warnings.push(`smoke test under cron-like env failed (exit ${smoke.status}): ${(smoke.stderr || smoke.stdout).trim().slice(0, 400)}`);
     }
-
-    warnings.push("your shell needs ~/.pi/agent/bin on PATH to run `schedule` directly (pi's bash tool already has it)");
 
     return { crontab: next, warnings, smoke: { status: smoke.status, output: smoke.stdout.trim() }, scheduleBin };
 }

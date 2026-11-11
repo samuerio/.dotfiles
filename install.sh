@@ -196,13 +196,12 @@ install_ai_agents() {
         warn "Dropbox telegram settings not found: $dropbox_telegram"
     fi
 
-    # agent/bin/ is gitignored (it carries the ~4MB fd binary), so the symlink
-    # that puts the `schedule` CLI on PATH is recreated here instead of coming
-    # from the repo.
-    local schedule_bin="${HOME}/.pi/agent/bin/schedule"
-    mkdir -p "$(dirname "$schedule_bin")"
-    ln -sfn "../extensions/schedule/cli.ts" "$schedule_bin"
-    info "Linked schedule CLI: ${schedule_bin}"
+    # The schedule extension keeps its own installer next to the code it
+    # launches. It links /usr/local/bin/schedule, which needs root, so the
+    # script prints the command instead of prompting when it cannot write.
+    local schedule_installer="${DOTFILES_ROOT}/pi/agent/extensions/schedule/install.sh"
+    bash "$schedule_installer" ||
+        warn "schedule CLI not installed; run: sudo bash ${schedule_installer}"
 }
 
 install_lazygit() {

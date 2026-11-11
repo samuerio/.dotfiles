@@ -23,13 +23,16 @@
 ## 一次上手
 
 ```bash
-# 0. 先确认 cron daemon 在跑（这台机器是 Arch + cronie，默认 disabled）
+# 0. 把 CLI 装到 PATH（软链 /usr/local/bin/schedule，需 root，可重复执行）
+sudo ./install.sh
+
+# 1. 先确认 cron daemon 在跑（这台机器是 Arch + cronie，默认 disabled）
 sudo systemctl enable --now cronie
 
-# 1. 装 crontab 块（幂等，先备份，并做一次 cron 环境冒烟）
+# 2. 装 crontab 块（幂等，先备份，并做一次 cron 环境冒烟）
 schedule install-cron
 
-# 2. 建任务。cwd 必须是绝对且已存在的目录，prompt 必须自包含
+# 3. 建任务。cwd 必须是绝对且已存在的目录，prompt 必须自包含
 schedule add --name daily-report \
     --cron '57 8 * * 1-5' \
     --cwd /home/zhe/workspace/proj \
