@@ -6,7 +6,7 @@ license: Vibecoded
 
 # schedule Skill
 
-`schedule` runs a prompt at cron tick time by dispatching a fresh headless `pi -p` process from the OS crontab. Task definitions are user-global state (not per-project, which is why every task carries an absolute `cwd`) and persist across sessions and reboots. Nothing fires until `schedule install-cron` has armed the crontab.
+`schedule` runs a prompt at cron tick time by dispatching a fresh headless `pi -p` process from the OS crontab. Task definitions are user-global state (not per-project, which is why every task carries an absolute `cwd`) and persist across sessions and reboots.
 
 ## When To Use This vs. `loop`
 
@@ -16,6 +16,8 @@ license: Vibecoded
 | "Every weekday at 9, run this repo's report script" | `schedule` (cross-session, unattended) |
 | Needs the current conversation's context | `loop` (schedule runs start from a blank session) |
 | Must keep running after I close pi | `schedule` |
+
+In short: needs this session or is near-term → `loop`; must survive pi closing → `schedule`.
 
 ## Management Is CLI-Only
 
@@ -32,6 +34,8 @@ schedule tick
 schedule install-cron
 schedule uninstall-cron
 ```
+
+`install-cron` installs one idempotent crontab block (managed between marker lines, original backed up to `crontab.bak`) and smoke-tests the CLI under a cron-like environment; each minute's tick dispatches due tasks and exits immediately. `uninstall-cron` removes only the marked block, backs up first, and is a no-op (exit 0) when no block is present. Task definitions and run history survive, so re-installing restores the schedule without touching state.
 
 ## Cron Conversion
 
@@ -56,23 +60,12 @@ Day-of-month and day-of-week in one expression are ORed (Vixie), so "the 1st, bu
 4. **Model routing is not per task.** A run is a one-shot worker call, so it is pinned at dispatch time to `modes[currentMode].roles.subagents` in modes.json (project `.pi/modes.json` of the task's cwd first, then `~/.pi/agent/modes.json`) and launched with `--provider … --model … --thinking …`. Change the pin in modes.json, not in the task. With no usable pin the child falls back to `settings.json` defaults. `schedule logs <id>` prints the model a run actually used; `schedule add` prints the routing a run would get right now.
 5. **Credentials must reach the child.** A task stores no provider, model or key, and crontab runs with a minimal environment, so a provider whose key is only resolvable from an env var (e.g. `engy` → `$ENGY_API_KEY`) is unavailable under cron. Symptom: `exited (code 1)` with `Use /login to log into a provider` in `schedule logs <id> --raw`. Check that before blaming the schedule.
    The fix is a pre-provisioned `api_key` entry in `~/.pi/agent/auth.json`, which is the user's credential setup and not something to author during a task: point at it, do not write it. Confirm with `env -i PATH=… HOME=… pi auth check --provider <p> --json` (`ready` / `api_key` means a scheduled run can authenticate); the `!command` mechanism is documented in pi's `docs/providers.md`.
-
-## One-Shot Tasks
-
-Use `--once` for one-shot tasks, never "remember to remove it afterwards": nobody removes it. The task fires exactly once, is then consumed, and the definition file stays for audit.
-
-Warn the user there is no automatic retry: a failed attempt shows in `LAST` (`exited (code 1)`, `error`, ...) for them to `remove` and re-add, and a slot that never ran keeps showing `missed · <age>`.
+6. **One-shot tasks use `--once`, never "remember to remove it afterwards": nobody removes it.** The task fires exactly once, is then consumed, and the definition file stays for audit. Warn the user there is no automatic retry: a failed attempt shows in `LAST` for them to `remove` and re-add; a slot that never ran is reported as `missed`. A manual `run` does not consume a `--once` task.
 
 ## Safety
 
 - Scheduling is unattended execution, and runs pass `--approve`, so project-local `.pi` resources and extensions in the task's `cwd` are trusted with nobody watching. Confirm the exact intent with the user before scheduling anything that deletes, pushes, publishes, deploys or mutates production; do not create such a task on your own initiative.
 - Do not run `schedule install-cron` or `uninstall-cron` on your own initiative: both rewrite the user's crontab, and uninstall silences every task. Print the command for the user instead.
-
-## Verifying a Task
-
-1. `schedule run <id> --fg` runs it once in the foreground with the same launch path, timeout and process-group handling as a scheduled run. Use this before trusting the schedule. A manual run does not consume a `--once` task.
-2. `schedule logs <id>` prints the run summary (state, exit code, duration) and the last assistant message.
-3. `schedule logs <id> --raw` prints stdout/stderr; add `-f` to follow. A `--fg` run inherits the terminal instead of redirecting, so it writes no `output.log`: that output only ever existed on screen.
 
 ## Reading Status
 
@@ -90,8 +83,6 @@ Warn the user there is no automatic retry: a failed attempt shows in `LAST` (`ex
 
 `skipped` is a tick-time decision (an active run already holds the task) and is not a run directory: it only appears in `~/.pi/agent/schedule/tick.log`.
 
-## Arming the Scheduler
+## Verifying a Task
 
-`schedule install-cron` installs one idempotent crontab block (managed between marker lines, original backed up to `crontab.bak`) and smoke-tests the CLI under a cron-like environment. After it runs, each minute's tick dispatches due tasks and exits immediately.
-
-`schedule uninstall-cron` is the inverse: it removes only the marked block, keeps the user's other crontab entries verbatim, backs up first, and prints the block it removed. It is a no-op (exit 0) when no block is present. Task definitions and run history survive, so re-installing restores the schedule without touching state.
+`schedule run <id> --fg` runs it once in the foreground with the same launch path, timeout and process-group handling as a scheduled run; use this before trusting the schedule. `schedule logs <id>` prints the run summary (state, exit code, duration) and the last assistant message. `schedule logs <id> --raw` prints stdout/stderr; add `-f` to follow. A `--fg` run inherits the terminal instead of redirecting, so it writes no `output.log`: that output only ever existed on screen.
