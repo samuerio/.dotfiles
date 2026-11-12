@@ -15,8 +15,6 @@ Output only:
 1. Main Call Graph — a navigation index of component relationships.
 2. Component Sections — the actual decisions, branches, state transitions, and cross-component CALLs.
 
-Do not create files or generate additional documentation.
-
 ## Source and Scope
 
 - For existing implementations, explore relevant source code and describe actual behavior. Source code takes precedence over design documents when they disagree.

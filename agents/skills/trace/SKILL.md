@@ -5,8 +5,7 @@ description: >
   concrete inputs from source code and supplied context. Show behaviorally
   relevant calls, guard conditions, derived values, state mutations, side
   effects, event-driven handoffs, and termination as a compact ASCII execution
-  trace, with an optional structural detail view for non-trivial call nesting.
-  Use for requests such as "trace this call", "walk me through input X",
+  trace. Use for requests such as "trace this call", "walk me through input X",
   "which path execution took", "why does this run again?", or "show the state
   changes". Never execute, modify, or instrument the target.
 ---
@@ -30,7 +29,7 @@ Follow only paths determined by source code, `INPUT`, `CONTEXT`, or an
 explicit `# inferred: ...` boundary.
 
 Every concrete scalar, string, count, timing, cost, token usage, or payload in
-`TRACE` or `DETAIL` must come from:
+`TRACE` must come from:
 
 - source code,
 - `INPUT`,
@@ -110,24 +109,24 @@ control flow, nested events, or result derivation.
 
 ## Modes
 
-- default — `INPUT`, `CONTEXT` (optional), `TRACE`, `DETAIL`
-- `compact`, `summary only`, or `causal only` — `TRACE` only, no `DETAIL`
-- `detail only`, `tree only`, or exact call nesting — `DETAIL` only, no
-  `TRACE`
+Always produce a single causal `TRACE` view.
 
-`INPUT` and `CONTEXT` are included in every mode when values are supplied;
-only `TRACE` and `DETAIL` vary.
+Include `INPUT` and `CONTEXT` when values are supplied or assumptions
+are needed.
+
+For `compact`, `summary only`, or `causal only`, further reduce
+non-essential events without losing causal completeness.
 
 ## Output structure
 
-Save the sections the mode includes, in the order `INPUT`, `CONTEXT`
-(optional), `TRACE`, `DETAIL`.
+Output directly in chat, in the order `INPUT` (when supplied),
+`CONTEXT` (when needed), `TRACE`.
 
 Wrap the whole output in a single fenced code block tagged `text`, so `#`
 comment lines stay plain text and whitespace is preserved; output nothing
 outside the fence and no prose between sections. The first line inside the
 fence is the first included section's label line (`INPUT:`, or `TRACE:`
-when `CONTEXT` is omitted, or `DETAIL:` for detail-only).
+when `CONTEXT` is omitted).
 
 If the content contains a run of three or more backticks, use a longer
 fence.
@@ -145,28 +144,9 @@ Use multiline structured blocks for `INPUT` and `CONTEXT`:
 Do not repeat an input/context value later as `VALUE` unless execution derives
 a materially different value.
 
-Include `DETAIL` when:
-
-- repository `CALL` nesting reaches depth 2 or more,
-- execution spans multiple top-level invocations or event cycles,
-- an asynchronous handoff causes later execution,
-- ownership would otherwise be ambiguous, or
-- `TRACE` intentionally collapses meaningful repository helpers.
-
-Omit `DETAIL` for simple linear traces where it would merely duplicate
-`TRACE`.
-
-For `compact`, `summary only`, or `causal only`, omit `DETAIL`.
-
-For `detail only`, `tree only`, or exact call nesting, output `DETAIL` without
-`TRACE`.
-
-Otherwise include both: `TRACE` answers what happened and why; `DETAIL`
-answers where it happened and which call owns it.
-
 ## Shared rendering rules
 
-Keep both views sparse and limited to the concrete executed path.
+Keep the trace sparse and limited to the concrete executed path.
 
 Do not restore:
 
@@ -179,9 +159,6 @@ Do not restore:
 Omit ordinary valueless `RETURN` when normal frame completion is obvious.
 Keep it when it carries a meaningful value, is an early return, determines
 caller behavior, distinguishes an outcome, or explains termination.
-
-`TRACE` and `DETAIL` must describe the same execution, neither more
-speculative nor more complete.
 
 ## TRACE view
 
@@ -434,120 +411,26 @@ first, transitional, and final meaningful iterations.
 
 Do not emit statement-level loop bookkeeping.
 
-## DETAIL view
-
-`DETAIL` is a structural call-tree view of the same execution.
-
-Do not simply repeat the causal trace with whitespace indentation.
-
-Use tree glyphs:
-
-- `├─` for non-final children,
-- `└─` for the final child,
-- `│` to preserve visible ancestry.
-
-Example:
-
-```text
-DETAIL:
-
-CALL processSettled(pi, ctx)
-├─ MUTATE verifierBusy: false → true
-│
-├─ CALL runSettleCycle(pi, ctx)
-│  │
-│  ├─ CALL runVerifier(ctx, objective)
-│  │  ├─ SIDE EFFECT verifier HTTP request (...)
-│  │  └─ RETURN {
-│  │       passed: false,
-│  │       reason: "one test still failing"
-│  │     }
-│  │
-│  └─ MUTATE goal.iteration: 2 → 3
-│
-└─ MUTATE verifierBusy: true → false
-```
-
-Use blank visual rows sparingly around materially nested `CALL` frames.
-
-Do not put blank rows between every event.
-
-Render an `IF` condition at the same tree level as the events it gates,
-directly above them — never as a parent frame that owns calls:
-
-```text
-CALL processSettled(pi, ctx)
-├─ MUTATE verifierBusy: false → true
-│
-├─ IF !verifierBusy
-│
-├─ CALL runSettleCycle(pi, ctx)
-│  ├─ SIDE EFFECT ctx.ui.setStatus("goal", "verifying...")
-│  │
-│  └─ MUTATE goal.iteration: 2 → 3
-│
-└─ MUTATE verifierBusy: true → false
-```
-
-### Multi-cycle DETAIL
-
-For multiple top-level cycles, render one tree per cycle:
-
-```text
-DETAIL:
-
-[run 3]
-
-CALL processSettled(pi, ctx)
-├─ ...
-└─ ...
-
-[run 4]
-
-CALL processSettled(pi, ctx)
-├─ ...
-└─ ...
-```
-
-Do not nest the second top-level invocation beneath the first merely because
-the first caused it indirectly.
-
-Cross-cycle causality belongs primarily in `TRACE`.
-
 ## Language
 
-Write `INPUT`, `CONTEXT`, `TRACE`, and `DETAIL` in English.
+Write `INPUT`, `CONTEXT`, and `TRACE` in English.
 
 Keep identifiers, strings, function names, method names, and source-level names
 exactly as they appear in source.
 
-Respond in the user's language only in the chat reply after saving.
+Respond in the user's language only in the chat reply.
 
 Omit source locations unless requested or needed to resolve ambiguity.
 
-## Save
+## Verify before output
 
-Save the trace as:
-
-```text
-.pi/trace/[YYYYMMDD-HHMMSS]-[slug]/trace.md
-```
-
-Use the timestamp when the skill runs.
-
-Derive `[slug]` from the traced function or method in kebab-case.
-
-Overwrite an existing file at the same output path rather than creating a
-`v2`, `final`, or similarly suffixed copy.
-
-Before saving, verify:
+Before emitting the trace, verify:
 
 - every concrete value traces to source, `INPUT`, `CONTEXT`, or an
   `assumed:` entry, and path-critical gaps are `assumed:` or stop the
   trace;
 - `TRACE` is chronological, cross-cycle handoffs are explicit, and no event
   follows a call's terminal `RETURN`;
-- `DETAIL`, when present, is the same execution with `├─`, `└─`, `│`;
 - every `IF` names a condition on the taken path only, with no untaken
   alternative, and every concrete operand traces to source, `INPUT`,
   `CONTEXT`, or an `assumed:` entry;
@@ -556,7 +439,3 @@ Before saving, verify:
   `# inferred:` lines.
 
 See `references/examples.md` for worked examples.
-
-After writing the file, reply exactly:
-
-> Trace saved - run `code [output-path] &` to review.
