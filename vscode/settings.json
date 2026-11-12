@@ -282,6 +282,5 @@
     "terminal.integrated.fontSize": 14,
     "files.eol": "\n",
     "git.openRepositoryInParentFolders": "never",
-    "diffEditor.hideUnchangedRegions.enabled": true,
     "redhat.telemetry.enabled": false
 }
