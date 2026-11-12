@@ -52,8 +52,8 @@ node --test --test-name-pattern="uninstall" \
 node --test --watch pi/agent/extensions/schedule/tests/
 ```
 
-当前基线：`cli 13 / cron 19 / routing 8 / runs-view 42 / run 18 / slots 7 / store 38 /
-tick 37 = 182 pass, 0 fail`。
+当前基线：`cli 14 / cron 19 / routing 8 / runs-view 42 / run 21 / slots 7 / store 38 /
+tick 38 = 187 pass, 0 fail`。
 
 读测试的顺序建议：`cron.test.ts` 看语义契约 → `run.test.ts` 看状态机 →
 `slots.test.ts` 看读写共用的槽位判定 → `tick.test.ts` 看写侧决策 →

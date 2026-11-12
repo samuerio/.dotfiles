@@ -180,12 +180,14 @@ env -i PATH=/home/zhe/.npm-global/bin:/usr/local/bin:/usr/bin:/bin HOME=$HOME \
 | `orphan` | pi 还活着但 helper 死了，30 分钟超时随之失效；调度只记录不收割，需手动杀进程组 |
 | `starting` / `stale` | 已 claim 但还没记 pid / claim 之后没走完（超 60s 算 stale） |
 | `exited` / `killed` / `error` | 终态：跑完 / 被 30 分钟超时杀掉 / 起不来 |
+| `unreadable` | 终态（读侧合成）：这次的 `metadata.json` 缺失或损坏。任务不占、调度不阻塞，`logs` 里能看到从目录重建的摘要（时间取 mtime，`trigger` 显示 `unknown`）；转录若完好，结果照常可取 |
 | `idle` | 从没跑过 |
 | `missed` | **不是 run 状态**：该跑却没跑。`LAST` 显示 `missed · <age>`，覆盖 run 状态 |
 
 `missed` 是读侧算出来的：最新 run 的 `startedAt`（从未跑过则 `createdAt`）之后、跌出
 catch-up 窗口且没有新 run 的槽位；`running` / `starting` / `orphan` / `stale`（claim 之后没人
-接手，这本身就是故障信号）和 `disable` 的任务不参与判定。`skipped` 仍然是 tick 当时的决策（有 active run），只出现在
+接手，这本身就是故障信号）、`unreadable`（记录坏了，实际发生了什么无法从记录判断）和 `disable` 的任务不参与判定。
+`skipped` 仍然是 tick 当时的决策（有 active run），只出现在
 `~/.pi/agent/schedule/tick.log`。
 
 ## 一次性与停机
@@ -237,7 +239,7 @@ schedule logs <id> --raw -f # 跟随输出直到这次运行结束（对已结�
 | 动作 | 条件 | 做了什么 |
 | --- | --- | --- |
 | `Preview` | session 文件存在 | 打开转录预览；关掉后回运行列表 |
-| `Add result to prompt` | 状态 ∈ `exited` / `killed` / `error` / `stale` **且** session 里有非空 assistant 文本 | 编辑器写入 `schedule task "<任务名>" run <时间戳> result:` + 空行 + 最后一条 assistant 文本（原样，不截断、不加 `Error:` 行），然后结束命令 |
+| `Add result to prompt` | 状态 ∈ `exited` / `killed` / `error` / `stale` / `unreadable` **且** session 里有非空 assistant 文本 | 编辑器写入 `schedule task "<任务名>" run <时间戳> result:` + 空行 + 最后一条 assistant 文本（原样，不截断、不加 `Error:` 行），然后结束命令 |
 | `Add session to prompt` | session 文件存在 | 编辑器写入 `read session @<session 绝对路径>`，然后结束命令 |
 
 `Add result to prompt` 的状态门槛不是多余的：还在跑的 run 的 `session.jsonl` 是**预先创建**的，
@@ -301,6 +303,7 @@ tail -f ~/.pi/agent/schedule/tick.log
 | 一直是 `running` 但没输出 | `ps -ef \| grep pi` | 任务确实长跑；或卡在交互式确认 |
 | `orphan (pgid N)` | `kill -9 -N` | helper 被强杀，超时保护失效且任务被永久占住；必须手动杀，调度不代劳 |
 | `error` / `starting` 卡住 | `metadata.json` 的 `error` | spawn 失败、cwd 被删、task 文件被手改坏（`list` 里显示 corrupt） |
+| 某次 run 显示 `unreadable`，或本该有的 run 消失了 | run 目录下的 `metadata.json` | 记录被手改坏或磁盘故障；转录 `session.jsonl` 还在就能 `logs`/预览拿到结果 |
 | 时间对不上 | `date` | cron 用本地时区；DST 切换日会偏 |
 
 退出码：正常 `0`；参数/状态错误 `1`；超时被杀 `124`。

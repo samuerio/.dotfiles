@@ -218,6 +218,17 @@ describe("tick: cross-second dedupe and mutual exclusion", () => {
         assert.equal(readWatermark(task.id).accountedThrough, null);
     });
 
+    test("an unreadable record does not block the scheduler", () => {
+        const task = makeTask({ createdAt: at(6, 8, 0, 30) });
+        const dir = claimRun(task.id, "20261106-080200", { cwd: tmpdir() });
+        // A corrupt record cannot hide a live process: occupancy is decided
+        // from readable metadata, so the slot must fire on schedule.
+        writeFileSync(join(dir, "metadata.json"), "not json", "utf8");
+        const harness = newHarness();
+        tickAt(at(6, 8, 4, 10), harness);
+        assert.equal(harness.dispatches.length, 1);
+    });
+
     test("a terminal run does not block the scheduler", () => {
         const task = makeTask({ createdAt: at(6, 8, 0, 30) });
         const dir = writeFakeRunningRun(task.id, "20261106-080200", { state: "exited", exitCode: 0 });

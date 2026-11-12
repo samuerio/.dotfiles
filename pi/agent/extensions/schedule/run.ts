@@ -25,7 +25,7 @@
  */
 import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import {
@@ -34,6 +34,7 @@ import {
     errorMessage,
     listRunStamps,
     readJsonFile,
+    readTask,
     runDir as runDirOf,
     taskRunsDir,
     validateRunStamp,
@@ -59,7 +60,9 @@ export type RunState = "starting" | "running" | "exited" | "killed" | "error";
 
 /**
  * Derived occupancy state. `starting`/`running`/`orphan` are active (they hold
- * the task); `stale` means the record claims to be alive but is not.
+ * the task); `stale` means the record claims to be alive but is not;
+ * `unreadable` means the record itself could not be read (see
+ * `unreadableMetadata`).
  */
 export type EffectiveState =
     | "starting"
@@ -68,9 +71,23 @@ export type EffectiveState =
     | "stale"
     | "exited"
     | "killed"
-    | "error";
+    | "error"
+    | "unreadable";
 
-export type RunTrigger = "scheduled" | "manual";
+/**
+ * `unknown` never exists on disk (`parseMetadata` rejects it); it is what the
+ * read-side synthesis uses when a corrupt/missing metadata.json leaves the
+ * trigger unknowable.
+ */
+export type RunTrigger = "scheduled" | "manual" | "unknown";
+
+/**
+ * What a run is created with. `unknown` is read-side only (the synthetic
+ * `unreadable` record); `Exclude` keeps it out of the write-side option types,
+ * so it can never reach disk, where `parseMetadata` would reject the record
+ * and turn it into the very `unreadable` state this read side exists to name.
+ */
+export type ClaimedTrigger = Exclude<RunTrigger, "unknown">;
 
 export interface RunMetadata {
     version: 1;
@@ -101,7 +118,7 @@ export interface RunMetadata {
 export interface ExecuteRunOptions {
     taskId: string;
     stamp: string;
-    trigger: RunTrigger;
+    trigger: ClaimedTrigger;
     /** Foreground runs share the caller's process group and stdio. */
     foreground: boolean;
     cwd: string;
@@ -176,7 +193,7 @@ export function outputLogPath(dir: string): string {
 export interface ClaimOptions {
     /** Task cwd; recorded in the claim metadata and in the launch line. */
     cwd: string;
-    trigger?: RunTrigger;
+    trigger?: ClaimedTrigger;
     /** Accounting instant; defaults to the wall clock (tick passes its `now`). */
     startedAt?: Date;
 }
@@ -238,6 +255,44 @@ function parseMetadata(value: unknown): RunMetadata | undefined {
 
 export function readMetadata(dir: string): RunMetadata | undefined {
     return parseMetadata(readJsonFile(metadataPath(dir)));
+}
+
+/**
+ * A terminal stand-in record for a stamp directory whose metadata.json is
+ * missing or corrupt. Claims always write metadata immediately, so this can
+ * only be manual edits or disk faults; the honest answer is to surface the run
+ * as `unreadable` rather than let it vanish (a lone newest run that reads as
+ * nothing makes `list` report the task as never-run and blame the schedule
+ * with `missed`).
+ *
+ * Every field is marked for what it is: `trigger: "unknown"`, `launchArgs: []`,
+ * and a `startedAt` borrowed from the directory's own mtime (the claim instant,
+ * the one time on disk that exists even when the record does not). The `error`
+ * text carries the specific fault; a permission failure is named as one, not
+ * passed off as corruption. Throws only when the directory itself is gone
+ * (GC or `rm` raced the read); `readRun` turns that into "not a run".
+ */
+function unreadableMetadata(taskId: string, dir: string): RunMetadata {
+    const startedAtMs = statSync(dir).mtimeMs;
+    let detail = "missing";
+    try {
+        readFileSync(metadataPath(dir), "utf8");
+        detail = "corrupt";
+    } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code && code !== "ENOENT") detail = `unreadable (${code})`;
+    }
+    return {
+        version: 1,
+        taskId,
+        trigger: "unknown",
+        state: "error",
+        startedAt: new Date(startedAtMs).toISOString(),
+        sessionFile: sessionPath(dir),
+        cwd: readTask(taskId)?.cwd ?? "",
+        launchArgs: [],
+        error: `metadata.json ${detail}; run state reconstructed from the directory`,
+    };
 }
 
 export function writeMetadata(dir: string, metadata: RunMetadata): void {
@@ -335,8 +390,16 @@ export function isActive(state: EffectiveState): boolean {
 function readRun(taskId: string, ts: string): ActiveRun | undefined {
     const dir = runDirOf(taskId, ts);
     const metadata = readMetadata(dir);
-    if (!metadata) return undefined;
-    return { dir, ts, metadata, effective: effectiveState(metadata) };
+    if (metadata) return { dir, ts, metadata, effective: effectiveState(metadata) };
+    // A stamp directory with no readable metadata still names a run.
+    if (!existsSync(dir)) return undefined;
+    try {
+        return { dir, ts, metadata: unreadableMetadata(taskId, dir), effective: "unreadable" };
+    } catch {
+        // The directory vanished between the two checks (GC or `rm` raced the
+        // read): nothing is left to name a run, so there is none to report.
+        return undefined;
+    }
 }
 
 /** All runs of a task, newest first. */
@@ -349,7 +412,10 @@ export function listRuns(taskId: string): ActiveRun[] {
     return runs;
 }
 
-/** Newest run of a task, active or not; stops at the first readable record. */
+/**
+ * Newest run of a task, whatever its state: the newest stamp directory wins,
+ * even when its metadata.json is unreadable.
+ */
 export function latestRun(taskId: string): ActiveRun | undefined {
     for (const ts of listRunStamps(taskId)) {
         const run = readRun(taskId, ts);
@@ -726,12 +792,12 @@ function lastAssistantText(entries: SessionEntry[], branch: Set<string> | undefi
     return latest;
 }
 
-export function readRunSummary(dir: string): RunSummary {
-    const metadata = readMetadata(dir);
-    if (!metadata) return { metadata: undefined, effective: "stale", lastAssistant: undefined };
+export function readRunSummary(taskId: string, stamp: string): RunSummary {
+    const run = readRun(taskId, stamp);
+    if (!run) return { metadata: undefined, effective: "stale", lastAssistant: undefined };
     return {
-        metadata,
-        effective: effectiveState(metadata),
-        lastAssistant: readLatestAssistant(metadata.sessionFile),
+        metadata: run.metadata,
+        effective: run.effective,
+        lastAssistant: readLatestAssistant(run.metadata.sessionFile),
     };
 }

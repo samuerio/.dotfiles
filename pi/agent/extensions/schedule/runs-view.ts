@@ -128,12 +128,14 @@ export const RUN_ACTION_LABELS: Record<RunAction, string> = {
 /**
  * States in which a run is over and its last assistant message is final.
  *
- * `stale` counts as over: a claim nobody picked up has no live process and
- * never will. `starting`/`running`/`orphan` do not — their `session.jsonl`
+ * `stale` and `unreadable` count as over: a claim nobody picked up has no live
+ * process and never will, and an unreadable metadata.json cannot hide a live
+ * process either (occupancy is decided from readable records).
+ * `starting`/`running`/`orphan` do not — their `session.jsonl`
  * already exists (the file is created before pi starts), so `existsSync` alone
  * would offer a half-written answer as if it were the result.
  */
-const SETTLED_STATES = new Set<string>(["exited", "killed", "error", "stale"]);
+const SETTLED_STATES = new Set<string>(["exited", "killed", "error", "stale", "unreadable"]);
 
 export function isSettledState(state: string): boolean {
     return SETTLED_STATES.has(state);
@@ -397,6 +399,16 @@ export interface ListRow {
 }
 
 /**
+ * States in which the newest run makes `missed` the wrong verdict: still in
+ * flight (the catch-up window expires while the task keeps working), a claim
+ * nobody picked up, or a record too broken to read. Reporting any of them as
+ * `missed` would blame the schedule for a fault that is not its fault.
+ */
+function suppressesMissed(state: EffectiveState): boolean {
+    return isActive(state) || state === "stale" || state === "unreadable";
+}
+
+/**
  * First slot the task owed but never ran, or undefined when it is up to date
  * (or currently busy).
  *
@@ -411,11 +423,7 @@ export function missedSince(
     now = new Date(),
 ): Date | undefined {
     if (!task.enabled) return undefined;
-    // A run in flight is not a missed slot, even after the 10-minute catch-up
-    // window: `first` drops out of the window while the task is still working.
-    // A `stale` claim is a dispatch that was accounted for but never picked up;
-    // reporting it as `missed` would hide the real fault behind the schedule.
-    if (newest && (isActive(newest.effective) || newest.effective === "stale")) return undefined;
+    if (newest && suppressesMissed(newest.effective)) return undefined;
     const base = newest ? Date.parse(newest.metadata.startedAt) : Date.parse(task.createdAt);
     if (!Number.isFinite(base)) return undefined;
     try {

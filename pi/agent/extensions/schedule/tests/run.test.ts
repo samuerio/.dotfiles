@@ -681,11 +681,11 @@ test("readRunSummary: reports effective state and last assistant text", async ()
         });
         assert.equal(code, 7);
         writeFileSync(sessionPath(dir), sessionBody, "utf8");
-        const summary = readRunSummary(dir);
+        const summary = readRunSummary(TASK, STAMP_A);
         assert.equal(summary.effective, "exited");
         assert.equal(summary.metadata?.exitCode, 7);
         assert.equal(summary.lastAssistant, "done");
-        assert.equal(readRunSummary(join(root, "nope")).metadata, undefined);
+        assert.equal(readRunSummary(TASK, "19990101-000000").metadata, undefined);
     } finally {
         restore();
         cleanupScratch(root);
@@ -717,6 +717,67 @@ test("executeRun: spawn failure is recorded as error, not thrown", async () => {
         assert.match(metadata.error ?? "", /does-not-exist/);
     } finally {
         restore();
+        cleanupScratch(root);
+    }
+});
+
+test("unreadable: a stamp directory with a corrupt metadata.json is still a run", () => {
+    const root = makeScratch();
+    try {
+        mkdirSync(join(root, "schedule"), { recursive: true });
+        const dir = claimRun(TASK, STAMP_A, { cwd: root });
+        writeFileSync(join(dir, "metadata.json"), "not json", "utf8");
+
+        const [run] = listRuns(TASK);
+        assert.ok(run);
+        assert.equal(run.effective, "unreadable");
+        assert.equal(run.metadata.trigger, "unknown");
+        assert.equal(run.metadata.state, "error");
+        assert.match(run.metadata.error ?? "", /corrupt/);
+        assert.ok(Number.isFinite(Date.parse(run.metadata.startedAt)));
+
+        // The fault cannot hold the task, and a summary reads the same record.
+        assert.equal(activeRun(TASK), undefined);
+        const summary = readRunSummary(TASK, STAMP_A);
+        assert.equal(summary.effective, "unreadable");
+        assert.equal(summary.metadata?.trigger, "unknown");
+    } finally {
+        cleanupScratch(root);
+    }
+});
+
+test("unreadable: a claim that never wrote its metadata is surfaced too", () => {
+    const root = makeScratch();
+    try {
+        mkdirSync(join(root, "schedule"), { recursive: true });
+        const dir = claimRun(TASK, STAMP_A, { cwd: root });
+        rmSync(join(dir, "metadata.json"));
+
+        const [run] = listRuns(TASK);
+        assert.ok(run);
+        assert.equal(run.effective, "unreadable");
+        assert.match(run.metadata.error ?? "", /missing/);
+        assert.equal(activeRun(TASK), undefined);
+    } finally {
+        cleanupScratch(root);
+    }
+});
+
+test("unreadable: the newest unreadable run does not hide an older real run", () => {
+    const root = makeScratch();
+    try {
+        mkdirSync(join(root, "schedule"), { recursive: true });
+        claimRun(TASK, STAMP_A, { cwd: root });
+        const dirB = claimRun(TASK, STAMP_B, { cwd: root });
+        writeFileSync(join(dirB, "metadata.json"), "{broken", "utf8");
+
+        const runs = listRuns(TASK);
+        assert.equal(runs.length, 2);
+        assert.equal(runs[0].ts, STAMP_B);
+        assert.equal(runs[0].effective, "unreadable");
+        assert.equal(runs[1].ts, STAMP_A);
+        assert.equal(runs[1].effective, "starting");
+    } finally {
         cleanupScratch(root);
     }
 });

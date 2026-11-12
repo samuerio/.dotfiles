@@ -259,3 +259,25 @@ describe("corrupt task definitions", () => {
         assert.equal(rows[0].cwd, "—");
     });
 });
+
+describe("unreadable run records", () => {
+    test("a run whose metadata.json is corrupt or missing is surfaced, not missed", () => {
+        const task = makeTask({ cron: "*/5 * * * *", createdAt: at(6, 10, 0) });
+
+        // Newest run exists but its record cannot be parsed: like a stale
+        // claim, the fault is not the schedule's, so `missed` must stay quiet.
+        const dir = claimRun(task.id, "20261106-110000", { cwd: tmpdir() });
+        writeFileSync(join(dir, "metadata.json"), "not json", "utf8");
+        const corrupt = row(task.id, at(6, 12, 20));
+        assert.equal(corrupt.state, "unreadable");
+        assert.equal(corrupt.missed, false);
+        assert.match(corrupt.last, /^unreadable · /);
+
+        // A record that was never written (claim crashed before the write) is
+        // the same story: the directory names the run, nothing else survives.
+        rmSync(join(dir, "metadata.json"));
+        const missing = row(task.id, at(6, 12, 20));
+        assert.equal(missing.state, "unreadable");
+        assert.equal(missing.missed, false);
+    });
+});

@@ -79,6 +79,7 @@ const USAGE = `Usage:
   schedule uninstall-cron
 
 Options:
+  --help, -h          print this usage and exit
   --prompt <text>     inline prompt; use --prompt=<text> or --prompt-file for
                       text that starts with a dash
   --prompt-file <p>   read the prompt from a file now, at add/set-prompt time;
@@ -374,7 +375,7 @@ async function cmdRun(args: ParsedArgs): Promise<number> {
             promptText,
             route,
         });
-        const summary = readRunSummary(dir);
+        const summary = readRunSummary(task.id, stamp);
         process.stdout.write(
             `\n--- ${task.id} run ${stamp} · ${describeState(summary.effective, summary.metadata)} ---\n`,
         );
@@ -467,12 +468,17 @@ async function cmdLogs(args: ParsedArgs): Promise<number> {
         });
     }
 
-    const summary = readRunSummary(latest.dir);
+    const summary = readRunSummary(task.id, latest.ts);
     const metadata = summary.metadata;
     const lines: string[] = [];
     lines.push(`${task.id}  ${task.name}  run ${latest.ts}  (${metadata?.trigger ?? "?"})`);
     lines.push(`state: ${describeState(summary.effective, metadata)}`);
-    lines.push(`model: ${describeRoute(metadata?.modelRoute)}`);
+    // No model line for an `unreadable` run (a synthesized record): "agent
+    // default" would read as a routing diagnosis when the real fault is a
+    // corrupt metadata.json.
+    if (metadata && summary.effective !== "unreadable") {
+        lines.push(`model: ${describeRoute(metadata.modelRoute)}`);
+    }
     if (metadata) {
         const started = metadata.startedAt;
         const finished = metadata.finishedAt;
@@ -555,6 +561,13 @@ async function main(): Promise<number> {
         return command ? 0 : 1;
     }
     const args = parseArgs(rest);
+    // A help request wins over running the verb (`schedule add --help` prints
+    // the usage instead of failing on missing --name). Being in BOOLEAN_FLAGS
+    // also stops the parser from eating the next token as its value.
+    if (has(args, "--help") || has(args, "-h")) {
+        process.stdout.write(USAGE);
+        return 0;
+    }
     switch (command) {
         case "list":
             return cmdList(args);
@@ -597,8 +610,8 @@ process.stdout.on("error", (error: NodeJS.ErrnoException) => {
 
 /**
  * True when this module is the process entry point (directly, or through the
- * `/usr/local/bin/schedule` symlink). Importing this module must not run the
- * CLI: `runs-view.ts` imports `cronToHuman`/`nextCron` for the shared rows.
+ * `/usr/local/bin/schedule` symlink). Importing this module must never start
+ * the CLI: `main()` runs only when the module itself is the entry point.
  */
 function isEntryPoint(): boolean {
     const entry = process.argv[1];

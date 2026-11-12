@@ -135,7 +135,9 @@ test("listRuns (the picker's source) is ordered newest first", () => {
 // runActions: the action menu is built from facts, in a fixed order
 // ---------------------------------------------------------------------------
 
-const SETTLED = ["exited", "killed", "error", "stale"];
+// `unreadable` is synthesized on the read side and settled by definition: the
+// transcript may still be intact even when its metadata.json is not.
+const SETTLED = ["exited", "killed", "error", "stale", "unreadable"];
 const ACTIVE = ["starting", "running", "orphan"];
 
 /** The full menu: preview, then the gated result, then the session mention. */

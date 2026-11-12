@@ -288,7 +288,6 @@ function buildTaskMenu(all: boolean): TaskMenu | undefined {
 }
 
 /** How the run-level loop ends: back to the task list, or done with the command. */
-/** How the run-level loop ends: back to the task list, or done with the command. */
 type FlowEnd = "back" | "done";
 
 /**
@@ -428,8 +427,11 @@ async function pickRun(
 function describeRun(task: Task, run: ActiveRun): string {
     const { metadata } = run;
     // effectiveState is derived from live pids; recompute so a run that ended
-    // between latestRun() and now is not reported as active.
-    const effective = effectiveState(metadata);
+    // between latestRun() and now is not reported as active. A synthesized
+    // `unreadable` record carries `state: "error"` on its face, so the
+    // recompute would relabel it and lose the one thing this branch exists to
+    // say; keep the already-derived verdict for that state.
+    const effective = run.effective === "unreadable" ? run.effective : effectiveState(metadata);
     const lines = [
         `${task.name} (${task.id})`,
         `cron: ${task.cron} · ${humanCron(task.cron)}${task.once ? " · once" : ""}`,
