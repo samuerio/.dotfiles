@@ -50,7 +50,7 @@ export interface LoopListDetails {
     jobs: LoopListJob[];
 }
 
-interface LoopDeleteDetails {
+export interface LoopDeleteDetails {
     id: string;
     scope: "session" | "durable";
 }
@@ -83,8 +83,14 @@ function cleanToken(text: unknown): string {
     return typeof text === "string" ? stripTerminalSequences(text) : "";
 }
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+    return typeof value === "object" && value !== null
+        ? (value as Record<string, unknown>)
+        : undefined;
+}
+
 function asArgs(args: RenderArgs | undefined | null): RenderArgs {
-    return typeof args === "object" && args !== null ? args : {};
+    return asRecord(args) ?? {};
 }
 
 function resultTextOf(result: RenderResult): string {
@@ -102,8 +108,8 @@ function reuseText(last: Component | undefined): Text {
 }
 
 /** One safe display line: sequences stripped, whitespace folded, width-capped. */
-function oneLine(text: string, maxWidth: number): string {
-    const clean = stripTerminalSequences(typeof text === "string" ? text : "").replace(/\s+/g, " ").trim();
+function oneLine(text: unknown, maxWidth: number): string {
+    const clean = cleanToken(text).replace(/\s+/g, " ").trim();
     return truncateToWidth(clean, Math.max(1, maxWidth), "…");
 }
 
@@ -155,7 +161,7 @@ function scheduleLabel(cron: string): string {
  * failed, and the toolErrorBg/toolError colors already carry that.
  */
 function errorBody(text: string, expanded: boolean, theme: Theme): string {
-    const clean = stripTerminalSequences(text ?? "").trim() || "failed";
+    const clean = cleanToken(text).trim() || "failed";
     return theme.fg("error", expanded ? clean : oneLine(clean, 96));
 }
 
@@ -164,10 +170,10 @@ function errorBody(text: string, expanded: boolean, theme: Theme): string {
  * aborted calls, anything hook-rewritten): show the content text as-is.
  */
 function legacyBody(text: string, expanded: boolean, theme: Theme): string {
-    const clean = stripTerminalSequences(text ?? "").trim();
+    const clean = cleanToken(text).trim();
     if (!clean) return theme.fg("dim", "(no output)");
     if (!expanded) return theme.fg("dim", oneLine(clean.split("\n")[0] ?? clean, 96));
-    return theme.fg("toolOutput", stripTerminalSequences(clean));
+    return theme.fg("toolOutput", clean);
 }
 
 function keyRow(label: string, value: string, theme: Theme): string {
@@ -176,7 +182,7 @@ function keyRow(label: string, value: string, theme: Theme): string {
 
 function promptLines(prompt: unknown): string[] {
     if (typeof prompt !== "string") return ["(unknown)"];
-    const clean = stripTerminalSequences(prompt).trim();
+    const clean = cleanToken(prompt).trim();
     return clean ? clean.split(/\r?\n/) : ["(empty)"];
 }
 
@@ -207,9 +213,8 @@ export function formatCreateCall(
 }
 
 function asCreateDetails(value: unknown): LoopCreateDetails | undefined {
-    if (typeof value !== "object" || value === null) return undefined;
-    const v = value as Record<string, unknown>;
-    if (typeof v.id !== "string" || !v.id || typeof v.cron !== "string" || !v.cron) {
+    const v = asRecord(value);
+    if (!v || typeof v.id !== "string" || !v.id || typeof v.cron !== "string" || !v.cron) {
         return undefined;
     }
     return {
@@ -281,9 +286,8 @@ export function formatDeleteCall(
 }
 
 function asDeleteDetails(value: unknown): LoopDeleteDetails | undefined {
-    if (typeof value !== "object" || value === null) return undefined;
-    const v = value as Record<string, unknown>;
-    if (typeof v.id !== "string" || !v.id) return undefined;
+    const v = asRecord(value);
+    if (!v || typeof v.id !== "string" || !v.id) return undefined;
     return { id: v.id, scope: v.scope === "durable" ? "durable" : "session" };
 }
 
@@ -331,17 +335,15 @@ function formatListDetailLine(job: LoopListJob, theme: Theme): string {
 }
 
 function asListDetails(value: unknown): LoopListDetails | undefined {
-    if (typeof value !== "object" || value === null) return undefined;
-    const v = value as Record<string, unknown>;
-    if (!Array.isArray(v.jobs)) return undefined;
+    const v = asRecord(value);
+    if (!v || !Array.isArray(v.jobs)) return undefined;
     return {
         jobs: v.jobs.flatMap((raw) => {
             // Renderer inputs must be fully shaped: pi re-feeds persisted
             // details from unvalidated session files (HTML export included),
             // so every field the row reads is coerced here.
-            if (typeof raw !== "object" || raw === null) return [];
-            const job = raw as Record<string, unknown>;
-            if (typeof job.id !== "string" || !job.id) return [];
+            const job = asRecord(raw);
+            if (!job || typeof job.id !== "string" || !job.id) return [];
             if (typeof job.cron !== "string" || !job.cron) return [];
             return [
                 {
@@ -376,9 +378,7 @@ export function formatListResult(
 ): string {
     if (isError) return errorBody(resultTextOf(result), options.expanded, theme);
     if (!details) return legacyBody(resultTextOf(result), options.expanded, theme);
-    const jobs = details.jobs.filter(
-        (job) => typeof job.id === "string" && typeof job.cron === "string",
-    );
+    const jobs = details.jobs;
     if (jobs.length === 0) return theme.fg("dim", "no scheduled jobs");
 
     const durableCount = jobs.filter((job) => job.durable === true).length;

@@ -174,14 +174,11 @@ export function computeNextCronRun(fields: CronFields, from: Date): Date | null 
 
         const dom = t.getDate();
         const dow = t.getDay();
-        const dayMatches =
-            domWild && dowWild
-                ? true
-                : domWild
-                  ? dowSet.has(dow)
-                  : dowWild
-                    ? domSet.has(dom)
-                    : domSet.has(dom) || dowSet.has(dow);
+        let dayMatches: boolean;
+        if (domWild && dowWild) dayMatches = true;
+        else if (domWild) dayMatches = dowSet.has(dow);
+        else if (dowWild) dayMatches = domSet.has(dom);
+        else dayMatches = domSet.has(dom) || dowSet.has(dow);
         if (!dayMatches) {
             t.setDate(t.getDate() + 1);
             t.setHours(0, 0, 0, 0);

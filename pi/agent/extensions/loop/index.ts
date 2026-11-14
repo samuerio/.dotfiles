@@ -34,25 +34,20 @@
  * before the durable delete can run a one-shot twice; a concurrent
  * create lost to a racing read-modify-write is overwritten
  * (last-write-wins). Both are documented in the spec.
+ * - File layout: store.ts owns task-file persistence (tolerant read,
+ *   verified atomic write, v1→v2 migration); owner-lease.ts owns the
+ *   scheduler owner lease (identity lock + PID liveness); cron.ts the
+ *   cron grammar; renderers.ts the tool renderers. This file keeps the
+ *   tick scheduler, injection carrier, tools, and registration.
  */
 
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
-import {
-    mkdir,
-    readFile,
-    rename,
-    stat,
-    unlink,
-    utimes,
-    writeFile,
-} from "node:fs/promises";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { Type } from "typebox";
 import {
-    withFileMutationQueue,
     type ExtensionAPI,
     type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
@@ -67,14 +62,26 @@ import {
     parseCronDetailed,
     parseCronExpression,
 } from "./cron.ts";
+import { releaseOwnerLockAt, tryAcquireOwnerLockAt } from "./owner-lease.ts";
 import {
     loopCreateRenderers,
     loopDeleteRenderers,
     loopListRenderers,
     type LoopCreateDetails,
+    type LoopDeleteDetails,
+    type LoopListDetails,
     type LoopListJob,
 } from "./renderers.ts";
-import type { LoopEnv, LoopFile, OwnerLock, StoredTask } from "./types.ts";
+import {
+    messageOf,
+    migrateTaskFile as migrateTaskFileAt,
+    mutateTaskFile as mutateTaskFileAt,
+    readTaskFile as readTaskFileAt,
+    type ReadResult,
+} from "./store.ts";
+import type { LoopEnv, StoredTask } from "./types.ts";
+
+export { legacyToStored } from "./store.ts";
 
 // ─── Constants ────────────────────────────────────────────────────
 
@@ -82,10 +89,6 @@ import type { LoopEnv, LoopFile, OwnerLock, StoredTask } from "./types.ts";
 const TICK_MS = 1000;
 /** How often a non-owner probes the owner lease. */
 const LOCK_PROBE_MS = 5000;
-/** Owner heartbeat on the lock file (corrupt-file liveness signal only). */
-const HEARTBEAT_MS = 15_000;
-/** Corrupt-lock mtime younger than this is treated as alive (no steal). */
-const CORRUPT_LOCK_LIVE_MS = 60_000;
 /** Stored-job cap (claude parity). */
 const MAX_JOBS = 50;
 /** Recurring tasks auto-expire after this age (fire one last time, then delete). */
@@ -111,7 +114,6 @@ const USAGE =
     "Each fire is injected into THIS session's context while it is idle.\n" +
     "Manage: loop_list to view, loop_delete to cancel.";
 
-
 // ─── Module state (per module evaluation; /reload re-evaluates) ───
 
 let api: ExtensionAPI | undefined;
@@ -119,12 +121,10 @@ let env: LoopEnv | undefined;
 let cachedCtx: ExtensionContext | undefined;
 let tickTimer: ReturnType<typeof setTimeout> | undefined;
 let probeTimer: ReturnType<typeof setInterval> | undefined;
-let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
 /** skip-if-running guard for the tick chain. */
 let ticking = false;
 let shuttingDown = false;
 let isOwner = false;
-let lockErrorNotified = false;
 /** Durable tasks with an injected fire whose delete has not landed yet. */
 const inFlight = new Set<string>();
 /** Ids already surfaced as missed — prevents re-asking on every tick. */
@@ -134,38 +134,23 @@ const activeTaskIds = new Map<string, number>();
 /** Session-only tasks (durable: false). Never touch the disk. */
 const sessionTasks = new Map<string, StoredTask>();
 /**
- * nextFireAt cache: id → { cron, anchor, next }. Recomputed when the cron
- * or the anchor (lastFiredAt ?? createdAt) changes; evicted when the id
+ * nextFireAt cache entry: id → { cron, anchor, next }. Recomputed when the
+ * cron or the anchor (lastFiredAt ?? createdAt) changes; evicted when the id
  * disappears from a tick's seen set; cleared on owner takeover.
  */
-const nextFireAt = new Map<string, { cron: string; anchor: number; next: number }>();
+type NextFireAtEntry = { cron: string; anchor: number; next: number };
+const nextFireAt = new Map<string, NextFireAtEntry>();
 /** Notify a task-file read error once per broken-file episode. */
 let readErrorNotified = false;
 
 // ─── Small helpers ────────────────────────────────────────────────
 
-function messageOf(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
-}
-
-function errnoCode(error: unknown): string | undefined {
-    return (error as NodeJS.ErrnoException | undefined)?.code;
-}
-
-function processAlive(pid: number): boolean {
-    try {
-        process.kill(pid, 0);
-        return true;
-    } catch (error) {
-        return errnoCode(error) === "EPERM";
-    }
-}
-
 function randomId(): string {
-    const id = randomBytes(4).toString("hex");
+    const bytes = randomBytes(4);
+    const id = bytes.toString("hex");
     // First char forced to a hex letter so an id can never look like a
     // leading interval token (\d+[smhd]) in a /loop invocation.
-    return "abcdef"[randomBytes(1)[0] % 6] + id.slice(1);
+    return "abcdef"[bytes[0] % 6] + id.slice(1);
 }
 
 /** Truncate to one display line (claude list format uses 80 chars). */
@@ -207,14 +192,6 @@ function formatCronFireTime(d: Date): string {
 
 // ─── Repo-local environment ───────────────────────────────────────
 
-function tasksFilePath(): string {
-    return path.join(env!.repoRoot, ".pi", "loop-tasks.json");
-}
-
-function lockFilePath(): string {
-    return path.join(env!.repoRoot, ".pi", "loop-tasks.lock");
-}
-
 /**
  * Repo root = dirname of `git rev-parse --git-common-dir` (absolute): the
  * MAIN repo root, so every worktree of the same repo shares one task file
@@ -237,164 +214,45 @@ async function probeRepoRoot(cwd: string): Promise<string> {
     return cwd;
 }
 
-// ─── Task file IO (tolerant read, verified atomic write) ──────────
-
-function isStoredTask(value: unknown): value is StoredTask {
-    const task = value as StoredTask | undefined;
-    return (
-        !!task &&
-        typeof task.id === "string" &&
-        typeof task.cron === "string" &&
-        typeof task.prompt === "string" &&
-        typeof task.createdAt === "number" &&
-        (task.lastFiredAt === undefined || typeof task.lastFiredAt === "number") &&
-        (task.recurring === undefined || typeof task.recurring === "boolean")
-    );
-}
-
-/** Accept v1-shaped entries (intervalMs scheduling truth) defensively. */
-export function legacyToStored(value: Record<string, unknown>): StoredTask | undefined {
-    const cron = value.cron;
-    if (typeof cron !== "string" || typeof value.id !== "string") return undefined;
-    if (typeof value.prompt !== "string" || typeof value.createdAt !== "number") {
-        return undefined;
-    }
-    // Recurring legacy tasks get lastFiredAt = now (anti-thundering-herd:
-    // otherwise every migrated job fires immediately on the next tick).
-    return {
-        id: value.id,
-        cron,
-        prompt: value.prompt,
-        createdAt: value.createdAt,
-        ...(value.recurring === true ? { recurring: true, lastFiredAt: Date.now() } : {}),
-    };
-}
-
-type ReadResult = {
-    /** Shape-valid entries (invalid cron strings included — never dropped). */
-    valid: StoredTask[];
-    /** Shape-invalid entries, preserved verbatim for write-back. */
-    rest: unknown[];
-};
+// ─── Storage bindings (env-bound shims over ./store.ts) ───────────
 
 /**
- * Read the task file. A missing file = no tasks. Unparseable JSON or a
- * malformed file throws (the caller never overwrites a file it could not
- * read). Shape-invalid entries survive in `rest` so a write-back never
- * silently erases them. Legacy v1 entries are converted on read.
+ * The storage logic itself lives in store.ts (task file: tolerant read,
+ * verified atomic write, v1→v2 migration) and owner-lease.ts (scheduler
+ * owner lease). These shims keep the existing call signatures: env.repoRoot
+ * is read at CALL time so __testReset can redirect the module to a scratch
+ * directory, and the tests keep importing from index.ts.
  */
+
+/** Tolerant read: shape-valid entries + unparseable originals preserved. */
 export async function readTaskFile(): Promise<ReadResult> {
-    let raw: string;
-    try {
-        raw = await readFile(tasksFilePath(), "utf8");
-    } catch (error) {
-        if (errnoCode(error) === "ENOENT") return { valid: [], rest: [] };
-        throw new Error(`cannot read ${tasksFilePath()}: ${messageOf(error)}`, {
-            cause: error,
-        });
-    }
-    let parsed: { version?: unknown; tasks?: unknown };
-    try {
-        parsed = JSON.parse(raw);
-    } catch (error) {
-        throw new Error(`${tasksFilePath()} is corrupt JSON: ${messageOf(error)}`, {
-            cause: error,
-        });
-    }
-    if (!parsed || !Array.isArray(parsed.tasks)) {
-        throw new Error(`${tasksFilePath()} is malformed: 'tasks' is not an array`);
-    }
-    const valid: StoredTask[] = [];
-    const rest: unknown[] = [];
-    for (const entry of parsed.tasks) {
-        if (isStoredTask(entry)) {
-            valid.push(entry);
-            continue;
-        }
-        const converted = legacyToStored(entry as Record<string, unknown>);
-        if (converted) valid.push(converted);
-        else rest.push(entry);
-    }
-    return { valid, rest };
+    return readTaskFileAt(env!.repoRoot);
 }
 
-/** Atomic write: unique temp name (pid + random — two processes sharing a
- * fixed .tmp would rename onto each other's half-written file), then rename. */
-async function atomicWriteFile(filePath: string, contents: string): Promise<void> {
-    await mkdir(path.dirname(filePath), { recursive: true });
-    const temporaryPath = `${filePath}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
-    await writeFile(temporaryPath, contents, { encoding: "utf8", mode: 0o600 });
-    await rename(temporaryPath, filePath);
-}
-
-/**
- * Read-modify-write over the durable task file. Runs INSIDE the process
- * mutation queue only — the owner lease is deliberately NOT consulted
- * (lease decides who FIRES, never who writes; a lease-gated write path
- * deadlocks against the owner's own heartbeat). Cross-process races resolve
- * last-write-wins: a concurrent create can be lost (claude parity), but a
- * corrupt or unreadable file is never overwritten — read errors throw.
- *
- * Post-write verification re-reads and byte-compares; a mismatch (another
- * process won the rename race) retries with a fresh base, up to 3 attempts.
- */
+/** Verified read-modify-write critical section (store.ts semantics). */
 export async function mutateTaskFile(
     mutator: (tasks: StoredTask[], rest: unknown[]) => void,
 ): Promise<boolean> {
-    return withFileMutationQueue(tasksFilePath(), async () => {
-        for (let attempt = 0; attempt < 3; attempt++) {
-            const { valid, rest } = await readTaskFile();
-            mutator(valid, rest);
-            const payload: LoopFile = { version: 2, tasks: [...valid, ...rest] };
-            const contents = `${JSON.stringify(payload, null, 2)}\n`;
-            await atomicWriteFile(tasksFilePath(), contents);
-            try {
-                if ((await readFile(tasksFilePath(), "utf8")) === contents) return true;
-            } catch (error) {
-                // "Vanished post-write" (external cleanup removed it) counts
-                // as done; any other read failure means the write is NOT
-                // verified and must not be reported as success.
-                if (errnoCode(error) === "ENOENT") return true;
-                throw error;
-            }
+    return mutateTaskFileAt(env!.repoRoot, mutator);
+}
+
+/** v1 → v2 migration (idempotent; runs on session_start). */
+export async function migrateTaskFile(): Promise<void> {
+    return migrateTaskFileAt(env!.repoRoot);
+}
+
+/** Drop every task whose id is in `ids` in a single write (no-op when
+ * none match). */
+function removeTasksByIds(ids: Iterable<string>): Promise<boolean> {
+    const idSet = new Set(ids);
+    return mutateTaskFile((tasks) => {
+        for (let i = tasks.length - 1; i >= 0; i--) {
+            if (idSet.has(tasks[i].id)) tasks.splice(i, 1);
         }
-        return false;
     });
 }
 
-// ─── Owner lease (identity lock; PID liveness decides) ────────────
-
-async function readOwnerLock(): Promise<OwnerLock | undefined> {
-    try {
-        const raw = await readFile(lockFilePath(), "utf8");
-        const parsed = JSON.parse(raw) as Partial<OwnerLock>;
-        if (
-            typeof parsed.sessionId === "string" &&
-            typeof parsed.pid === "number" &&
-            typeof parsed.acquiredAt === "number"
-        ) {
-            return parsed as OwnerLock;
-        }
-        return undefined;
-    } catch {
-        return undefined; // missing or corrupt
-    }
-}
-
-function startHeartbeat(): void {
-    stopHeartbeat();
-    heartbeatTimer = setInterval(() => {
-        void utimes(lockFilePath(), new Date(), new Date()).catch(() => {});
-    }, HEARTBEAT_MS);
-    heartbeatTimer.unref();
-}
-
-function stopHeartbeat(): void {
-    if (heartbeatTimer) {
-        clearInterval(heartbeatTimer);
-        heartbeatTimer = undefined;
-    }
-}
+// ─── Owner lease bindings (over ./owner-lease.ts) ─────────────────
 
 let testSessionId: string | undefined;
 
@@ -408,131 +266,24 @@ function currentSessionId(): string {
 }
 
 /**
- * Acquire or confirm the scheduler owner lease.
- *   ① lock already ours (same sessionId — the /reload path, where the file
- *     still names this process's pid under the previous module evaluation)
- *     → true, rewriting the pid if the module restarted under a new one;
- *   ② another LIVE pid → false (probe again in 5s);
- *   ③ dead pid → unlink and re-create;
- *   ④ corrupt file → mtime-guarded unlink and re-create (the heartbeat
- *     keeps a live owner's mtime fresh, so a live owner is never stolen;
- *     mtime is ONLY consulted here, never on a parseable lock).
+ * Acquire or confirm the scheduler owner lease. On success marks this
+ * module's isOwner; lease internals (heartbeat, corrupt-file liveness,
+ * steal windows) live in owner-lease.ts. Exported for lease tests:
+ * same-process re-acquire / foreign-pid guard.
  */
-/**
- * Acquire or confirm the scheduler owner lease.
- *   ① lock already ours (same sessionId after /reload, or the file names
- *     THIS process's pid after a same-process session replacement) → true,
- *     rewriting the payload to the current sessionId + live pid;
- *   ② another LIVE pid → false (probe again in 5s);
- *   ③ dead pid → unlink and re-create;
- *   ④ corrupt file → mtime-guarded unlink and re-create (the heartbeat
- *     keeps a live owner's mtime fresh, so a live owner is never stolen;
- *     mtime is ONLY consulted here, never on a parseable lock).
- */
-/** Exported for lease tests: same-process re-acquire / foreign-pid guard. */
 export async function tryAcquireOwnerLock(): Promise<boolean> {
-    const sessionId = currentSessionId();
-    const writeExclusive = async (): Promise<boolean> => {
-        try {
-            await mkdir(path.dirname(lockFilePath()), { recursive: true });
-            await writeFile(
-                lockFilePath(),
-                `${JSON.stringify({ sessionId, pid: process.pid, acquiredAt: Date.now() })}\n`,
-                { flag: "wx", mode: 0o600 },
-            );
-            return true;
-        } catch (error) {
-            // Only EEXIST means "someone holds the lock". Every other errno
-            // (EACCES, EROFS, ENOSPC) must surface instead of degrading to
-            // "never owner" with the durable scheduler silently paused.
-            if (errnoCode(error) === "EEXIST") return false;
-            throw error;
-        }
-    };
-
-    const adopt = (): true => {
-        isOwner = true;
-        lockErrorNotified = false;
-        startHeartbeat();
-        return true;
-    };
-
-    try {
-        if (await writeExclusive()) return adopt();
-    } catch (error) {
-        reportLockError(error);
-        return false;
-    }
-
-    const existing = await readOwnerLock();
-    if (existing && (existing.sessionId === sessionId || existing.pid === process.pid)) {
-        // Idempotent re-acquire. Covers both: /reload (same session id,
-        // possibly a new pid after module re-evaluation) AND same-process
-        // session replacement (/new, /fork, switch — the shutdown release
-        // may have failed, leaving the file naming OUR live pid under the
-        // previous session id). Rewrite the payload so other sessions see
-        // the current session id plus a live pid and don't steal it.
-        await atomicWriteFile(
-            lockFilePath(),
-            `${JSON.stringify({ sessionId, pid: process.pid, acquiredAt: existing.acquiredAt })}\n`,
-        ).catch(() => {});
-        return adopt();
-    }
-
-    if (existing && processAlive(existing.pid)) return false;
-
-    if (!existing) {
-        // Corrupt/missing since the wx failure: steal only if the mtime is
-        // stale (a live owner's heartbeat refreshes it every 15s).
-        try {
-            const info = await stat(lockFilePath());
-            if (Date.now() - info.mtimeMs < CORRUPT_LOCK_LIVE_MS) return false;
-        } catch {
-            return false; // vanished between wx and stat: retry next probe
-        }
-    }
-
-    await unlink(lockFilePath()).catch(() => {});
-    try {
-        if (await writeExclusive()) return adopt();
-    } catch (error) {
-        reportLockError(error);
-    }
-    return false; // another session won the recovery race
-}
-function releaseOwnerLock(): void {
-    stopHeartbeat();
-    // Snapshot synchronously: session_shutdown clears cachedCtx around this
-    // call, and currentSessionId() degrades to the pid string once it has.
-    const sessionId = currentSessionId();
-    void (async () => {
-        try {
-            const existing = await readOwnerLock();
-            // A stolen lock must not be deleted by us.
-            if (
-                !existing ||
-                (existing.sessionId !== sessionId && existing.pid !== process.pid)
-            ) {
-                return;
-            }
-            await unlink(lockFilePath());
-        } catch {
-            // already gone
-        }
-    })();
-}
-
-/** Surface lock-write failures once per process (the probe re-runs every
- * 5s); a read-only repo or full disk must not masquerade as "held". */
-function reportLockError(error: unknown): void {
-    console.error("[loop] owner lock write failed:", error);
-    if (lockErrorNotified) return;
-    lockErrorNotified = true;
-    safeNotify(
-        cachedCtx,
-        `[loop] cannot write owner lock (${messageOf(error)}); durable scheduling paused`,
-        "error",
+    const acquired = await tryAcquireOwnerLockAt(
+        env!.repoRoot,
+        currentSessionId(),
+        (message) => safeNotify(cachedCtx, message, "error"),
     );
+    if (acquired) isOwner = true;
+    return acquired;
+}
+
+/** Release; snapshots sessionId synchronously (see owner-lease.ts). */
+function releaseOwnerLock(): void {
+    releaseOwnerLockAt(env!.repoRoot, currentSessionId());
 }
 
 // ─── Injection (current-session carrier) ──────────────────────────
@@ -618,11 +369,8 @@ async function surfaceMissedTasks(): Promise<void> {
         // Block normal firing while the ask-first prompt is pending.
         nextFireAt.set(task.id, { cron: task.cron, anchor: task.createdAt, next: Infinity });
     }
-    const removed = await mutateTaskFile((tasks) => {
-        for (let i = tasks.length - 1; i >= 0; i--) {
-            if (missed.some((m) => m.id === tasks[i].id)) tasks.splice(i, 1);
-        }
-    }).catch((error) => {
+    const missedIds = missed.map((task) => task.id);
+    const removed = await removeTasksByIds(missedIds).catch((error) => {
         console.error("[loop] failed to remove missed tasks:", messageOf(error));
         return false;
     });
@@ -677,11 +425,7 @@ async function runTick(): Promise<void> {
     }
 }
 
-function computeEntry(task: StoredTask): {
-    cron: string;
-    anchor: number;
-    next: number;
-} {
+function computeEntry(task: StoredTask): NextFireAtEntry {
     const anchor = task.recurring
         ? (task.lastFiredAt ?? task.createdAt)
         : task.createdAt;
@@ -751,39 +495,34 @@ async function tickBody(): Promise<void> {
             } else if (fired) {
                 firedRecurring.push(task.id);
             }
-            // Recurring fire whose injection failed: the reschedule stands
-            // (retrying each tick would hot-loop); the task fires again at
-            // its next cron match.
-        } else if (isSession) {
-            // One-shot (or aged) session task: synchronous memory removal.
-            if (fired) {
-                sessionTasks.delete(task.id);
-                nextFireAt.delete(task.id);
-            }
-            // Injection failed: keep it due so the next tick retries.
-        } else if (fired) {
-            // One-shot (or aged) durable task: inject FIRST, then delete.
-            // If the delete fails the task survives on disk for the next
-            // tick (inFlight holds until the write settles); a crash
-            // between inject and delete can re-run it once — accepted
-            // (claude parity).
-            inFlight.add(task.id);
-            nextFireAt.delete(task.id);
-            void mutateTaskFile((tasks) => {
-                const index = tasks.findIndex((t) => t.id === task.id);
-                if (index >= 0) tasks.splice(index, 1);
-            })
-                .catch((error) => {
-                    console.error(
-                        `[loop] failed to remove fired task ${task.id}: ${messageOf(error)}`,
-                    );
-                })
-                .finally(() => inFlight.delete(task.id));
-        } else {
-            // Durable one-shot whose injection failed: the task stays on
-            // disk and the next tick retries the injection (v5 ordering
-            // rationale: never delete what was never delivered).
+            // A recurring fire whose injection failed keeps the reschedule
+            // (retrying each tick would hot-loop); it fires again at its
+            // next cron match.
+            return;
         }
+
+        // One-shot (or aged) task. Nothing is deleted until the injection
+        // landed: never delete what was never delivered.
+        if (!fired) return;
+        if (isSession) {
+            // Session task: synchronous memory removal.
+            sessionTasks.delete(task.id);
+            nextFireAt.delete(task.id);
+            return;
+        }
+        // Durable task: inject FIRST, then delete. If the delete fails the
+        // task survives on disk for the next tick (inFlight holds until the
+        // write settles); a crash between inject and delete can re-run it
+        // once — accepted (claude parity).
+        inFlight.add(task.id);
+        nextFireAt.delete(task.id);
+        void removeTasksByIds([task.id])
+            .catch((error) => {
+                console.error(
+                    `[loop] failed to remove fired task ${task.id}: ${messageOf(error)}`,
+                );
+            })
+            .finally(() => inFlight.delete(task.id));
     };
 
     // Durable tasks fire only in the owner. Read fresh each tick (no
@@ -829,10 +568,6 @@ async function tickBody(): Promise<void> {
     // Session-only tasks: process-private, no lock, no file.
     for (const task of [...sessionTasks.values()]) processTask({ ...task }, true);
 
-    if (seen.size === 0) {
-        nextFireAt.clear();
-        return;
-    }
     for (const id of nextFireAt.keys()) {
         if (!seen.has(id)) nextFireAt.delete(id);
     }
@@ -864,46 +599,6 @@ function startProbe(): void {
         })().catch((error) => console.error("[loop] probe error:", error));
     }, LOCK_PROBE_MS);
     probeTimer.unref();
-}
-
-// ─── v1 → v2 migration ────────────────────────────────────────────
-
-/**
- * session_start: if the task file is not version 2, rewrite it as v2
- * (cron was already the display truth for the three legacy templates;
- * recurring lastFiredAt stamps to now to avoid a migrated-fire stampede).
- * Correctness comes from version checking + content idempotence, not from
- * a cross-process queue: two windows may each migrate once and the last
- * write wins — the result is still a valid v2 file with the same tasks.
- */
-export async function migrateTaskFile(): Promise<void> {
-    let raw: string;
-    try {
-        raw = await readFile(tasksFilePath(), "utf8");
-    } catch (error) {
-        if (errnoCode(error) === "ENOENT") return;
-        throw error;
-    }
-    let parsed: { version?: unknown; tasks?: unknown };
-    try {
-        parsed = JSON.parse(raw);
-    } catch {
-        return; // corrupt: leave it; readTaskFile/mutate will fail loudly
-    }
-    if (parsed?.version === 2) return;
-    const { valid, rest } = await readTaskFile();
-    // All entries are pre-v2 here: normalize strictly (strip intervalMs/
-    // failureCount/lastError/paused), stamping recurring lastFiredAt = now
-    // so a migrated file does not fire-stampede on the next tick.
-    const migrated = valid.map((task) => ({
-        id: task.id,
-        cron: task.cron,
-        prompt: task.prompt,
-        createdAt: task.createdAt,
-        ...(task.recurring ? { recurring: true as const, lastFiredAt: Date.now() } : {}),
-    }));
-    const payload: LoopFile = { version: 2, tasks: [...migrated, ...rest] };
-    await atomicWriteFile(tasksFilePath(), `${JSON.stringify(payload, null, 2)}\n`);
 }
 
 // ─── Tools ────────────────────────────────────────────────────────
@@ -1070,7 +765,7 @@ export default function (pi: ExtensionAPI) {
                 sessionTasks.set(task.id, { ...task });
             }
 
-            const nextFireAt =
+            const firstFireAt =
                 (recurring
                     ? jitteredNextCronRunMs(task.cron, Date.now(), task.id)
                     : oneShotJitteredNextCronRunMs(task.cron, Date.now(), task.id)) ?? null;
@@ -1081,7 +776,7 @@ export default function (pi: ExtensionAPI) {
                     cron: task.cron,
                     recurring,
                     durable,
-                    nextFireAt,
+                    nextFireAt: firstFireAt,
                 } satisfies LoopCreateDetails,
             };
         },
@@ -1098,35 +793,26 @@ export default function (pi: ExtensionAPI) {
         annotations: { readOnlyHint: true },
         ...loopListRenderers,
         async execute() {
-            const jobs: LoopListJob[] = [];
             let fileTasks: StoredTask[];
             try {
                 fileTasks = (await readTaskFile()).valid;
             } catch (error) {
                 throw new Error(`loop task file error: ${messageOf(error)}`);
             }
-            for (const task of fileTasks) {
-                jobs.push({
-                    id: task.id,
-                    cron: task.cron,
-                    recurring: task.recurring ?? false,
-                    durable: true,
-                    // Details ride in the session/HTML export forever; cap
-                    // at the same preview the model-facing line uses.
-                    prompt: truncate80(task.prompt),
-                    createdAt: task.createdAt,
-                });
-            }
-            for (const task of sessionTasks.values()) {
-                jobs.push({
-                    id: task.id,
-                    cron: task.cron,
-                    recurring: task.recurring ?? false,
-                    durable: false,
-                    prompt: truncate80(task.prompt),
-                    createdAt: task.createdAt,
-                });
-            }
+            // Details ride in the session/HTML export forever; cap the
+            // prompt at the same preview the model-facing line uses.
+            const toJob = (task: StoredTask, durable: boolean): LoopListJob => ({
+                id: task.id,
+                cron: task.cron,
+                recurring: task.recurring ?? false,
+                durable,
+                prompt: truncate80(task.prompt),
+                createdAt: task.createdAt,
+            });
+            const jobs: LoopListJob[] = [
+                ...fileTasks.map((task) => toJob(task, true)),
+                ...[...sessionTasks.values()].map((task) => toJob(task, false)),
+            ];
             const lines = jobs.map((job) => {
                 const schedule = parseCronExpression(job.cron)
                     ? cronToHuman(job.cron)
@@ -1159,21 +845,20 @@ export default function (pi: ExtensionAPI) {
             const id = params.id.trim();
 
             // Existence check BEFORE any write: an unknown id must not
-            // touch the disk (claude validateInput parity).
-            // Snapshot where the job lived before any removal, so the
-            // renderer can show "cancelled · session|durable".
-            let scope: LoopDeleteDetails["scope"] = sessionTasks.has(id)
-                ? "session"
-                : "durable";
-            let exists = sessionTasks.has(id);
-            if (!exists) {
+            // touch the disk (claude validateInput parity). Snapshot where
+            // the job lived, so the renderer can show "cancelled ·
+            // session|durable".
+            const isSessionTask = sessionTasks.has(id);
+            const scope = isSessionTask ? "session" : "durable";
+            if (!isSessionTask) {
+                let onDisk = false;
                 try {
-                    exists = (await readTaskFile()).valid.some((t) => t.id === id);
+                    onDisk = (await readTaskFile()).valid.some((task) => task.id === id);
                 } catch (error) {
                     throw new Error(`loop task file error: ${messageOf(error)}`);
                 }
+                if (!onDisk) throw new Error(`No scheduled job with id '${id}'.`);
             }
-            if (!exists) throw new Error(`No scheduled job with id '${id}'.`);
 
             sessionTasks.delete(id);
             // Only durable-origin deletes touch the task file: a
@@ -1191,10 +876,7 @@ export default function (pi: ExtensionAPI) {
                 };
             }
             if (!inFlight.has(id)) {
-                const removed = await mutateTaskFile((tasks) => {
-                    const index = tasks.findIndex((task) => task.id === id);
-                    if (index >= 0) tasks.splice(index, 1);
-                }).catch((error) => {
+                const removed = await removeTasksByIds([id]).catch((error) => {
                     throw new Error(`loop task file error: ${messageOf(error)}`);
                 });
                 if (!removed) {
