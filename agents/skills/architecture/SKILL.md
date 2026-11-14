@@ -7,6 +7,8 @@ description: Use this skill to produce a structured architecture document with M
 
 Produce a structured architecture document from either an existing codebase (Research) or a written plan (Draft), with Mermaid diagrams and prose in Simplified Chinese.
 
+Focus on system structure, component boundaries, and the primary runtime flow. Omit implementation details, secondary flows, and design rationale unless essential to understanding the architecture.
+
 ## Step 0 - Clarify if Needed (Draft mode only)
 
 Ask about any ambiguities in scope, responsibilities, data flow, or design intent that cannot be inferred from the plan before proceeding.
@@ -36,10 +38,6 @@ Include only units that own control flow, enforce an error boundary, or can be r
 
 |Component|Responsibility|
 |---------|--------------|
-
-## 4. Design Notes
-
-Record the reasoning behind key architectural decisions that cannot be inferred from the diagrams. Tables preferred.
 
 ````
 

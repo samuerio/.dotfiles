@@ -1,42 +1,72 @@
 ---
 name: trace
 description: >
-  Statically reconstruct the causal execution path of a function or method for
-  concrete inputs from source code and supplied context. Show behaviorally
-  relevant calls, guard conditions, derived values, state mutations, side
-  effects, event-driven handoffs, and termination as a compact ASCII execution
-  trace. Use for requests such as "trace this call", "walk me through input X",
-  "which path execution took", "why does this run again?", or "show the state
-  changes". Never execute, modify, or instrument the target.
+  Statically reconstruct a causal execution path from source code and concrete
+  inputs, or the intended primary flow from a design document before
+  implementation. Show relevant calls, guards, derived values, mutations,
+  side effects, event handoffs, and termination as a compact ASCII TRACE.
+  Use for "trace this call", "show the state changes", or "trace this design's
+  main flow". Never execute, modify, or instrument the target.
 ---
 
 # Trace
 
-Statically reconstruct the execution path for concrete `INPUT` and supplied
-`CONTEXT`.
+Statically reconstruct one causal path. The result is a static
+reconstruction, never an observed execution, and the target is never
+executed, modified, instrumented, or probed.
 
-Never execute, modify, instrument, or probe the target.
+- **Code mode**: the one path determined by source code, concrete `INPUT`,
+  and supplied `CONTEXT`. Use it only when the traced behavior itself has an
+  implementation; related modules or earlier implementations do not make an
+  unimplemented design a code-mode target.
+- **Design mode**: the intended primary flow from a design document, when the
+  target has no implementation yet. Read only the referenced document and its
+  directly associated pseudocode, specifications, or interface sketches; do
+  not search unrelated artifacts or borrow behavior from adjacent
+  implementations.
+
+Never mix actual execution with intended behavior.
 
 ## Grounding and unknowns
 
-Treat source code as authoritative for control flow.
+In code mode, treat source code as authoritative for control flow.
+
+In design mode, treat design artifacts as authoritative for intended control
+flow. More specific artifacts refine less specific ones:
+
+pseudocode / signatures > interface sketches > design narrative
+
+This refines underspecification, not contradictions: when artifacts
+substantively conflict on a material point, emit `UNDECIDED: <question>`
+rather than picking one side.
 
 Treat supplied `INPUT` and `CONTEXT` as authoritative for explicitly provided
 arguments, external state, runtime results, callbacks, events, configuration,
 and environment state.
 
-Follow only paths determined by source code, `INPUT`, `CONTEXT`, or an
-explicit `# inferred: ...` boundary.
+Follow only paths determined by the authoritative source or design artifacts,
+`INPUT`, `CONTEXT`, or an explicit `# inferred: ...` boundary.
 
 Every concrete scalar, string, count, timing, cost, token usage, or payload in
 `TRACE` must come from:
 
 - source code,
+- design artifacts (in design mode),
 - `INPUT`,
 - `CONTEXT`, or
 - an `assumed:` entry in `CONTEXT`.
 
 Never invent concrete values or label an invention as `# inferred:`.
+
+### Design mode
+
+- Infer reasonable details from the design when necessary, respecting
+  explicit design decisions and avoiding unsupported assumptions that
+  materially change the intended architecture.
+- If a critical ambiguity prevents a coherent trace, emit
+  `UNDECIDED: <question>` as the final trace event and stop.
+
+### Code-mode unknowns
 
 When a runtime value is unavailable:
 
@@ -88,7 +118,8 @@ that materially explain:
 
 Prefer the shallowest representation that preserves causal understanding.
 
-- `CALL` — enter repository code whose internals materially explain the path.
+- `CALL` — enter repository code (code mode) or a documented operation
+  (design mode) whose internals materially explain the path.
 - `IF` — guard condition on the taken path that materially determines the next
   traced step; rendered only under the Branch conditions rules.
 - `VALUE` — derive a value later used by traced control flow, mutation, side
@@ -107,29 +138,18 @@ Do not mechanically render repository helpers. Inline a helper's relevant
 value, mutation, or side effect unless entering the helper materially explains
 control flow, nested events, or result derivation.
 
-## Modes
-
-Always produce a single causal `TRACE` view.
-
-Include `INPUT` and `CONTEXT` when values are supplied or assumptions
-are needed.
-
-For `compact`, `summary only`, or `causal only`, further reduce
-non-essential events without losing causal completeness.
-
 ## Output structure
 
-Output directly in chat, in the order `INPUT` (when supplied),
-`CONTEXT` (when needed), `TRACE`.
+Always produce a single causal `TRACE`, preceded by `INPUT` (when values are
+supplied) and `CONTEXT` (when values are supplied or assumptions are needed),
+output directly in chat. For `compact`, `summary only`, or `causal only`,
+further reduce non-essential events without losing causal completeness.
 
-Wrap the whole output in a single fenced code block tagged `text`, so `#`
-comment lines stay plain text and whitespace is preserved; output nothing
-outside the fence and no prose between sections. The first line inside the
-fence is the first included section's label line (`INPUT:`, or `TRACE:`
-when `CONTEXT` is omitted).
-
-If the content contains a run of three or more backticks, use a longer
-fence.
+Wrap the whole output in a single `text` fenced block, so whitespace is
+preserved (longer fence if the content contains three or more backticks);
+output nothing outside it and no prose between sections. The first line
+inside is the first included section's label (`INPUT:`, `CONTEXT:`, or
+`TRACE:`).
 
 Use multiline structured blocks for `INPUT` and `CONTEXT`:
 
@@ -148,13 +168,8 @@ a materially different value.
 
 Keep the trace sparse and limited to the concrete executed path.
 
-Do not restore:
-
-- untraversed branches,
-- irrelevant temporaries,
-- bookkeeping,
-- trivial wrappers,
-- fabricated runtime values.
+Do not restore untraversed branches, irrelevant temporaries, bookkeeping,
+trivial wrappers, or fabricated runtime values.
 
 Omit ordinary valueless `RETURN` when normal frame completion is obvious.
 Keep it when it carries a meaningful value, is an early return, determines
@@ -166,9 +181,7 @@ caller behavior, distinguishes an outcome, or explains termination.
 
 Render it as a chronological ASCII causal trace.
 
-Do not default to a lexical call tree.
-
-Use vertical flow for chronology:
+Use vertical flow for chronology, not a lexical call tree:
 
 ```text
 TRACE:
@@ -194,12 +207,9 @@ CALL process(...)
 CALL next(...)
 ```
 
-Do not draw decorative boxes around every function.
-
-Do not render alternate outcomes, decision diamonds, or a full control-flow
-graph: this is a concrete execution trace, not a CFG. The one allowed
-exception is a single `IF` line naming the condition on the taken path; see
-Branch conditions below.
+No decorative boxes, alternate outcomes, decision diamonds, or full
+control-flow graph; the only exception is a single `IF` line on the taken
+path (see Branch conditions).
 
 ### Branch conditions
 
@@ -214,9 +224,11 @@ traced step and its outcome is not already evident from the rendered events:
 Omit ordinary null checks and guards whose taken direction is unambiguous
 from the surrounding events.
 
-Write the condition as a source-level expression. Concrete operands follow
-the same grounding rules as every other value; when a runtime value is
-unavailable, keep the expression symbolic rather than inventing it.
+Write the condition as a source-level expression in code mode, or use the
+condition explicitly described by the design artifact in design mode. Never
+invent design guards. Concrete operands follow the same grounding rules as
+every other value; when a runtime value is unavailable, keep the expression
+symbolic rather than inventing it.
 
 Place `IF` above the events it gates:
 
@@ -229,8 +241,7 @@ CALL processSettled(pi, ctx)
 CALL runSettleCycle(...)
 ```
 
-`IF` marks the taken branch only. Never render the untaken alternative, an
-`ELSE`, or a decision diamond.
+`IF` marks the taken branch only; never add an `ELSE`.
 
 ### Calls and results
 
@@ -415,27 +426,9 @@ Do not emit statement-level loop bookkeeping.
 
 Write `INPUT`, `CONTEXT`, and `TRACE` in English.
 
-Keep identifiers, strings, function names, method names, and source-level names
-exactly as they appear in source.
-
+Keep identifiers, function names, method names, and strings exactly as they
+appear in source.
 Respond in the user's language only in the chat reply.
-
 Omit source locations unless requested or needed to resolve ambiguity.
-
-## Verify before output
-
-Before emitting the trace, verify:
-
-- every concrete value traces to source, `INPUT`, `CONTEXT`, or an
-  `assumed:` entry, and path-critical gaps are `assumed:` or stop the
-  trace;
-- `TRACE` is chronological, cross-cycle handoffs are explicit, and no event
-  follows a call's terminal `RETURN`;
-- every `IF` names a condition on the taken path only, with no untaken
-  alternative, and every concrete operand traces to source, `INPUT`,
-  `CONTEXT`, or an `assumed:` entry;
-- the whole output is a single `text` fence, longer than any run of three
-  or more backticks, containing only the sections and `# iteration:` /
-  `# inferred:` lines.
 
 See `references/examples.md` for worked examples.
