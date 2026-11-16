@@ -16,7 +16,6 @@ import {
 import {
     __testReset,
     buildMissedTaskNotification,
-    legacyToStored,
 } from "../index.ts";
 
 // index.ts's file IO uses module state set via __testReset.
@@ -248,89 +247,7 @@ test("file IO: shape-invalid entries are preserved verbatim on write-back", asyn
     });
 });
 
-// ─── migration ────────────────────────────────────────────────────
-
-test("migration: v1 → v2 stamps recurring lastFiredAt (anti-herd) and is idempotent", async () => {
-    await withScratchRepoAsync(async (root) => {
-        const file = join(root, ".pi", "loop-tasks.json");
-        mkdirSync(join(root, ".pi"), { recursive: true });
-        const v1 = {
-            version: 1,
-            tasks: [
-                {
-                    id: "aabbccdd",
-                    cron: "*/5 * * * *",
-                    intervalMs: 300_000,
-                    prompt: "recurring job",
-                    createdAt: Date.now() - 60_000,
-                    lastFiredAt: Date.now() - 60_000,
-                    recurring: true,
-                },
-                {
-                    id: "11223344",
-                    cron: "0 9 * * *",
-                    intervalMs: 86_400_000,
-                    prompt: "one-shot job",
-                    createdAt: Date.now() - 120_000,
-                    lastFiredAt: Date.now() - 120_000,
-                    recurring: false,
-                },
-            ],
-        };
-        writeFileSync(file, JSON.stringify(v1));
-        const { migrateTaskFile } = await import("../index.ts");
-        await migrateTaskFile();
-
-        const migrated = JSON.parse(readFileSync(file, "utf8"));
-        assert.equal(migrated.version, 2);
-        const recurring = migrated.tasks.find((t: { id: string }) => t.id === "aabbccdd");
-        const oneShot = migrated.tasks.find((t: { id: string }) => t.id === "11223344");
-        assert.ok(recurring.lastFiredAt > Date.now() - 5000, "recurring lastFiredAt = now (no fire stampede)");
-        assert.equal(recurring.intervalMs, undefined, "legacy fields stripped");
-        assert.equal(recurring.paused, undefined);
-        assert.equal(recurring.failureCount, undefined);
-        assert.equal(oneShot.lastFiredAt, undefined, "one-shot keeps createdAt anchor");
-        assert.equal(oneShot.recurring, undefined);
-
-        // Second run is a no-op (already v2).
-        const before = readFileSync(file, "utf8");
-        await migrateTaskFile();
-        assert.equal(readFileSync(file, "utf8"), before);
-    });
-});
-
-test("migration: leaves corrupt files alone (read/mutate fail loudly later)", async () => {
-    await withScratchRepoAsync(async (root) => {
-        const file = join(root, ".pi", "loop-tasks.json");
-        mkdirSync(join(root, ".pi"), { recursive: true });
-        writeFileSync(file, "{broken");
-        const { migrateTaskFile } = await import("../index.ts");
-        await migrateTaskFile();
-        assert.equal(readFileSync(file, "utf8"), "{broken");
-    });
-});
-
-// ─── legacy conversion / missed detection ─────────────────────────
-
-test("legacyToStored converts v1 entries; recurring gets lastFiredAt=now", () => {
-    const now = Date.now();
-    const stored = legacyToStored({
-        id: "aabbccdd",
-        cron: "*/5 * * * *",
-        intervalMs: 300_000,
-        prompt: "x",
-        createdAt: now - 60_000,
-        recurring: true,
-        paused: true,
-        failureCount: 2,
-    });
-    assert.ok(stored);
-    assert.equal(stored.recurring, true);
-    assert.ok((stored.lastFiredAt ?? 0) >= now - 5000);
-    assert.equal("paused" in stored, false);
-    assert.equal("intervalMs" in stored, false);
-    assert.equal(legacyToStored({ id: "x" }), undefined);
-});
+// ─── missed detection ─────────────────────────────────────────────
 
 test("findMissedTasks: past one-shots only", () => {
     const now = Date.now();

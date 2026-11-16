@@ -7,7 +7,6 @@ import {
     mkdirSync,
     mkdtempSync,
     readFileSync,
-    existsSync,
     writeFileSync,
     rmSync,
 } from "node:fs";
@@ -18,9 +17,7 @@ import test from "node:test";
 import {
     errnoCode,
     isStoredTask,
-    legacyToStored,
     mutateTaskFile,
-    migrateTaskFile,
     readTaskFile,
     tasksFilePath,
 } from "../store.ts";
@@ -73,25 +70,22 @@ test("readTaskFile: malformed container throws", async () => {
     }
 });
 
-test("readTaskFile: shape-invalid entries survive in rest; v1 entries convert", async () => {
+test("readTaskFile: shape-invalid entries survive in rest", async () => {
     const root = scratch();
     try {
+        // Missing cron, so not a StoredTask: it must survive in rest, not vanish.
+        const noCron = { id: "def3abc4", prompt: "no cron", createdAt: 5 };
         writeFileSync(
             tasksFilePath(root),
-            JSON.stringify({
-                version: 2,
-                tasks: [
-                    T("abc1def2"),
-                    { garbage: true },
-                    { id: "def3abc4", cron: "0 9 * * *", prompt: "legacy", createdAt: 5 },
-                ],
-            }),
+            JSON.stringify({ version: 2, tasks: [T("abc1def2"), noCron, { garbage: true }] }),
             "utf8",
         );
         const { valid, rest } = await readTaskFile(root);
-        assert.equal(valid.length, 2);
-        assert.equal(valid[1].id, "def3abc4");
-        assert.deepEqual(rest, [{ garbage: true }]);
+        assert.deepEqual(
+            valid.map((t) => t.id),
+            ["abc1def2"],
+        );
+        assert.deepEqual(rest, [noCron, { garbage: true }]);
     } finally {
         cleanup(root);
     }
@@ -144,75 +138,10 @@ test("mutateTaskFile: mutator throwing does not write; error surfaces", async ()
     }
 });
 
-test("migrateTaskFile: missing and already-v2 files are no-ops", async () => {
-    const root = scratch();
-    try {
-        await migrateTaskFile(root); // no file: fine
-        assert.equal(existsSync(tasksFilePath(root)), false);
-        await mutateTaskFile(root, (tasks) => {
-            tasks.push(T("abc1def2"));
-        });
-        const before = readFileSync(tasksFilePath(root), "utf8");
-        await migrateTaskFile(root); // v2 already: byte-identical
-        assert.equal(readFileSync(tasksFilePath(root), "utf8"), before);
-    } finally {
-        cleanup(root);
-    }
-});
-
-test("migrateTaskFile: v1 file is rewritten as v2 with lastFiredAt stamped", async () => {
-    const root = scratch();
-    try {
-        writeFileSync(
-            tasksFilePath(root),
-            JSON.stringify({
-                version: 1,
-                tasks: [
-                    {
-                        id: "def3abc4",
-                        cron: "0 9 * * *",
-                        prompt: "legacy",
-                        createdAt: 5,
-                        recurring: true,
-                        intervalMs: 60_000,
-                        failureCount: 2,
-                    },
-                ],
-            }),
-            "utf8",
-        );
-        await migrateTaskFile(root);
-        const { valid } = await readTaskFile(root);
-        assert.equal(valid.length, 1);
-        assert.equal(valid[0].recurring, true);
-        assert.ok(typeof valid[0].lastFiredAt === "number");
-        assert.ok(!("intervalMs" in valid[0]));
-        assert.ok(!("failureCount" in valid[0]));
-    } finally {
-        cleanup(root);
-    }
-});
-
-test("isStoredTask / legacyToStored: strict shape, defensive conversion", () => {
+test("isStoredTask: strict shape", () => {
     assert.equal(isStoredTask(T("abc1def2")), true);
     assert.equal(isStoredTask({ garbage: true }), false);
     assert.equal(isStoredTask({ ...T("abc1def2"), createdAt: "x" }), false);
-
-    const converted = legacyToStored({ ...T("def3abc4"), recurring: true });
-    assert.ok(converted);
-    // lastFiredAt is stamped to Date.now(); assert only its type so the
-    // assertion cannot race a millisecond boundary against itself.
-    assert.equal(typeof converted.lastFiredAt, "number");
-    const { lastFiredAt: _stampedAt, ...remainder } = converted;
-    assert.deepEqual(remainder, {
-        id: "def3abc4",
-        cron: "*/5 * * * *",
-        prompt: "p-def3abc4",
-        createdAt: 1_000,
-        recurring: true,
-    });
-    assert.equal(legacyToStored({ id: "x" }), undefined);
-    assert.equal(legacyToStored({ ...T("x"), cron: 5 }), undefined);
 });
 
 test("errnoCode: errno surfaces from fs errors", async () => {
@@ -236,7 +165,7 @@ test("errnoCode: errno surfaces from fs errors", async () => {
 test("readTaskFile: null and primitive entries land in rest, never throw", async () => {
     const root = scratch();
     try {
-        // Externally edited file: null / numbers are not legacy candidates.
+        // Externally edited file: nulls and numbers are not StoredTasks.
         writeFileSync(
             tasksFilePath(root),
             JSON.stringify({ version: 2, tasks: [null, 42, T("abc1def2")] }),

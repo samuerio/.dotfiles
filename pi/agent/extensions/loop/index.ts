@@ -21,7 +21,7 @@
  *   session entry ("✻ Running scheduled task ..."). Fires only while
  *   the session is idle; busy → deferred to a later tick, never lost.
  * - Storage split: durable:false lives in a process Map and dies with
- *   the session; durable:true lives in .pi/loop-tasks.json (version 2).
+ *   the session; durable:true lives in .pi/loop-tasks.json.
  * - Two independent locks, mirroring claude's split:
  *     owner lease (.pi/loop-tasks.lock, identity + PID liveness)
  *       decides WHO fires durable tasks;
@@ -35,10 +35,10 @@
  * create lost to a racing read-modify-write is overwritten
  * (last-write-wins). Both are documented in the spec.
  * - File layout: store.ts owns task-file persistence (tolerant read,
- *   verified atomic write, v1→v2 migration); owner-lease.ts owns the
- *   scheduler owner lease (identity lock + PID liveness); cron.ts the
- *   cron grammar; renderers.ts the tool renderers. This file keeps the
- *   tick scheduler, injection carrier, tools, and registration.
+ *   verified atomic write); owner-lease.ts owns the scheduler owner
+ *   lease (identity lock + PID liveness); cron.ts the cron grammar;
+ *   renderers.ts the tool renderers. This file keeps the tick
+ *   scheduler, injection carrier, tools, and registration.
  */
 
 import { randomBytes } from "node:crypto";
@@ -74,14 +74,11 @@ import {
 } from "./renderers.ts";
 import {
     messageOf,
-    migrateTaskFile as migrateTaskFileAt,
     mutateTaskFile as mutateTaskFileAt,
     readTaskFile as readTaskFileAt,
     type ReadResult,
 } from "./store.ts";
 import type { LoopEnv, StoredTask } from "./types.ts";
-
-export { legacyToStored } from "./store.ts";
 
 // ─── Constants ────────────────────────────────────────────────────
 
@@ -218,10 +215,10 @@ async function probeRepoRoot(cwd: string): Promise<string> {
 
 /**
  * The storage logic itself lives in store.ts (task file: tolerant read,
- * verified atomic write, v1→v2 migration) and owner-lease.ts (scheduler
- * owner lease). These shims keep the existing call signatures: env.repoRoot
- * is read at CALL time so __testReset can redirect the module to a scratch
- * directory, and the tests keep importing from index.ts.
+ * verified atomic write) and owner-lease.ts (scheduler owner lease).
+ * These shims keep the existing call signatures: env.repoRoot is read at
+ * CALL time so __testReset can redirect the module to a scratch directory,
+ * and the tests keep importing from index.ts.
  */
 
 /** Tolerant read: shape-valid entries + unparseable originals preserved. */
@@ -234,11 +231,6 @@ export async function mutateTaskFile(
     mutator: (tasks: StoredTask[], rest: unknown[]) => void,
 ): Promise<boolean> {
     return mutateTaskFileAt(env!.repoRoot, mutator);
-}
-
-/** v1 → v2 migration (idempotent; runs on session_start). */
-export async function migrateTaskFile(): Promise<void> {
-    return migrateTaskFileAt(env!.repoRoot);
 }
 
 /** Drop every task whose id is in `ids` in a single write (no-op when
@@ -902,15 +894,6 @@ export default function (pi: ExtensionAPI) {
 
         if (!env) {
             env = { repoRoot: await probeRepoRoot(ctx.cwd) };
-        }
-
-        // Migration is idempotent and cheap; run it in every mode. The
-        // scheduler itself stays interactive-only.
-        try {
-            await migrateTaskFile();
-        } catch (error) {
-            safeNotify(ctx, `[loop] task file migration failed: ${messageOf(error)}`, "error");
-            console.error("[loop] migration failed:", error);
         }
 
         if (ctx.mode !== "tui") return; // no scheduler, no lock, no injection
