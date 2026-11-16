@@ -1,63 +1,63 @@
 {
-  "version": 1,
-  "currentMode": "smart",
-  "modes": {
-    "default": {
-      "roles": {
-        "main": {
-          "provider": "deepseek",
-          "modelId": "deepseek-flash",
-          "thinkingLevel": "high"
+    "version": 1,
+    "currentMode": "smart",
+    "modes": {
+        "default": {
+            "roles": {
+                "main": {
+                    "provider": "deepseek",
+                    "modelId": "deepseek-flash",
+                    "thinkingLevel": "high"
+                },
+                "oracle": {
+                    "provider": "deepseek",
+                    "modelId": "deepseek-flash",
+                    "thinkingLevel": "high"
+                },
+                "subagents": {
+                    "provider": "deepseek",
+                    "modelId": "deepseek-flash",
+                    "thinkingLevel": "high"
+                }
+            }
         },
-        "oracle": {
-          "provider": "deepseek",
-          "modelId": "deepseek-flash",
-          "thinkingLevel": "high"
+        "rush": {
+            "roles": {
+                "main": {
+                    "provider": "engy",
+                    "modelId": "deepseek-v4.1-flash",
+                    "thinkingLevel": "high"
+                },
+                "oracle": {
+                    "provider": "engy",
+                    "modelId": "qwen3.8-27b",
+                    "thinkingLevel": "high"
+                },
+                "subagents": {
+                    "provider": "engy",
+                    "modelId": "deepseek-v4.1-flash",
+                    "thinkingLevel": "high"
+                }
+            }
         },
-        "subagents": {
-          "provider": "deepseek",
-          "modelId": "deepseek-flash",
-          "thinkingLevel": "high"
+        "smart": {
+            "roles": {
+                "main": {
+                    "provider": "opencode-go",
+                    "modelId": "deepseek-v4.1-flash",
+                    "thinkingLevel": "high"
+                },
+                "oracle": {
+                    "provider": "opencode-go",
+                    "modelId": "deepseek-v4.1-flash",
+                    "thinkingLevel": "high"
+                },
+                "subagents": {
+                    "provider": "opencode-go",
+                    "modelId": "deepseek-v4.1-flash",
+                    "thinkingLevel": "high"
+                }
+            }
         }
-      }
-    },
-    "rush": {
-      "roles": {
-        "main": {
-          "provider": "engy",
-          "modelId": "deepseek-v4.1-flash",
-          "thinkingLevel": "high"
-        },
-        "oracle": {
-          "provider": "engy",
-          "modelId": "qwen3.8-27b",
-          "thinkingLevel": "high"
-        },
-        "subagents": {
-          "provider": "engy",
-          "modelId": "deepseek-v4.1-flash",
-          "thinkingLevel": "high"
-        }
-      }
-    },
-    "smart": {
-      "roles": {
-        "main": {
-          "provider": "opencode-go",
-          "modelId": "glm-5.3-flash",
-          "thinkingLevel": "high"
-        },
-        "oracle": {
-          "provider": "opencode-go",
-          "modelId": "deepseek-v4.1-flash",
-          "thinkingLevel": "high"
-        },
-        "subagents": {
-          "provider": "opencode-go",
-          "modelId": "deepseek-v4.1-flash",
-          "thinkingLevel": "high"
-        }
-      }
     }
-  }
 }

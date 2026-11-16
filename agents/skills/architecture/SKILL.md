@@ -55,6 +55,6 @@ Include only units that own control flow, enforce an error boundary, or can be r
 
 After writing the file, use this exact phrasing:
 
-> Architecture saved — run `code [output-path] &` to review.
+> Architecture saved — run `nvim [output-path]` to open the file, then use the `:MarkdownPreview` command to preview it.
 
 > All prose in **Simplified Chinese**; file paths, section headings, Mermaid node IDs, and code identifiers in **English**.
