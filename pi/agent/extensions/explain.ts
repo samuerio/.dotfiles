@@ -111,12 +111,7 @@ const ACTION_VALUES = ACTIONS.map((a) => a.value).join(", ");
 // ─── Prompt construction ─────────────────────────────────────────
 
 function buildPrompt(action: ExplainAction, targetArgs: string): string {
-	const target = targetArgs.trim();
-	const targetRule = target
-		? `**Target parsing**\n- Target: ${target}`
-		: "**Target parsing**\n- Infer the target from the conversation context. If unclear, ask the user one concise clarifying question.";
-
-	return `${targetRule}\n\n**Output rules**\n- Respond in Chinese.\n\n${action.prompt}`;
+	return [targetArgs.trim(), action.prompt].filter(Boolean).join("; ");
 }
 
 // ─── Argument parsing ────────────────────────────────────────────
