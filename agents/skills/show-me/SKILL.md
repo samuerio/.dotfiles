@@ -30,6 +30,26 @@ renderer requests a live chat
           └── live AgentSession returned to caller
 ```
 
+- Show what happens in order and what each step changes: `│ ▼` for time, `├─` for
+  same-step effects, `├─ if <condition> → <event>` for forks (one event per outcome,
+  never a nested `▼`), every event is exactly one of `CALL` / `MUTATE` / `SIDE EFFECT` /
+  `RETURN`, and anything that is not an event goes after `#` on the line it belongs to.
+
+```text
+CALL handleSave(payload)
+  │
+  ├─ if content unchanged → RETURN cached result  # skips write + notify
+  │
+  ▼
+MUTATE cache entry "draft-3": stale → fresh
+  │
+  ├─ SIDE EFFECT write content to disk
+  ├─ SIDE EFFECT notify editors
+  │
+  ▼
+RETURN renderer shows saved state
+```
+
 - Show UI structure as a component tree, including state and module boundaries that matter.
   Write sibling nodes as `<A> + <B>`. Only layers that own state, hotkeys, or callbacks
   carry a block; pure render nodes stay bare.
