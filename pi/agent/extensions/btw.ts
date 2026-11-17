@@ -382,6 +382,40 @@ const threadTools = new WeakMap<BtwDetails, ToolCallInfo[]>();
 const pendingToolCache = new Map<string, PendingToolCacheEntry>();
 const mdTheme = getMarkdownTheme();
 
+/** One in-flight side turn. Cancelling only flips the flag; settleRun awaits the
+ * tail so a stale run can never write into the next turn's state. */
+type SideRun = { cancelled: boolean; done: Promise<void> };
+
+/** Module scope, like the pending state above: after ctx.reload() a run started
+ * by a previous module instance must still be recognisable and cancellable. */
+let activeRun: SideRun | null = null;
+
+/** Synchronously invalidate the in-flight turn; returns the token for settling. */
+function cancelActiveRun(): SideRun | null {
+	const run = activeRun;
+	if (!run) {
+		return null;
+	}
+	run.cancelled = true;
+	return run;
+}
+
+/** Wait for an invalidated turn's async tail (catch/finally) to finish without
+ * touching an activeRun that a newer turn may already own. */
+async function settleRun(run: SideRun | null): Promise<void> {
+	if (!run) {
+		return;
+	}
+	try {
+		await run.done;
+	} catch {
+		// executeTurn owns error reporting; the tail only needs to be awaited.
+	}
+	if (activeRun === run) {
+		activeRun = null;
+	}
+}
+
 /** Drop the in-flight turn: question, stream, error, thinking and tool state. */
 function resetPendingTurn(): void {
 	pendingQuestion = null;
@@ -446,6 +480,7 @@ function notify(ctx: ExtensionContext | ExtensionCommandContext, message: string
 /** Status-row tone: idle is muted, a failure is an error, anything in flight warns. */
 function statusColor(status: string): "dim" | "error" | "warning" {
 	if (status.startsWith("Ready")) return "dim";
+	if (status.includes("cancelled")) return "dim";
 	if (status.includes("failed")) return "error";
 	return "warning";
 }
@@ -577,7 +612,7 @@ class BtwOverlay extends Container implements Focusable {
 		const status = this.getStatus();
 		const header = this.theme.bold(this.theme.fg("accent", "BTW side chat"));
 		const followState = this.scroll.isFollowingEnd ? "following" : "scrolled";
-		const hint = `Enter submit · Esc close · ctrl+u/d page · ctrl+o view: ${transcriptDetail} · ${followState}`;
+		const hint = `Enter submit · Esc close/cancel · ctrl+u/d page · ctrl+o view: ${transcriptDetail} · ${followState}`;
 		// Budgeted to columns: an overflowing hint would clip into the right pad
 		// column inside fillViewport and end flush against the terminal edge.
 		const hintLine = this.theme.fg("dim", truncateToWidth(hint, columns, "…"));
@@ -653,7 +688,7 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	function getTranscriptLinesInner(width: number, theme: BtwTheme): string[] {
-		if (thread.length === 0 && !pendingQuestion && !pendingAssistant && !pendingError) {
+		if (thread.length === 0 && !pendingQuestion) {
 			return [theme.fg("dim", "No BTW messages yet. Type a question below.")];
 		}
 
@@ -742,29 +777,25 @@ export default function (pi: ExtensionAPI) {
 		overlayRuntime?.setDraft?.(value);
 	}
 
-	async function disposeSideSession(): Promise<void> {
-		const current = activeSideSession;
-		activeSideSession = null;
-		if (!current) {
-			return;
-		}
-
+	/** Reclaim one side session instance: unsubscribed before the abort so no
+	 * event can reach the pending state while the abort drains. */
+	async function disposeRuntime(runtime: SideSessionRuntime): Promise<void> {
 		try {
-			current.unsubscribe();
+			runtime.unsubscribe();
 		} catch {
 			// Ignore unsubscribe errors during cleanup.
 		}
 
 		try {
-			await current.session.abort();
+			await runtime.session.abort();
 		} catch {
 			// Ignore abort errors during cleanup.
 		}
-		current.session.dispose();
+		runtime.session.dispose();
 
-		if (current.sideFile) {
+		if (runtime.sideFile) {
 			try {
-				rmSync(current.sideFile, { force: true });
+				rmSync(runtime.sideFile, { force: true });
 			} catch {
 				// Ignore fork-file cleanup errors (tmpdir, best effort).
 			}
@@ -776,25 +807,40 @@ export default function (pi: ExtensionAPI) {
 		}
 	}
 
+	async function disposeSideSession(): Promise<void> {
+		const current = activeSideSession;
+		activeSideSession = null;
+		if (current) {
+			await disposeRuntime(current);
+		}
+	}
+
 	async function resetThread(): Promise<void> {
+		// Invalidate first: the abort below is what makes an in-flight prompt settle,
+		// and its tail must already be ignored by the time it does.
+		const dying = cancelActiveRun();
 		thread = [];
 		resetPendingTurn();
 		sideBusy = false;
 		setOverlayDraft("");
 		setOverlayStatus("Ready");
 		await disposeSideSession();
+		// The reset entry below must not race the abandoned turn's tail.
+		await settleRun(dying);
 		const details: BtwResetDetails = { timestamp: Date.now() };
 		pi.appendEntry(BTW_RESET_TYPE, details);
 		syncOverlay();
 	}
 
 	async function restoreThread(ctx: ExtensionContext): Promise<void> {
+		const dying = cancelActiveRun();
 		await disposeSideSession();
+		await settleRun(dying);
 		thread = [];
 		resetPendingTurn();
 		sideBusy = false;
-		overlayStatus = "Ready";
-		overlayDraft = "";
+		setOverlayStatus("Ready");
+		setOverlayDraft("");
 		const branch = ctx.sessionManager.getBranch();
 		let lastResetIndex = -1;
 		for (let i = 0; i < branch.length; i++) {
@@ -1007,7 +1053,7 @@ export default function (pi: ExtensionAPI) {
 	 * conversation's content moved, so a follow-up within one snapshot reuses the
 	 * side session and keeps its tool results.
 	 */
-	async function ensureSideSession(ctx: ExtensionCommandContext): Promise<SideSessionRuntime | null> {
+	async function ensureSideSession(ctx: ExtensionCommandContext, run: SideRun): Promise<SideSessionRuntime | null> {
 		if (!ctx.model) {
 			return null;
 		}
@@ -1017,9 +1063,28 @@ export default function (pi: ExtensionAPI) {
 			return activeSideSession;
 		}
 
-		await disposeSideSession();
-		activeSideSession = await createSideSession(ctx, contentLeafId);
-		return activeSideSession;
+		// Everything below works on local references: a cancel landing inside the
+		// fork / createAgentSession window must not leave a live session or a fork
+		// file attached to no owner.
+		const stale = activeSideSession;
+		activeSideSession = null;
+		if (stale) {
+			await disposeRuntime(stale);
+		}
+		if (run.cancelled) {
+			return null;
+		}
+
+		const created = await createSideSession(ctx, contentLeafId);
+		if (!created) {
+			return null;
+		}
+		if (run.cancelled) {
+			await disposeRuntime(created);
+			return null;
+		}
+		activeSideSession = created;
+		return created;
 	}
 
 	async function ensureOverlay(ctx: ExtensionCommandContext): Promise<void> {
@@ -1163,8 +1228,16 @@ export default function (pi: ExtensionAPI) {
 		}
 
 		setOverlayStatus("Summarizing BTW thread for injection...");
+		// Snapshot: the thread can be reset by a new turn while the summary streams.
+		const items = thread;
 		try {
-			const summary = await summarizeThread(ctx, thread);
+			const summary = await summarizeThread(ctx, items);
+			if (sideBusy) {
+				// A new side question started meanwhile; injecting would reset the
+				// thread and abort it, so leave both untouched.
+				notify(ctx, "BTW is processing a new question; injection skipped.", "warning");
+				return;
+			}
 			const message = `Summary of my BTW side conversation:\n\n${summary}`;
 			if (ctx.isIdle()) {
 				pi.sendUserMessage(message);
@@ -1179,13 +1252,57 @@ export default function (pi: ExtensionAPI) {
 		}
 	}
 
+	/** Single flight: a second Esc must not stack dialogs or cancel twice. Only
+	 * covers the synchronous teardown below; any await releases it, because a
+	 * closed view must never swallow a later Esc. */
+	let overlayClosing = false;
+
 	async function closeOverlayFlow(ctx: ExtensionContext | ExtensionCommandContext): Promise<void> {
-		dismissOverlay();
-		if (!ctx.hasUI) {
+		if (overlayClosing) {
 			return;
 		}
+		overlayClosing = true;
 
-		if (thread.length === 0) {
+		// A finished answer (the streaming message already recorded "stop") is
+		// kept: the turn commits itself, only the view closes.
+		const answerComplete = sideBusy && pendingAssistant?.stopReason === "stop";
+		const dying = answerComplete ? null : cancelActiveRun();
+		const cancelledQuestion = dying ? pendingQuestion : null;
+
+		try {
+			// runtime.close() copies the typed draft into overlayDraft before the
+			// overlay is torn down, so the check below sees the real draft.
+			dismissOverlay();
+
+			if (dying) {
+				if (!overlayDraft.trim() && cancelledQuestion) {
+					setOverlayDraft(cancelledQuestion);
+				}
+				sideBusy = false;
+				resetPendingTurn();
+				overlayStatus = "Side request cancelled.";
+				// The abort can wait on the side session's auto-compaction, so it must
+				// never block the Esc path. disposeSideSession() unsubscribes
+				// synchronously, so no late event can reach the pending state.
+				void (async () => {
+					try {
+						await disposeSideSession();
+					} catch (error) {
+						// Teardown must not surface as an unhandled rejection in the
+						// fire-and-forget path; the tail still has to be settled.
+						console.warn(`BTW: side session teardown failed (${error instanceof Error ? error.message : String(error)})`);
+					} finally {
+						await settleRun(dying);
+					}
+				})();
+			}
+		} finally {
+			// Released before the first await: the select dialog and the summary
+			// round-trip are both long, and Esc during them must still work.
+			overlayClosing = false;
+		}
+
+		if (!ctx.hasUI || thread.length === 0) {
 			return;
 		}
 
@@ -1215,29 +1332,76 @@ export default function (pi: ExtensionAPI) {
 			notify(ctx, "BTW is still processing the previous message.", "warning");
 			return;
 		}
+		// The view can be dismissed while the auth round-trip above is pending; a
+		// submit from a closed view must not start an invisible turn.
+		if (!overlayRuntime) {
+			return;
+		}
 		// Claim the busy slot before the first await: ensureSideSession disposes the
 		// previous side session, so a second submit inside that window would abort
 		// the in-flight prompt.
 		sideBusy = true;
+		const run: SideRun = { cancelled: false, done: Promise.resolve() };
+		// Start in a microtask so activeRun is set before any run code executes.
+		run.done = Promise.resolve().then(() => executeTurn(ctx, question, model, run));
+		activeRun = run;
 
 		try {
-			const side = await ensureSideSession(ctx);
+			await run.done;
+		} catch {
+			// executeTurn owns error reporting; the shell only manages busy state.
+		} finally {
+			if (activeRun === run) {
+				activeRun = null;
+				sideBusy = false;
+				syncOverlay();
+			}
+		}
+	}
+
+	async function executeTurn(
+		ctx: ExtensionCommandContext,
+		question: string,
+		model: NonNullable<ExtensionCommandContext["model"]>,
+		run: SideRun,
+	): Promise<void> {
+		try {
+			resetPendingTurn();
+			// Written synchronously: the panel shows the question while the side
+			// session is still forking, and a cancel always has a question to restore.
+			pendingQuestion = question;
+			setOverlayStatus("Streaming side response...");
+
+			const side = await ensureSideSession(ctx, run);
+			if (run.cancelled) {
+				return;
+			}
 			if (!side) {
 				notify(ctx, "Unable to create BTW side session.", "error");
 				return;
 			}
 
-			resetPendingTurn();
-			pendingQuestion = question;
-			setOverlayStatus("Streaming side response...");
-
 			await side.session.prompt(question, { source: "extension" });
+			// First statement after the prompt: the session may already be disposed,
+			// so nothing may be read from it before this check.
+			if (run.cancelled) {
+				return;
+			}
+
 			const response = getLastAssistantMessage(side.session);
+			if (response?.stopReason === "aborted") {
+				// Cancellation is not an error: no notify, no thread entry, no entry
+				// append, no pendingError.
+				if (activeRun === run) {
+					// An abort we did not initiate still ends this turn: drop the pending
+					// state so it cannot linger as a phantom in-flight question.
+					resetPendingTurn();
+					setOverlayStatus("Side request cancelled.");
+				}
+				return;
+			}
 			if (!response) {
 				throw new Error("BTW request finished without a response.");
-			}
-			if (response.stopReason === "aborted") {
-				throw new Error("BTW request aborted.");
 			}
 			if (response.stopReason === "error") {
 				throw new Error(response.errorMessage || "BTW request failed.");
@@ -1263,6 +1427,10 @@ export default function (pi: ExtensionAPI) {
 			resetPendingTurn();
 			setOverlayStatus("Ready for the next side question.");
 		} catch (error) {
+			// An invalidated turn must never touch the next turn's pending state.
+			if (run.cancelled) {
+				return;
+			}
 			const message = error instanceof Error ? error.message : String(error);
 			pendingError = message;
 			// Keep which calls ran (frozen as errored) for the error view; drop
@@ -1272,9 +1440,6 @@ export default function (pi: ExtensionAPI) {
 			pendingToolCache.clear();
 			setOverlayStatus(wrapPlain(message, 60)[0] ?? "BTW request failed.");
 			notify(ctx, message, "error");
-		} finally {
-			sideBusy = false;
-			syncOverlay();
 		}
 	}
 
@@ -1310,7 +1475,9 @@ export default function (pi: ExtensionAPI) {
 					}
 					// null = user cancelled (Esc), do nothing
 				} else {
-					await resetThread();
+					// Nothing to reset here: the thread is already empty (first open, or
+					// a turn that was just cancelled), and resetThread() would discard
+					// the question a cancel restored into the draft.
 					setOverlayStatus("Ready");
 					await ensureOverlay(ctx);
 				}
@@ -1331,7 +1498,9 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("session_shutdown", async () => {
+		const dying = cancelActiveRun();
 		await disposeSideSession();
+		await settleRun(dying);
 		dismissOverlay();
 	});
 }
