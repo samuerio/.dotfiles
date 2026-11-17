@@ -113,6 +113,11 @@ sequenceDiagram
     Daemon-->>UI: stream result
 ```
 
+- Only add a mermaid.live preview link when the user explicitly asks. Run
+  `node {baseDir}/scripts/mermaid-live.mjs diagram.mmd` (stdin also works) and append the
+  printed URL verbatim as `Preview: [mermaid.live](<url>)`. Only the URL goes to stdout; a
+  surrounding mermaid code fence is unwrapped automatically.
+
 - Use `diff` when the point is what changes and the surrounding shape already exists. Match the diff shape to the topic.
 
 For a component change:
