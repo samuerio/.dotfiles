@@ -72,9 +72,8 @@ function widgetLines(): string[] {
         if (!entry.task) continue;
         const run = latestRun(entry.id);
         if (!run || !isActive(run.effective)) continue;
-        const mark = run.effective === "orphan" ? "orphan" : run.effective;
         lines.push(
-            `schedule: ${entry.task.name} [${run.metadata.trigger}] ${mark} ${elapsedSince(run.metadata.startedAt)}`,
+            `schedule: ${entry.task.name} [${run.metadata.trigger}] ${run.effective} ${elapsedSince(run.metadata.startedAt)}`,
         );
     }
     return lines;

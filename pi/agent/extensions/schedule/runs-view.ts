@@ -321,14 +321,16 @@ function agoText(iso: string | undefined): string {
     const delta = Date.now() - at;
     const past = delta >= 0;
     const seconds = Math.abs(delta) / 1000;
-    const unit =
-        seconds < 60
-            ? `${Math.round(seconds)}s`
-            : seconds < 3600
-              ? `${Math.round(seconds / 60)}m`
-              : seconds < 86400
-                ? `${Math.round(seconds / 3600)}h`
-                : `${Math.round(seconds / 86400)}d`;
+    let unit: string;
+    if (seconds < 60) {
+        unit = `${Math.round(seconds)}s`;
+    } else if (seconds < 3600) {
+        unit = `${Math.round(seconds / 60)}m`;
+    } else if (seconds < 86400) {
+        unit = `${Math.round(seconds / 3600)}h`;
+    } else {
+        unit = `${Math.round(seconds / 86400)}d`;
+    }
     return past ? `${unit} ago` : `in ${unit}`;
 }
 
@@ -423,6 +425,19 @@ export function missedSince(
     now = new Date(),
 ): Date | undefined {
     if (!task.enabled) return undefined;
+    // A one-shot task that already had its own scheduled run owes nothing
+    // further. Without this, a daily `--once` task reports `missed` from the
+    // second day on: its newest run's `startedAt` keeps receding and the slots
+    // after it are all outside the catch-up window. The check spans every run,
+    // not just the newest: a manual re-run after the scheduled one becomes the
+    // newest run and must not revive `missed` (NEXT is already `—` there).
+    // A manual run *before* the slot still leaves the slot owed.
+    if (task.once) {
+        const scheduled = newest?.metadata.trigger === "scheduled"
+            ? newest
+            : listRuns(task.id).find((run) => run.metadata.trigger === "scheduled");
+        if (scheduled) return undefined;
+    }
     if (newest && suppressesMissed(newest.effective)) return undefined;
     const base = newest ? Date.parse(newest.metadata.startedAt) : Date.parse(task.createdAt);
     if (!Number.isFinite(base)) return undefined;
@@ -538,12 +553,10 @@ export function taskRowLines(rows: ListRow[]): string[] {
     });
     const widest = (pick: (cell: (typeof cells)[number]) => string): number =>
         Math.max(0, ...cells.map((cell) => displayWidth(pick(cell))));
-    const [idWidth, nameWidth, scheduleWidth, lastWidth] = [
-        widest((cell) => cell.id),
-        widest((cell) => cell.name),
-        widest((cell) => cell.schedule),
-        widest((cell) => cell.last),
-    ];
+    const idWidth = widest((cell) => cell.id);
+    const nameWidth = widest((cell) => cell.name);
+    const scheduleWidth = widest((cell) => cell.schedule);
+    const lastWidth = widest((cell) => cell.last);
     // The tail cell (next or cwd) is last, so it needs no padding; trimEnd drops
     // its trailing spaces when the batch is empty.
     return cells.map((cell) =>

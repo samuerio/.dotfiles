@@ -157,6 +157,49 @@ describe("NEXT", () => {
         assert.equal(listRow.missed, true);
     });
 
+    test("a once task whose scheduled run happened is not missed", () => {
+        const task = makeTask({ cron: "0 9 * * *", once: true, createdAt: at(6, 8, 0) });
+        writeRun(task.id, "20261106-090000", { startedAt: at(6, 9, 0).toISOString() });
+        writeWatermark(task.id, at(6, 9, 0).toISOString());
+
+        // Two days later the run's own startedAt is far behind, so an
+        // unconditioned missed calculation would blame the schedule forever.
+        const listRow = row(task.id, at(8, 12, 0));
+        assert.equal(listRow.next, "—");
+        assert.equal(listRow.missed, false);
+        assert.match(listRow.last, /^exited \(code 0\) · /);
+    });
+
+    test("a manual re-run after the scheduled run does not revive missed", () => {
+        const task = makeTask({ cron: "0 9 * * *", once: true, createdAt: at(6, 8, 0) });
+        writeRun(task.id, "20261106-090000", { startedAt: at(6, 9, 0).toISOString() });
+        // The dispatch advanced the watermark, which is what makes NEXT `—`.
+        writeWatermark(task.id, at(6, 9, 0).toISOString());
+        // `schedule run <id>` after consumption: the newest run is manual, but
+        // the scheduled slot was already consumed, so `NEXT —` and `missed`
+        // cannot disagree.
+        writeRun(task.id, "20261107-120000", {
+            startedAt: at(7, 12, 0).toISOString(),
+            trigger: "manual",
+        });
+        const listRow = row(task.id, at(9, 12, 0));
+        assert.equal(listRow.next, "—");
+        assert.equal(listRow.missed, false);
+        assert.match(listRow.last, /^exited \(code 0\) · /);
+    });
+
+    test("a manual run does not count as the once slot being consumed", () => {
+        const task = makeTask({ cron: "0 9 * * *", once: true, createdAt: at(6, 8, 0) });
+        writeRun(task.id, "20261106-100000", {
+            startedAt: at(6, 10, 0).toISOString(),
+            trigger: "manual",
+        });
+        // The 11-07 09:00 slot was never run: only a scheduled trigger consumes.
+        const listRow = row(task.id, at(8, 12, 0));
+        assert.equal(listRow.missed, true);
+        assert.match(listRow.last, /^missed · /);
+    });
+
     test("an unschedulable cron renders `invalid`", () => {
         const task = makeTask({ cron: "0 0 30 2 *", createdAt: at(6, 11, 0) });
         const listRow = row(task.id, at(6, 12, 20));

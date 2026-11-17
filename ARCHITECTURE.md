@@ -27,7 +27,7 @@ mtime 陈旧判定做多会话调度权互斥，claim-then-dispatch 毫秒级关
 `schedule`（cron 调度 + headless 执行：任务定义存 `pi/agent/schedule/tasks/*.json`，prompt 正文内联其中
 （`--prompt-file` 只在 add/set-prompt 时读一次、路径不落盘，任务因此自包含），OS crontab 每分钟跑
 `schedule tick`，到期任务以非递归 `mkdir` 原子 claim 后派生 detached helper，由它启动
-`pi -p --approve --provider … --model … --thinking … --session <runDir>/session.jsonl -- @<runDir>/prompt.md`
+`pi -p --approve [--provider … --model … [--thinking …]] --name schedule:<id> --session <runDir>/session.jsonl -- @<runDir>/prompt.md`
 （模型 pin 在派发时从 `modes[currentMode].roles.subagents` 解析，任务本身不存模型）并负责 30 分钟墙钟超时
 （SIGTERM → 10s → SIGKILL 进程组）与两段式 metadata 状态机；调度锚点是 tick 独占的
 `runs/<id>/state.json` watermark（dispatched 与 missed 都消耗 slot），占用判定走 effectiveState
@@ -60,14 +60,16 @@ ctrl+o 预览子类封装（pickSession），供 `worktree-task` 挑选会话；
 （merge base、分支/提交列表、PR checkout）+ preset 选择器（可选附加项）+ 直参解析，
 供 `review` 与 `security-review` 共用，两命令各自持有 rubric 与会话机制）。
 pi 只把 `extensions/*.ts` 顶层文件与含 `index.ts` 的子目录
-识别为扩展，`lib/` 子目录不会被自动加载；`extensions/schedule/` 是当前唯一「含 `index.ts` 而被自动加载」
-的子目录，同目录下的 `cron.ts`/`slots.ts`/`store.ts`/`run.ts`/`routing.ts`/`runs-view.ts`/`cli.ts`/`tick.ts` 不是扩展。
+识别为扩展，`lib/` 子目录不会被自动加载；`extensions/schedule/` 与 `extensions/loop/` 都是「含
+`index.ts` 而被自动加载」的子目录，schedule 同目录下的
+`cron.ts`/`slots.ts`/`store.ts`/`run.ts`/`routing.ts`/`runs-view.ts`/`cli.ts`/`tick.ts` 不是扩展。
 
 **Architecture Invariant:** 扩展只能调用 pi 公开的 ExtensionAPI 与事件钩子，禁止直接操作 pi 内部状态。
 
 **Architecture Invariant:** `extensions/schedule/` 下的 `cron.ts`/`slots.ts`/`store.ts`/`run.ts`/`routing.ts`/`runs-view.ts`/`cli.ts`/`tick.ts` 只能 import
-node 标准库，禁止 import `@earendil-works/*` 或其它扩展：这些文件由 crontab 里的 `node` 直接执行，
-pi 的扩展加载器不在场，裸包名解析不到。该目录只有 `index.ts`（自动加载入口）允许 import pi 包。
+node 标准库与同目录模块，禁止 import `@earendil-works/*` 或其它目录的扩展：这些文件由 crontab
+里的 `node` 直接执行，pi 的扩展加载器不在场，裸包名解析不到。该目录只有 `index.ts`（自动加载
+入口）允许 import pi 包。
 
 ### `pi/agent/`
 
@@ -83,8 +85,9 @@ agent 全局设置（不再使用 `packages` 声明第三方扩展包）；子�
 （`bin/` 被 `pi/.gitignore` 忽略）。`schedule` CLI 不属于这里：它由
 `extensions/schedule/install.sh` 软链到 `/usr/local/bin/schedule`（需 root，脚本自行给出 `sudo` 命令），
 因此不在仓库内、也不在 `~/.pi/agent/bin` 里。`schedule/tasks/*.json` 是任务定义，但 `cwd` 是绝对路径、
-跨机不可复用，因此与 `schedule/runs/`（含 watermark `state.json`）、`schedule/tick.log`、
-`schedule/crontab.bak` 一样属于本机运行产物，已 gitignore。
+跨机不可复用，因此与 `schedule/runs/`（含 watermark `state.json` 与 tick.log 去重标记
+`notice.json`）、`schedule/tick.log`（轮转为 `tick.log.1`）、`schedule/crontab.bak`
+一样属于本机运行产物，已 gitignore。
 
 **API Boundary:** `models.json` 是 provider/模型清单的唯一来源，扩展不直接读取；`modes.json` 由 `prompt-editor` 扩展
 提供 TUI 编辑入口，运行时与扩展共享读写。子代理运行时与 session 查看工具均为本地 `extensions/`

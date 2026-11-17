@@ -12,7 +12,7 @@
 #   ./install.sh --uninstall  remove that link
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 SOURCE="${SCRIPT_DIR}/cli.ts"
 TARGET="/usr/local/bin/schedule"
 
@@ -38,10 +38,23 @@ usage: install.sh [--uninstall]
 EOF
 }
 
-# Our link is created with an absolute target, so comparing readlink's raw
-# output identifies it without `readlink -f` (BSD readlink lacks the flag).
+# Canonicalize a path without `realpath`/`readlink -f` (BSD and older macOS
+# lack them): the directory is resolved physically, the basename is kept.
+physical() {
+    local path="$1" dir base
+    dir="$(dirname "$path")"
+    base="$(basename "$path")"
+    (cd "$dir" 2>/dev/null && printf '%s/%s' "$(pwd -P)" "$base")
+}
+
+# Compare physically as well as literally: installing once through a symlinked
+# checkout (~/dotfiles -> ~/workspace/.dotfiles) and once through the real path
+# must still be recognized as the same link.
 is_our_link() {
-    [[ -L "$TARGET" ]] && [[ "$(readlink "$TARGET")" == "$SOURCE" ]]
+    [[ -L "$TARGET" ]] || return 1
+    local target
+    target="$(readlink "$TARGET")"
+    [[ "$target" == "$SOURCE" ]] || [[ "$(physical "$target")" == "$(physical "$SOURCE")" ]]
 }
 
 # Create or replace the link; fall back to a no-prompt sudo, then to the
@@ -106,6 +119,9 @@ if is_our_link; then
 else
     [[ -e "$TARGET" && ! -L "$TARGET" ]] &&
         die "$TARGET exists and is not a symlink; refusing to overwrite it"
+    if [[ -L "$TARGET" ]]; then
+        warn "replacing existing link: $TARGET -> $(readlink "$TARGET")"
+    fi
     make_link || exit 1
     info "linked: $TARGET -> $SOURCE"
 fi

@@ -35,11 +35,11 @@ schedule install-cron
 schedule uninstall-cron
 ```
 
-`install-cron` installs one idempotent crontab block (managed between marker lines, original backed up to `crontab.bak`) and smoke-tests the CLI under a cron-like environment; each minute's tick dispatches due tasks and exits immediately. `uninstall-cron` removes only the marked block, backs up first, and is a no-op (exit 0) when no block is present. Task definitions and run history survive, so re-installing restores the schedule without touching state.
+`install-cron` installs one idempotent crontab block (managed between marker lines, the replaced body backed up to `crontab.bak`) and smoke-tests the CLI under a cron-like environment; each minute's tick dispatches due tasks and exits immediately. `uninstall-cron` removes only the marked block, backs it up first, and is a no-op (exit 0) when no block is present. Task definitions and run history survive, so re-installing restores the schedule without touching state. `crontab.bak` holds the body the last install/uninstall replaced, not necessarily the pre-schedule original.
 
 ## Cron Conversion
 
-5 fields, local time, standard cron syntax plus `@daily` / `@hourly` / `@weekly` / `@monthly` / `@yearly` macros.
+5 fields, local time, standard cron syntax plus `@daily` / `@hourly` / `@weekly` / `@monthly` / `@yearly` (and the aliases `@midnight` / `@annually`). The next-fire search is bounded at 366 days: an expression with no slot in that window (a leap-day cron in most years, or a genuinely impossible date like Feb 30) is accepted by `add` with a note, but `NEXT` reads `invalid` and the tick logs it as not schedulable instead of firing.
 
 | User says | Expression |
 |---|---|
@@ -75,13 +75,15 @@ Day-of-month and day-of-week in one expression are ORed (Vixie), so "the 1st, bu
 |---|---|
 | `running` | process alive, helper alive, timeout enforced |
 | `orphan` | the pi process is alive but its supervisor died, so the timeout no longer applies; nothing reaps it, so kill the process group yourself |
-| `starting` / `stale` | claimed but no pid recorded yet / claim never completed (a dispatch that never reached the helper stays visible here) |
+| `starting` / `stale` | claimed but no pid recorded yet (under 60s) / the claim never completed, or the record says `running` while the pi pid is gone |
 | `exited` / `killed` / `error` | terminal: finished, killed by the 30-minute timeout, or failed to start |
+| `unreadable` | terminal (read-side synthesis): this run's `metadata.json` is missing or corrupt. It does not hold the task, and `logs`/Preview still yield the transcript |
 | `missed` | not a run state: the task owed a slot that never ran. `LAST` shows `missed · <age>` and overrides the run state |
+| `idle` | no run yet |
 
-`missed` is computed on the read side from the newest run's `startedAt` (or `createdAt` before the first run): only when every owed slot has left the 10-minute catch-up window. A task that is `running` / `starting` / `orphan` / `stale` (a claim nobody picked up, which is its own fault signal), or `disabled`, is never reported as missed. Missed slots are deliberately not replayed.
+`missed` is computed on the read side from the newest run's `startedAt` (or `createdAt` before the first run): only when every owed slot has left the 10-minute catch-up window. A task that is `running` / `starting` / `orphan` / `stale` (a claim nobody picked up, which is its own fault signal) / `unreadable` (the record cannot be judged), or `disabled`, is never reported as missed. A `--once` task whose own scheduled run already happened is not missed either. Missed slots are deliberately not replayed.
 
-`skipped` is a tick-time decision (an active run already holds the task) and is not a run directory: it only appears in `~/.pi/agent/schedule/tick.log`.
+`skipped` is a tick-time decision (an active run already holds the task) and is not a run directory: it appears only in the `schedule tick` count line and in `~/.pi/agent/schedule/tick.log`.
 
 ## Verifying a Task
 

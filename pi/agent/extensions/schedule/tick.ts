@@ -34,7 +34,7 @@ import {
     taskRunsDir,
     writeWatermark,
 } from "./store.ts";
-import type { Task } from "./store.ts";
+import type { Task, TaskListEntry } from "./store.ts";
 
 /**
  * The crontab schedule for `tick`. Single source of truth: `installCron` renders
@@ -155,14 +155,17 @@ export function runTick(options: TickOptions = {}): TickResult {
 
     gcRuns(now);
 
-    for (const entry of listTasks()) {
+    // Each task is handled in isolation: a corrupt definition, a permission
+    // error or a full disk on one task must not starve every other task (the
+    // whole pass would abort, and again on the next minute).
+    const tickTask = (entry: TaskListEntry): void => {
         const { id } = entry;
         const task = entry.task;
         if (!task) {
             noticeOnce(id, `corrupt:${entry.error ?? "unknown"}`, `[${id}] corrupt task file: ${entry.error ?? "unknown"}`, log);
-            continue;
+            return;
         }
-        if (!task.enabled) continue;
+        if (!task.enabled) return;
 
         const active = activeRun(id);
         if (active) {
@@ -173,7 +176,7 @@ export function runTick(options: TickOptions = {}): TickResult {
                     : active.effective;
             noticeOnce(id, key, `[${id}] ${detail} run ${active.ts}: scheduling skipped`, log);
             result.skipped.push(id);
-            continue;
+            return;
         }
         const watermark = readWatermark(id);
 
@@ -184,7 +187,7 @@ export function runTick(options: TickOptions = {}): TickResult {
         // the past after consumption, so the watermark is the only stop.
         if (task.once && watermark.accountedThrough !== null) {
             noticeOnce(id, "once-consumed", `[${id}] once task already consumed; not firing again`, log);
-            continue;
+            return;
         }
 
         // The anchor is the highest instant already accounted for: the
@@ -194,7 +197,7 @@ export function runTick(options: TickOptions = {}): TickResult {
             : Date.parse(watermark.accountedThrough);
         if (!Number.isFinite(anchorMs)) {
             noticeOnce(id, "bad-anchor", `[${id}] unusable scheduling anchor; skipping`, log);
-            continue;
+            return;
         }
         const anchor = new Date(anchorMs);
 
@@ -204,10 +207,10 @@ export function runTick(options: TickOptions = {}): TickResult {
         } catch (error) {
             const message = errorMessage(error);
             noticeOnce(id, `cron:${message}`, `[${id}] cron '${task.cron}' is not schedulable: ${message}`, log);
-            continue;
+            return;
         }
 
-        if (verdict.kind === "pending") continue;
+        if (verdict.kind === "pending") return;
 
         // Account first, dispatch second: at-most-once, not at-least-once.
         writeWatermark(id, now.toISOString());
@@ -218,7 +221,7 @@ export function runTick(options: TickOptions = {}): TickResult {
             }
             log(`[${id}] behind since ${anchor.toISOString()} (cron '${task.cron}')`);
             result.missed += 1;
-            continue;
+            return;
         }
 
         const stamp = stampOf(now);
@@ -231,7 +234,7 @@ export function runTick(options: TickOptions = {}): TickResult {
             if ((error as { code?: string }).code !== "EEXIST") {
                 log(`[${id}] claim failed for run ${stamp}: ${errorMessage(error)}`);
             }
-            continue;
+            return;
         }
         try {
             dispatch(id, stamp);
@@ -239,6 +242,14 @@ export function runTick(options: TickOptions = {}): TickResult {
             result.dispatched.push(id);
         } catch (error) {
             log(`[${id}] dispatch failed for run ${stamp}: ${errorMessage(error)}`);
+        }
+    };
+
+    for (const entry of listTasks()) {
+        try {
+            tickTask(entry);
+        } catch (error) {
+            log(`[${entry.id}] tick failed: ${errorMessage(error)}`);
         }
     }
 

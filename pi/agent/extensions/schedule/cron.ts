@@ -77,6 +77,12 @@ function normalizeExpression(expr: string): string {
     return CRON_MACROS[trimmed.toLowerCase()] ?? trimmed;
 }
 
+/** The fields of a macro-expanded expression (`[]` when it expands to nothing). */
+function splitFields(expr: string): string[] {
+    const expanded = normalizeExpression(expr);
+    return expanded.length === 0 ? [] : expanded.split(/\s+/);
+}
+
 type ExpandResult = { values: number[] } | { error: string };
 
 /**
@@ -95,7 +101,7 @@ function expandField(field: string, index: number): ExpandResult {
             if (!(step >= 1)) return { error: "step must be >= 1" };
             if (step > max - min + 1) {
                 return {
-                    error: `step ${step} exceeds the field span (${min}-${max}); smallest usable value is ${min}`,
+                    error: `step ${step} exceeds the field span (${min}-${max})`,
                 };
             }
             for (let i = min; i <= max; i += step) out.add(i);
@@ -141,8 +147,7 @@ function expandField(field: string, index: number): ExpandResult {
 
 /** Parse a 5-field expression (or macro). Throws `CronParseError`. */
 export function parseCron(expr: string): CronFields {
-    const expandedExpr = normalizeExpression(expr);
-    const parts = expandedExpr.length === 0 ? [] : expandedExpr.split(/\s+/);
+    const parts = splitFields(expr);
     if (parts.length !== 5) {
         throw new CronParseError(
             `expected 5 fields (minute hour day-of-month month day-of-week), got ${parts.length}`,
@@ -219,14 +224,16 @@ function computeNextCronRun(fields: CronFields, after: Date): Date | null {
 
         const dom = t.getDate();
         const dow = t.getDay();
-        const dayMatches =
-            domWild && dowWild
-                ? true
-                : domWild
-                  ? dowSet.has(dow)
-                  : dowWild
-                    ? domSet.has(dom)
-                    : domSet.has(dom) || dowSet.has(dow);
+        let dayMatches: boolean;
+        if (domWild && dowWild) {
+            dayMatches = true;
+        } else if (domWild) {
+            dayMatches = dowSet.has(dow);
+        } else if (dowWild) {
+            dayMatches = domSet.has(dom);
+        } else {
+            dayMatches = domSet.has(dom) || dowSet.has(dow);
+        }
         if (!dayMatches) {
             t.setDate(t.getDate() + 1);
             t.setHours(0, 0, 0, 0);
@@ -289,8 +296,10 @@ function formatLocalTime(minute: number, hour: number): string {
  */
 export function cronToHuman(expr: string): string {
     const raw = expr.trim();
-    const expandedExpr = normalizeExpression(raw);
-    const parts = expandedExpr.length === 0 ? [] : expandedExpr.split(/\s+/);
+    // Never invent a plausible schedule for something the parser rejects:
+    // `60 9 * * *` would otherwise read as "Every day at 10:00 AM".
+    if (!isValidCron(raw)) return raw;
+    const parts = splitFields(raw);
     if (parts.length !== 5) return raw;
     const [minute, hour, dayOfMonth, month, dayOfWeek] = parts as [
         string,

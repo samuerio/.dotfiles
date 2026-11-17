@@ -1,7 +1,8 @@
 # 测试 schedule
 
 分五层，越往下越接近真实、越慢、越可能留下垃圾。日常改代码只跑第 1 层，改调度逻辑跑到第 4 层，
-只有改 `index.ts`（TUI 部分）才需要第 5 层。
+只有改 `index.ts`（TUI 部分）才需要第 5 层。**只有第 1 层是自动化测试**（`tests/`，一条
+`node --test` 跑完）；第 2–5 层是手工剧本，没有 CI 兜底。
 
 | 层 | 覆盖 | 手段 | 耗时 |
 | --- | --- | --- | --- |
@@ -52,12 +53,16 @@ node --test --test-name-pattern="uninstall" \
 node --test --watch pi/agent/extensions/schedule/tests/
 ```
 
-当前基线：`cli 14 / cron 19 / routing 8 / runs-view 42 / run 21 / slots 7 / store 38 /
-tick 38 = 187 pass, 0 fail`。
+当前基线：`argv 7 / cli 16 / cron 20 / routing 8 / runs-view 42 / run 21 / slots 7 /
+store 40 / tick 38 = 199 pass, 0 fail`。
+
+需要 Node ≥ 22.18（或 23.6+）来直接执行 `.ts`，不需要 `--experimental-strip-types`；
+本机 v26.10.0。
 
 读测试的顺序建议：`cron.test.ts` 看语义契约 → `run.test.ts` 看状态机 →
 `slots.test.ts` 看读写共用的槽位判定 → `tick.test.ts` 看写侧决策 →
-`cli.test.ts` 看读侧（`LAST` / `NEXT` / `missed`）。这几份是规格，改实现前先看
+`cli.test.ts` 看读侧（`LAST` / `NEXT` / `missed`）、`argv.test.ts` 看 CLI 进程契约
+（argv 解析、未知选项、退出码）。这几份是规格，改实现前先看
 它们期望什么。`runs-view.test.ts` 则是 `/schedule` 的规格：任务行、run 标签、动作菜单的
 门槛（哪些状态能取结果）与写进编辑器的两段文本。
 
@@ -194,7 +199,7 @@ export PATH=/tmp/sched-t/bin:$PATH
 
 $S install-cron          # 打印整份 crontab，含标记块
 cat /tmp/fakebin/crontab.txt
-cat /tmp/sched-t/agent/schedule/crontab.bak     # 安装前的备份
+cat /tmp/sched-t/agent/schedule/crontab.bak     # 本次被替换掉的 crontab（第一次 install 时才是安装前原样）
 
 $S install-cron          # 幂等：标记块只有一份
 $S uninstall-cron        # 只删自己的块，backup.sh 那行原样留着
@@ -202,8 +207,8 @@ $S uninstall-cron        # no pi-schedule block found in crontab（exit 0，且�
 ```
 
 要验的四个点：**幂等**（重复 install 块不重复）、**只动自己的块**（用户条目原样）、
-**先备份**（`crontab.bak` 是安装前的内容）、**no-op 不写回**（第二次 uninstall 不应调用
-`crontab -`）。
+**先备份**（`crontab.bak` 是本次被替换的内容；install 与 uninstall 都会覆盖它，所以它不
+一定是「安装前原样」）、**no-op 不写回**（第二次 uninstall 不应调用 `crontab -`）。
 
 真实安装前先看一眼解析出来的 PATH 与 node 绝对路径对不对：`$S install-cron` 会把整份
 crontab 打到 stdout，肉眼扫一遍再决定要不要在真环境跑。
@@ -212,8 +217,9 @@ crontab 打到 stdout，肉眼扫一遍再决定要不要在真环境跑。
 `~/.pi/agent`（只读地跑一次 `list`，不会写东西）。看到真实任务名出现在冒烟输出里是正常的。
 
 `install-cron` 会警告 `no cron daemon running`。这不是噪音：cron daemon 没跑时整套调度
-静默失效。实测这台机器（Arch + cronie）就是 `cronie.service` 未启用，所以真要装必须先
-`sudo systemctl enable --now cronie`。装完再跑 `install-cron`，警告应该消失。
+静默失效。本机（Arch + cronie）当前是 `active`/`enabled`，但别假定默认状态：
+`systemctl is-active cronie`，没跑就先 `sudo systemctl enable --now cronie`。
+装完再跑 `install-cron`，警告应该消失。
 
 ## 第 5 层：TUI（`/schedule` 与 widget）
 
@@ -222,7 +228,9 @@ crontab 打到 stdout，肉眼扫一遍再决定要不要在真环境跑。
 ```bash
 tmux new -s sched
 # 在 pane 里：
-piw --no-session --no-extensions -e ./pi/agent/extensions/schedule/index.ts
+~/.agents/skills/pi-headless/scripts/piw --no-session --no-extensions \
+    -e ./pi/agent/extensions/schedule/index.ts
+# piw 不在 PATH 上，用 pi-headless SKILL 里的绝对路径
 #   ↑ 在 dotfiles 根目录下执行；不加 -p / --mode json 就是交互 TUI
 ```
 
@@ -253,8 +261,9 @@ pane 里依次验：
 9. 任务结束后 widget 自动消失。
 10. `/quit` 退出（不要 Ctrl-C，TUI 可能不干净）。
 
-child guard 的验法：`PI_SCHEDULE_RUN_DIR=/tmp/x piw --no-session -e ...`，此时 `/schedule`
-不应注册。手工验不方便的话，直接读 `index.ts` 开头那 10 行 + 跑第 1 层里的 `run.test.ts`
+child guard 的验法：`PI_SCHEDULE_RUN_DIR=/tmp/x ~/.agents/skills/pi-headless/scripts/piw
+--no-session -e ...`，此时 `/schedule` 不应注册。手工验不方便的话，直接读 `index.ts` 里
+`scheduleExtension()` 开头对 `PI_SCHEDULE_RUN_DIR` 的早退分支 + 跑第 1 层里的 `run.test.ts`
 （它断言了子进程环境里有 `PI_SCHEDULE_RUN_DIR`）。
 
 ## 收尾

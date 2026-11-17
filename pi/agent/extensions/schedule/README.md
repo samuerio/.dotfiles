@@ -11,8 +11,9 @@
   跨机不可复用），
   `runs/<id>/<stamp>/`（会被 GC：保留最新 10 个 **或** 14 天内的，两者取并集；每个任务的
   最新 run 与 `state.json` 永不删）。
-- **调度权与执行权分离。** tick 只做三件事：读配置、算到期、`mkdir` claim 槽位，然后派生
-  helper 立刻退出。helper 拥有完整生命周期（spawn pi、超时、信号升级、回写元数据）。
+- **调度权与执行权分离。** tick 只做四类事：GC 旧 run、读配置、算到期并把 watermark 推到现在、
+  `mkdir` claim 槽位，然后派生 helper 立刻退出。helper 拥有完整生命周期（spawn pi、超时、
+  信号升级、回写元数据）。
 - **槽位由 watermark 记账。** `runs/<id>/state.json` 的 `accountedThrough` 记着「已经处理到
   哪个时刻」（不一定正好是 cron 槽位），原子写、永不回收。关机期间的槽位不会被永久记成
   「没跑」，也不会在开机后补跑一串。
@@ -26,8 +27,8 @@
 # 0. 把 CLI 装到 PATH（软链 /usr/local/bin/schedule，需 root，可重复执行）
 sudo ./install.sh
 
-# 1. 先确认 cron daemon 在跑（这台机器是 Arch + cronie，默认 disabled）
-sudo systemctl enable --now cronie
+# 1. 先确认 cron daemon 在跑（本机是 Arch + cronie，当前 enabled/active；别假定默认状态）
+systemctl is-active cronie || sudo systemctl enable --now cronie
 
 # 2. 装 crontab 块（幂等，先备份，并做一次 cron 环境冒烟）
 schedule install-cron
@@ -41,14 +42,14 @@ schedule add --name daily-report \
 # next: 11-09 08:57
 # --prompt-file 只在这一刻读一次，正文被内联进任务定义
 
-# 3. 先手动验一遍再信它（不消耗 --once，不写 watermark）
+# 4. 先手动验一遍再信它（不消耗 --once，不写 watermark）
 schedule run 4c3c7a6e --fg
 
-# 4. 看结果
+# 5. 看结果
 schedule logs 4c3c7a6e
 ```
 
-不带 `--fg` 的 `schedule run <id>` 是后台跑（和定时触发同一条路径），立刻返回 pid：
+不带 `--fg` 的 `schedule run <id>` 是后台跑（和定时触发同一条路径），最多轮询 1 秒拿到 pid：
 
 ```
 started 4c3c7a6e run 20261106-162834 (pid 1516081)
@@ -61,12 +62,12 @@ logs: schedule logs 4c3c7a6e
 schedule list [--json]                  # 全部任务 + effective 状态 + 下次触发 + 项目 cwd
 schedule add --name <n> --cron <expr> --cwd <abs>
               (--prompt <t> | --prompt-file <p>) [--once]
-schedule remove <id>                    # 只删定义，run 历史留给 GC
+schedule remove <id>                    # 只删定义，run 历史留给 GC（每个任务的最新 run 永不删）
 schedule set-prompt <id> (--prompt <t> | --prompt-file <p>)
                                         # 换 prompt；id、run 历史、水位都不动
 schedule enable <id> / disable <id>     # 保留定义，停止/恢复触发
 schedule run <id> [--fg]                # 手动跑一次（manual trigger）
-schedule logs <id> [--raw] [-f]         # 摘要 / 原始输出 / 跟随
+schedule logs <id> [--raw [-f]]         # 摘要 / 原始输出 / 跟随（-f 只配 --raw 用）
 schedule tick                           # 手动跑一次调度（cron 每分钟调）
 schedule install-cron / uninstall-cron  # 装/卸 crontab 块
 ```
@@ -74,6 +75,9 @@ schedule install-cron / uninstall-cron  # 装/卸 crontab 块
 `--prompt` 的值以 `-` 开头时用 `--prompt=-foo` 或改用 `--prompt-file`。
 `--prompt-file` 只在 `add` / `set-prompt` **当时读一次**：正文被内联进任务定义，路径不落盘。
 之后改或删那个文件都不影响已建好的任务；要换内容再跑一次 `set-prompt`。
+参数解析是严格的：未知选项（`--oncee` 这种拼错）、给布尔开关赋值（`--once=true`）、
+取值选项没带值都会报错退出，不再静默忽略；`--` 之后的所有 token 按 positional 处理。
+
 `list --json` 输出 `{tasks:[{id,name,cron,schedule,enabled,once,next,last,state,missed,cwd}]}`。
 `missed` 是布尔值（`LAST` 是否被 missed 覆盖），`last` 是渲染好的文本，`cwd` 是任务的
 **完整绝对路径**。
@@ -94,7 +98,8 @@ schedule install-cron / uninstall-cron  # 装/卸 crontab 块
 - 没有可用 pin：不加任何模型参数，退回 `settings.json` 的默认 provider/model。
 - **任务里不存模型**。想换模型改 modes.json（`currentMode` 或该模式的 `roles.subagents`），
   下一次运行就生效，不用动任务。
-- `schedule add` 会打印新任务将来用的路由，`schedule logs <id>` 打印某次运行实际用的模型：
+- `schedule add` 会打印新任务将来用的路由，`schedule logs <id>` 打印某次运行实际用的模型
+  （`unreadable` 的合成摘要不打印 `model:` 行：真实故障是坏掉的 `metadata.json`，不是路由）：
 
 ```
 $ schedule add --name daily-report --cron '57 8 * * 1-5' --cwd /abs --prompt '…'
@@ -152,7 +157,10 @@ env -i PATH=/home/zhe/.npm-global/bin:/usr/local/bin:/usr/bin:/bin HOME=$HOME \
 
 ## cron 表达式
 
-5 字段（分 时 日 月 周），本地时区，支持标准语法与 `@hourly/@daily/@weekly/@monthly/@yearly`。
+5 字段（分 时 日 月 周），本地时区，支持标准语法与 `@hourly/@daily/@weekly/@monthly/@yearly`
+（以及别名 `@midnight` / `@annually`）。下次触发只在 366 天窗口内搜索：窗口里没有槽位的表达式
+（多数年份里的闰日 cron，或 `0 0 30 2 *` 这种永远不成立的日子）`add` 会照收但打印一行
+`note`，`NEXT` 显示 `invalid`，tick 记一次「not schedulable」而不会触发。
 
 | 想要 | 写 |
 | --- | --- |
@@ -178,16 +186,16 @@ env -i PATH=/home/zhe/.npm-global/bin:/usr/local/bin:/usr/bin:/bin HOME=$HOME \
 | --- | --- |
 | `running` | pi 活着、helper 活着，超时仍在生效 |
 | `orphan` | pi 还活着但 helper 死了，30 分钟超时随之失效；调度只记录不收割，需手动杀进程组 |
-| `starting` / `stale` | 已 claim 但还没记 pid / claim 之后没走完（超 60s 算 stale） |
+| `starting` / `stale` | 已 claim 但还没记 pid（60s 内）/ 超过 60s 还没走完，或记录写着 `running` 但 pi 的 pid 已经不在 |
 | `exited` / `killed` / `error` | 终态：跑完 / 被 30 分钟超时杀掉 / 起不来 |
 | `unreadable` | 终态（读侧合成）：这次的 `metadata.json` 缺失或损坏。任务不占、调度不阻塞，`logs` 里能看到从目录重建的摘要（时间取 mtime，`trigger` 显示 `unknown`）；转录若完好，结果照常可取 |
 | `idle` | 从没跑过 |
-| `missed` | **不是 run 状态**：该跑却没跑。`LAST` 显示 `missed · <age>`，覆盖 run 状态 |
+| `missed` | **不是 run 状态**：该跑却没跑。`LAST` 显示 `missed · <age>`，覆盖 run 状态（`--once` 任务已经按自己的 scheduled run 跑过一次后不再算 missed） |
 
 `missed` 是读侧算出来的：最新 run 的 `startedAt`（从未跑过则 `createdAt`）之后、跌出
 catch-up 窗口且没有新 run 的槽位；`running` / `starting` / `orphan` / `stale`（claim 之后没人
 接手，这本身就是故障信号）、`unreadable`（记录坏了，实际发生了什么无法从记录判断）和 `disable` 的任务不参与判定。
-`skipped` 仍然是 tick 当时的决策（有 active run），只出现在
+`skipped` 仍然是 tick 当时的决策（有 active run），只出现在 `schedule tick` 的计数行和
 `~/.pi/agent/schedule/tick.log`。
 
 ## 一次性与停机
@@ -265,6 +273,10 @@ session 文件缺失（run 没真正启动，或转录被删）时先弹摘要 +
   metadata.json   # state/pid/pgid/helperPid/launchArgs/exitCode...
 ```
 
+同级还有两个不是 run 的文件：`runs/<id>/state.json`（watermark）与 `runs/<id>/notice.json`
+（tick.log 去重标记，不参与 GC）。`~/.pi/agent/schedule/` 下是 `tasks/`、`runs/`、
+`crontab.bak` 与 `tick.log`（到 1 MiB 轮转成 `tick.log.1`）。
+
 想深入看某次运行做了什么：`pi --resume` 挑那个 session 文件，或直接读 `session.jsonl`。
 
 ## 日常运维
@@ -277,7 +289,8 @@ schedule enable  4c3c7a6e
 # 改 prompt：id、run 历史、水位都不动
 schedule set-prompt 4c3c7a6e --prompt-file /abs/r.md
 
-# 改 cron 或 cwd：没有 edit，先 remove 再 add（run 历史变成孤儿目录，等 GC）
+# 改 cron 或 cwd：没有 edit，先 remove 再 add（run 历史变成孤儿目录，等 GC；
+# 每个任务目录的最新 run 会被保留，不会全删）
 schedule remove 4c3c7a6e
 schedule add --name daily-report --cron '57 9 * * 1-5' --cwd /abs --prompt-file /abs/r.md
 
@@ -310,14 +323,16 @@ tail -f ~/.pi/agent/schedule/tick.log
 
 ## 边界
 
-- **POSIX only**。Windows 直接拒绝启动（依赖进程组语义）。
+- **POSIX only**。`schedule` CLI 在 Windows 上直接拒绝启动（依赖进程组语义）；pi 里的扩展
+  本身没有平台守卫，会在真正执行 run 时才失败。
 - **任务不 pin 模型**：一律走 `roles.subagents`，无法给单个任务指定别的模型。
 - **headless 全量加载**：子会话和你交互式用的一样，会加载所有扩展与 skill（包括 `loop`）。
-  没有 `--no-extensions` 开关。
+  `schedule` 不给子会话传 `--no-extensions`，也没有关掉它的选项（pi 本身有该 flag）。
 - **`--approve` 无人值守**：任务 `cwd` 下项目级 `.pi` 资源被自动信任。只在可信仓库里建任务。
 - **任务不跨机同步**：`tasks/*.json` 已 gitignore（`cwd` 是绝对路径，本来就搬不过去），
   `runs/`、`tick.log`、`crontab.bak` 同样属于本机产物。
 - **改 prompt 有专用命令，改 cron/cwd 没有**：前者 `set-prompt`，后者只能 remove + add。
-- **定义 schema 不迁移**：`promptFile` 字段已删除，旧任务文件一律判 corrupt（`list` 里显示
-  `(unreadable)` 并在表尾提示），需 `remove` 后按新方法 `add`。
-- **不引入 tmux**，也没有 `wait` 子命令：要等结果用 `logs -f` 或轮询 `list`。
+- **定义 schema 不迁移**：`promptFile` 字段已删除，缺少内联 `prompt` 正文的旧任务文件判
+  corrupt（`list` 里显示 `(unreadable)` 并在表尾提示），需 `remove` 后按新方法 `add`；
+  未知字段本身会被忽略，同时带 `prompt` 的旧文件仍能读。
+- **不引入 tmux**，也没有 `wait` 子命令：要等结果用 `logs --raw -f` 或轮询 `list`。

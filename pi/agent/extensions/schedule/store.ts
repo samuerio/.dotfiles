@@ -195,7 +195,7 @@ function parseTask(id: string, raw: string): Task | undefined {
     // A task without a prompt has nothing to run: from here on that is a corrupt
     // definition, not a dispatch-time error inside a detached helper.
     if (!isString(task.prompt) || task.prompt.length === 0) return undefined;
-    const parsed: Task = {
+    return {
         version: 1,
         id,
         name: task.name,
@@ -206,7 +206,6 @@ function parseTask(id: string, raw: string): Task | undefined {
         once: task.once,
         createdAt: task.createdAt,
     };
-    return parsed;
 }
 
 export function readTask(id: string): Task | undefined {
@@ -255,7 +254,8 @@ export function listTasks(): TaskListEntry[] {
         const leftAt = left.task?.createdAt ?? "";
         const rightAt = right.task?.createdAt ?? "";
         if (leftAt !== rightAt) return leftAt < rightAt ? -1 : 1;
-        return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
+        if (left.id === right.id) return 0;
+        return left.id < right.id ? -1 : 1;
     });
     return out;
 }
@@ -320,7 +320,10 @@ export function addTask(input: AddTaskInput, options: AddTaskOptions = {}): Task
         const id = nextId();
         if (!validateTaskId(id)) throw new Error(`add: generated invalid task id: ${id}`);
         const path = taskPath(id);
-        if (existsSync(path)) continue;
+        // A removed task's run history is kept for GC, so reusing its id would
+        // inherit the old watermark (a `once` task would start consumed) and
+        // misattribute its runs. An id that ever ran is never reused.
+        if (existsSync(path) || existsSync(taskRunsDir(id))) continue;
         const task: Task = {
             version: 1,
             id,
@@ -400,6 +403,12 @@ export function readWatermark(taskId: string): Watermark {
     if (parsed.version !== 1) return synthetic;
     const accountedThrough = parsed.accountedThrough;
     if (accountedThrough !== null && !isString(accountedThrough)) return synthetic;
+    // An unparseable timestamp is as corrupt as a non-string: the `once` guard
+    // reads any non-null value as "consumed" (never firing again) and a
+    // recurring task skips on `bad-anchor` forever.
+    if (accountedThrough !== null && !Number.isFinite(Date.parse(accountedThrough))) {
+        return synthetic;
+    }
     return {
         version: 1,
         taskId,
@@ -410,13 +419,30 @@ export function readWatermark(taskId: string): Watermark {
 
 export function writeWatermark(taskId: string, accountedThrough: string | null): void {
     if (!validateTaskId(taskId)) throw new Error(`invalid task id: ${taskId}`);
+    // `accountedThrough` is defined as the highest instant already accounted
+    // for, so a clock that steps backwards (NTP, `date -s`) must not rewind it:
+    // the next tick would otherwise re-dispatch slots that already ran. Passing
+    // `null` is an explicit reset and is left alone.
+    const nextAccountedThrough = accountedThrough === null
+        ? null
+        : maxInstant(readWatermark(taskId).accountedThrough, accountedThrough);
     const watermark: Watermark = {
         version: 1,
         taskId,
-        accountedThrough,
+        accountedThrough: nextAccountedThrough,
         updatedAt: new Date().toISOString(),
     };
     atomicWriteJson(watermarkPath(taskId), watermark);
+}
+
+/** Later of two ISO instants; an unparseable side never wins. */
+export function maxInstant(previous: string | null, next: string): string {
+    if (previous === null) return next;
+    const previousMs = Date.parse(previous);
+    const nextMs = Date.parse(next);
+    if (!Number.isFinite(nextMs)) return previous;
+    if (!Number.isFinite(previousMs)) return next;
+    return nextMs >= previousMs ? next : previous;
 }
 
 /** Run stamps (`YYYYMMDD-HHmmss`) of one task, newest first. */
@@ -459,24 +485,24 @@ export function gcRuns(now: Date = new Date()): { removed: string[] } {
         const taskId = entry.name;
         const taskDir = join(root, taskId);
         const stamps = listRunStamps(taskId);
-        stamps.forEach((stamp, index) => {
-            if (index === 0) return; // newest run always survives
-            if (index < KEEP_RUNS) return;
+        for (const [index, stamp] of stamps.entries()) {
+            if (index === 0) continue; // newest run always survives
+            if (index < KEEP_RUNS) continue;
             const full = join(taskDir, stamp);
             let ageMs: number;
             try {
                 ageMs = nowMs - statSync(full).mtimeMs;
             } catch {
-                return;
+                continue;
             }
-            if (ageMs < KEEP_MS) return;
+            if (ageMs < KEEP_MS) continue;
             try {
                 rmSync(full, { recursive: true, force: true });
                 removed.push(full);
             } catch {
                 // leave it for the next tick
             }
-        });
+        }
     }
     return { removed };
 }

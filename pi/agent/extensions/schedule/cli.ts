@@ -26,8 +26,8 @@ import {
     executeRun,
     isActive,
     latestRun,
-    listRuns,
     outputLogPath,
+    patchMetadata,
     readMetadata,
     readRunSummary,
 } from "./run.ts";
@@ -37,7 +37,6 @@ import {
     addTask,
     errorMessage,
     getScheduleDir,
-    listTasks,
     readTask,
     removeTask,
     setTaskEnabled,
@@ -53,7 +52,7 @@ import {
     stampOf,
     uninstallCron,
 } from "./tick.ts";
-import { describeRoute, resolveSubagentRoute } from "./routing.ts";
+import { describeRoute, resolveSubagentRoute, type ModelRoute } from "./routing.ts";
 import {
     buildRows,
     describeState,
@@ -68,7 +67,7 @@ import type { ListRow } from "./runs-view.ts";
 const USAGE = `Usage:
   schedule list [--json]
   schedule add --name <name> --cron <expr> --cwd <abs-dir> (--prompt <text> | --prompt-file <path>) [--once]
-  schedule remove <id>
+  schedule remove <id>                    (alias: rm)
   schedule set-prompt <id> (--prompt <text> | --prompt-file <path>)
   schedule enable <id>
   schedule disable <id>
@@ -80,8 +79,8 @@ const USAGE = `Usage:
 
 Options:
   --help, -h          print this usage and exit
-  --prompt <text>     inline prompt; use --prompt=<text> or --prompt-file for
-                      text that starts with a dash
+  --prompt <text>     inline prompt; a prompt that begins with an option name
+                      needs the --prompt=<text> form
   --prompt-file <p>   read the prompt from a file now, at add/set-prompt time;
                       the task stores the text itself, never the path
   --once              fire only for the first scheduled slot, then stop
@@ -111,6 +110,15 @@ const BOOLEAN_FLAGS = new Set([
     "-f",
 ]);
 
+/** Options that consume the next token as their value. */
+const VALUE_FLAGS = new Set([
+    "--name",
+    "--cron",
+    "--cwd",
+    "--prompt",
+    "--prompt-file",
+]);
+
 interface ParsedArgs {
     positionals: string[];
     flags: Map<string, string | true>;
@@ -125,7 +133,13 @@ function parseArgs(argv: string[]): ParsedArgs {
     const flags = new Map<string, string | true>();
     for (let i = 0; i < argv.length; i += 1) {
         const arg = argv[i];
-        if (arg === "--") break;
+        if (arg === "--") {
+            // Standard end-of-options: everything after it is positional and
+            // taken verbatim (`schedule remove -- <id>`, or an id/prompt that
+            // starts with a dash).
+            positionals.push(...argv.slice(i + 1));
+            break;
+        }
         if (arg.startsWith("--") && arg.includes("=")) {
             const at = arg.indexOf("=");
             flags.set(arg.slice(0, at), arg.slice(at + 1));
@@ -259,6 +273,10 @@ function cmdAdd(args: ParsedArgs): number {
     process.stdout.write(
         `added ${task.id}  ${task.name}  (${cronToHuman(task.cron)})\n` +
             `next: ${nextText(next)}\n` +
+            (next.kind === "unschedulable"
+                ? "note: no fire time in the next 366 days, so this task will not\n" +
+                  "      run until one enters that window (a leap-day cron does this)\n"
+                : "") +
             `model: ${describeRoute(resolveSubagentRoute(task.cwd))}\n`,
     );
     return 0;
@@ -333,7 +351,7 @@ async function waitForMetadata(
 /** Inputs every real run needs; both `run` and `__exec` go through here. */
 function runInputs(task: Task): {
     promptText: string;
-    route: ReturnType<typeof resolveSubagentRoute>;
+    route: ModelRoute | undefined;
 } {
     // Runs are one-shot worker calls: follow the active mode's
     // roles.subagents pin instead of whichever provider pi falls back to.
@@ -387,12 +405,29 @@ async function cmdRun(args: ParsedArgs): Promise<number> {
         detached: true,
         stdio: "ignore",
     });
+    let spawnError: Error | undefined;
+    // Without a listener an async spawn failure (EMFILE, ENOMEM, a removed
+    // node binary) surfaces as an uncaught exception and a stack trace. Record
+    // it on the claim instead, where `list`/`logs` can show it.
+    child.on("error", (error: Error) => {
+        spawnError = error;
+        patchMetadata(dir, {
+            state: "error",
+            error: `helper spawn failed: ${error.message}`,
+            finishedAt: new Date().toISOString(),
+        });
+        process.stderr.write(`run ${task.id}: could not start the helper: ${error.message}\n`);
+    });
     child.unref();
 
     const metadata = await waitForMetadata(
         dir,
         (candidate) => typeof candidate.pid === "number" || !isActive(effectiveState(candidate)),
     );
+    // The claim is already recorded as `error`, but the caller still needs a
+    // non-zero exit code: a script that checks only `$?` must not read a failed
+    // dispatch as "started".
+    if (spawnError) return 1;
     process.stdout.write(
         `started ${task.id} run ${stamp}` +
             (metadata?.pid ? ` (pid ${metadata.pid})` : "") +
@@ -426,8 +461,8 @@ async function followRaw(path: string, done: () => boolean): Promise<number> {
         }
         if (size > offset) {
             const fd = openSync(path, "r");
+            let position = offset;
             try {
-                let position = offset;
                 for (;;) {
                     const read = readSync(fd, buffer, 0, buffer.length, position);
                     if (read <= 0) break;
@@ -437,7 +472,10 @@ async function followRaw(path: string, done: () => boolean): Promise<number> {
             } finally {
                 closeSync(fd);
             }
-            offset = size;
+            // Advance by what was actually read, not by the stale `stat` size:
+            // bytes appended between the stat and the read would otherwise be
+            // printed twice on the next poll.
+            offset = position;
             continue;
         }
         if (done()) return 0;
@@ -532,6 +570,7 @@ async function cmdExec(args: ParsedArgs): Promise<number> {
     const id = args.positionals[0];
     const stamp = args.positionals[1];
     if (!id || !stamp) fail("__exec: usage: schedule __exec <id> <stamp> [--fg] [--manual]");
+    if (!validateTaskId(id)) fail(`__exec: invalid task id: ${id}`);
     const task = readTask(id);
     if (!task) fail(`__exec: no such task: ${id}`);
     const { promptText, route } = runInputs(task);
@@ -567,6 +606,20 @@ async function main(): Promise<number> {
     if (has(args, "--help") || has(args, "-h")) {
         process.stdout.write(USAGE);
         return 0;
+    }
+    // No silent `--oncee`: an unrecognized option is a typo the user believes
+    // in, and swallowing it changes what the task does (`--oncee` would leave
+    // a recurring task behind).
+    for (const [name, value] of args.flags) {
+        if (!BOOLEAN_FLAGS.has(name) && !VALUE_FLAGS.has(name)) {
+            fail(`unknown option '${name}'`);
+        }
+        if (BOOLEAN_FLAGS.has(name) && value !== true) {
+            fail(`option '${name}' does not take a value`);
+        }
+        if (VALUE_FLAGS.has(name) && value === true) {
+            fail(`option '${name}' requires a value`);
+        }
     }
     switch (command) {
         case "list":

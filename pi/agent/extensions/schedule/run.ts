@@ -332,7 +332,7 @@ export function parseProcStatStartTime(raw: string): number | undefined {
     if (close < 0) return undefined;
     const fields = raw.slice(close + 2).trim().split(/\s+/);
     const starttime = Number(fields[19]);
-    return Number.isFinite(starttime) && fields[19] !== undefined ? starttime : undefined;
+    return Number.isFinite(starttime) ? starttime : undefined;
 }
 
 export function readPidStartTime(pid: number): number | undefined {
@@ -505,6 +505,9 @@ function withDeadline(promise: Promise<unknown>, ms: number): Promise<boolean> {
  * share the caller's group (killing it would take down the user's shell).
  */
 function signalChild(child: ChildProcess, signal: NodeJS.Signals, useGroup: boolean): void {
+    // A reaped child's pid/pgid can already belong to somebody else: never
+    // signal a group after the child has been observed to exit.
+    if (child.exitCode !== null || child.signalCode !== null) return;
     const pid = child.pid;
     if (useGroup && typeof pid === "number" && pid > 0) {
         try {
@@ -539,6 +542,19 @@ export async function executeRun(options: ExecuteRunOptions): Promise<number> {
         throw new Error("schedule: POSIX only (process-group kill is not available)");
     }
     const dir = runDirOf(options.taskId, options.stamp);
+    // `__exec` is reachable by hand: without these two guards a forged or stale
+    // stamp either escapes the runs directory (`../tasks/…`) or re-launches a
+    // finished run, overwriting the prompt and session that record history.
+    if (!validateRunStamp(options.stamp)) {
+        throw new Error(`executeRun: invalid run stamp: ${options.stamp}`);
+    }
+    const claimed = readMetadata(dir);
+    if (!claimed || claimed.taskId !== options.taskId) {
+        throw new Error(`executeRun: no claimed run at ${dir}`);
+    }
+    if (claimed.state !== "starting") {
+        throw new Error(`executeRun: run ${options.stamp} is already ${claimed.state}; refusing to re-run it`);
+    }
 
     // 1. Prompt snapshot + pre-created session file: both paths must exist and
     //    be final before the metadata first write, so `logs` never waits.
@@ -645,7 +661,11 @@ export async function executeRun(options: ExecuteRunOptions): Promise<number> {
         const diedQuietly = await withDeadline(exitPromise, killGraceMs());
         if (!diedQuietly) {
             signalChild(child, "SIGKILL", useGroup);
-            await withDeadline(exitPromise, POST_KILL_WAIT_MS);
+            const gaveUp = !(await withDeadline(exitPromise, POST_KILL_WAIT_MS));
+            // Still not reaped after SIGKILL (uninterruptible sleep): stop
+            // holding the helper open on a process that will never exit
+            // normally. The metadata already says `killed`.
+            if (gaveUp) child.unref();
         }
         patchMetadata(dir, { killedAt: new Date().toISOString() });
     }
@@ -764,7 +784,9 @@ export function readLatestAssistant(sessionFile: string): string | undefined {
         if (typeof entry.id === "string") byId.set(entry.id, entry);
     }
     const onActiveBranch = new Set<string>();
-    let cursor: SessionEntry | undefined = [...entries].reverse().find((entry) => typeof entry.id === "string");
+    let cursor: SessionEntry | undefined = entries.findLast(
+        (entry) => typeof entry.id === "string",
+    );
     while (cursor && typeof cursor.id === "string" && !onActiveBranch.has(cursor.id)) {
         onActiveBranch.add(cursor.id);
         const parentId = cursor.parentId;

@@ -165,13 +165,13 @@ test("day-of-month and day-of-week constrained together use OR semantics", () =>
     // 2026-11-06 is a Friday.
     assert.equal(new Date(2026, 10, 6).getDay(), 5);
 
-    const next = nextCron(expr, new Date(2026, 10, 6, 12, 0));
-    const matchedByDom = next.getDate() === 13;
-    const matchedByDow = next.getDay() === 5;
-    assert.ok(matchedByDom || matchedByDow, `unexpected match ${next.toString()}`);
-    // The very next midnight-qualifying day must be the OR of both sets:
-    // encountering day 13 first (Friday the 13th) is the strongest signal.
-    assert.equal(matchedByDom && matchedByDow, true);
+    // From Nov 1, OR picks Friday the 6th (weekday matches, date does not);
+    // AND would pick Friday the 13th. Asserting the earlier date is what makes
+    // this test unable to pass on an AND implementation.
+    const next = nextCron(expr, new Date(2026, 10, 1, 12, 0));
+    assert.equal(next.getTime(), new Date(2026, 10, 6).getTime());
+    assert.equal(next.getDay(), 5);
+    assert.equal(next.getDate(), 6);
 
     // Pure day-of-month (dow wildcard) must ignore the weekday.
     const domOnly = nextCron("0 0 13 * *", new Date(2026, 10, 6, 12, 0));
@@ -345,6 +345,13 @@ test("cronToHuman formats macros and falls back to the raw input", () => {
     assert.equal(cronToHuman("0 0 1 * *"), "0 0 1 * *");
     assert.equal(cronToHuman("0 0 13 * 5"), "0 0 13 * 5");
     assert.equal(cronToHuman("not a cron"), "not a cron");
+});
+
+test("cronToHuman never invents a schedule for an unparseable expression", () => {
+    // Each of these would otherwise render as a plausible-looking schedule.
+    assert.equal(cronToHuman("*/0 * * * *"), "*/0 * * * *");
+    assert.equal(cronToHuman("60 9 * * *"), "60 9 * * *");
+    assert.equal(cronToHuman("0 0 * * 8"), "0 0 * * 8");
 });
 
 test("cronToHuman wording matches loop/cron.ts for non-macro expressions", () => {

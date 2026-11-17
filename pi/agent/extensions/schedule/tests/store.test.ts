@@ -155,6 +155,25 @@ describe("addTask", () => {
         );
     });
 
+    test("an id whose run history still exists is never reused", () => {
+        const old = addTask(
+            { name: "a", cron: "@daily", cwd: tmpdir(), prompt: "x", once: true },
+            { nextId: () => "aaaaaaaa" },
+        );
+        // The watermark outlives the definition: a `once` task would start
+        // consumed and its old runs would be misattributed.
+        writeWatermark(old.id, "2030-01-01T00:00:00.000Z");
+        assert.equal(removeTask(old.id), true);
+
+        const ids = ["aaaaaaaa", "bbbbbbbb"];
+        const created = addTask(
+            { name: "b", cron: "@daily", cwd: tmpdir(), prompt: "y" },
+            { nextId: () => ids.shift() ?? "cccccccc" },
+        );
+        assert.equal(created.id, "bbbbbbbb");
+        assert.equal(readWatermark(created.id).accountedThrough, null);
+    });
+
     test("rejects invalid input", () => {
         const notADirectory = join(scratch, "prompt.md");
         writeFileSync(notADirectory, "x");
@@ -302,11 +321,30 @@ describe("watermark", () => {
         assert.equal(readWatermark("a1b2c3d4").accountedThrough, null);
     });
 
+    test("the watermark never moves backwards when the clock does", () => {
+        writeWatermark("a1b2c3d4", "2026-11-06T07:28:00.000Z");
+        // An NTP step (or `date -s`) must not make an already-accounted slot
+        // eligible again: the next tick would re-dispatch it.
+        writeWatermark("a1b2c3d4", "2026-11-06T05:00:00.000Z");
+        assert.equal(readWatermark("a1b2c3d4").accountedThrough, "2026-11-06T07:28:00.000Z");
+
+        writeWatermark("a1b2c3d4", "2026-11-06T09:00:00.000Z");
+        assert.equal(readWatermark("a1b2c3d4").accountedThrough, "2026-11-06T09:00:00.000Z");
+    });
+
     test("a corrupt watermark degrades to never accounted for instead of wedging scheduling", () => {
         mkdirSync(taskRunsDir("a1b2c3d4"), { recursive: true });
         writeFileSync(watermarkPath("a1b2c3d4"), "{ half");
         assert.equal(readWatermark("a1b2c3d4").accountedThrough, null);
         writeFileSync(watermarkPath("a1b2c3d4"), JSON.stringify({ version: 1, accountedThrough: 42 }));
+        assert.equal(readWatermark("a1b2c3d4").accountedThrough, null);
+        writeFileSync(watermarkPath("a1b2c3d4"), JSON.stringify({ version: 1, accountedThrough: 42 }));
+        assert.equal(readWatermark("a1b2c3d4").accountedThrough, null);
+        // A string that is not an instant is the same fault: reading it as a
+        // watermark would freeze a `once` task as consumed, forever.
+        writeFileSync(watermarkPath("a1b2c3d4"), JSON.stringify({ version: 1, accountedThrough: "garbage" }));
+        assert.equal(readWatermark("a1b2c3d4").accountedThrough, null);
+        writeFileSync(watermarkPath("a1b2c3d4"), JSON.stringify({ version: 1, accountedThrough: "" }));
         assert.equal(readWatermark("a1b2c3d4").accountedThrough, null);
     });
 
