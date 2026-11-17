@@ -149,6 +149,8 @@ import {
     Text,
     truncateToWidth,
     type TUI,
+    type TuiMouseEvent,
+    type TuiMouseEventResult,
 } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import {
@@ -1850,8 +1852,11 @@ export default function (pi: ExtensionAPI) {
             const previewHint = (): string => {
                 const base =
                     "esc/o: back to the list • ↑/↓ or j/k: scroll • ctrl+d/u: half page";
+                // pi reports mouse input only in fullscreen (alt-screen) mode.
+                const withWheel =
+                    tui.mode === "fullscreen" ? `${base} • wheel: scroll` : base;
                 const nav = previewText?.matchSummary();
-                return nav ? `${base} • ${nav}` : base;
+                return nav ? `${withWheel} • ${nav}` : withWheel;
             };
             let selectList: SelectList | null = null;
             // Browse mode (the initial state): every session of the
@@ -2270,6 +2275,16 @@ export default function (pi: ExtensionAPI) {
             return {
                 render: (width: number) => root.render(width),
                 invalidate: () => root.invalidate(),
+                // Wheel over the preview scrolls the transcript window; in list
+                // mode the event is left alone so the event can reach the list.
+                handleMouse: (event: TuiMouseEvent): TuiMouseEventResult | undefined => {
+                    if (mode !== "preview" || event.type !== "wheel") return undefined;
+                    const delta = Math.trunc(event.wheelDelta ?? 0);
+                    if (!Number.isFinite(delta) || delta === 0) return undefined;
+                    previewText?.scrollBy(delta);
+                    tui.requestRender();
+                    return { handled: true, render: true };
+                },
                 handleInput: (data: string) => {
                     if (mode === "preview") {
                         if (

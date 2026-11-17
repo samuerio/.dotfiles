@@ -17,6 +17,8 @@ import {
 	truncateToWidth,
 	visibleWidth,
 	type TUI,
+	type TuiMouseEvent,
+	type TuiMouseEventResult,
 } from "@earendil-works/pi-tui";
 
 // ─── Session Label ───────────────────────────────────────────────
@@ -247,6 +249,18 @@ class SessionPreviewOverlay {
 		}
 	}
 
+	/**
+	 * Wheel scrolls the transcript, never the conversation behind the overlay.
+	 * pi reports mouse input only in fullscreen (alt-screen) mode.
+	 */
+	handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+		if (event.type !== "wheel") return undefined;
+		const delta = Math.trunc(event.wheelDelta ?? 0);
+		if (!Number.isFinite(delta) || delta === 0) return undefined;
+		this.scrollBy(delta);
+		return { handled: true, render: true };
+	}
+
 	render(width: number): string[] {
 		// The overlay already owns the whole terminal, so take every row.
 		const maxHeight = Math.max(10, this.tui.terminal.rows || 24);
@@ -438,7 +452,11 @@ class SessionPreviewOverlay {
 		const halfPage = this.theme.fg("accent", "ctrl+d/u") + this.theme.fg("dim", " half page");
 		const page = this.theme.fg("accent", "←/→") + this.theme.fg("dim", " page");
 		const ends = this.theme.fg("accent", "g/G") + this.theme.fg("dim", " top/bottom");
-		let line = [close, detail, scroll, halfPage, page, ends].join(this.theme.fg("muted", " • "));
+		const parts = [close, detail, scroll, halfPage, page, ends];
+		if (this.tui.mode === "fullscreen") {
+			parts.push(this.theme.fg("dim", "wheel scroll"));
+		}
+		let line = parts.join(this.theme.fg("muted", " • "));
 		if (this.totalLines > this.viewHeight) {
 			const start = Math.min(this.totalLines, this.scrollOffset + 1);
 			const end = Math.min(this.totalLines, this.scrollOffset + this.viewHeight);
