@@ -35,4 +35,4 @@ Do not infer implementation permission from approval of the plan.
 
 After writing the plan file, use this exact phrasing:
 
-> Draft saved — run `nvim <plan-path>` to open the file, then use the `:MarkdownPreview` command to preview it.
+> Draft saved. Run `nvim +MarkdownPreview <plan-path>` to open the file and start the browser preview.
