@@ -1,7 +1,9 @@
 /**
  * Markdown Viewer Extension
  *
- * Renders a markdown file for the user in a scrollable overlay viewer.
+ * Renders a markdown file for the user in a scrollable full-terminal reader:
+ * a framed overlay that takes every row and every column, with keyboard and
+ * (in fullscreen TUI mode) mouse-wheel scrolling.
  *
  * - Tool `show_markdown(path, changeSummary?)`: for the agent to present a
  *   markdown file it just wrote or updated (plans, reports, docs), optionally
@@ -38,7 +40,7 @@ import {
     truncateToWidth,
     visibleWidth,
 } from "@earendil-works/pi-tui";
-import type { OverlayHandle } from "@earendil-works/pi-tui";
+import type { OverlayHandle, TuiMouseEvent, TuiMouseEventResult } from "@earendil-works/pi-tui";
 
 type ViewerDetails = { path: string; error?: string };
 
@@ -140,7 +142,6 @@ class MarkdownViewerOverlayComponent {
     private theme: Theme;
     private keybindings: KeybindingsManager;
     private onClose: () => void;
-    private fullscreen = false;
 
     constructor(
         tui: TUI,
@@ -163,6 +164,19 @@ class MarkdownViewerOverlayComponent {
         this.changeSummary = summaryText
             ? new Markdown(summaryText, 1, 0, getMarkdownTheme())
             : null;
+    }
+
+    /**
+     * Wheel scrolls the document, never the transcript behind the overlay.
+     * pi only reports mouse input in fullscreen (alt-screen) mode, so this
+     * never fires in regular mode.
+     */
+    handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+        if (event.type !== "wheel") return undefined;
+        const delta = Math.trunc(event.wheelDelta ?? 0);
+        if (!Number.isFinite(delta) || delta === 0) return undefined;
+        this.scrollBy(delta);
+        return { handled: true, render: true };
     }
 
     handleInput(keyData: string): void {
@@ -199,9 +213,12 @@ class MarkdownViewerOverlayComponent {
             this.scrollBy(-Math.floor(this.viewHeight / 2) || -1);
             return;
         }
-        if (matchesKey(keyData, "f")) {
-            this.fullscreen = !this.fullscreen;
-            this.tui.requestRender();
+        if (matchesKey(keyData, "g")) {
+            this.scrollTo(0);
+            return;
+        }
+        if (matchesKey(keyData, "shift+g")) {
+            this.scrollTo(this.totalLines);
             return;
         }
         if (kb.matches(keyData, "tui.select.pageUp") || matchesKey(keyData, Key.left)) {
@@ -215,12 +232,19 @@ class MarkdownViewerOverlayComponent {
     }
 
     render(width: number): string[] {
-        const maxHeight = this.getMaxHeight();
-        const headerLines = this.fullscreen ? 0 : 3;
-        const footerLines = this.fullscreen ? 0 : 2;
+        // The overlay owns the whole terminal (100% width, full height, no
+        // margin), so the frame has to fit in exactly `rows` lines: anything
+        // longer is clipped by pi's maxHeight and loses the bottom border.
+        const rows = Math.max(1, this.tui.terminal.rows || 24);
+        // Full chrome is a 3-row header (title, path, blank), a 2-row footer
+        // (blank, action line) and the 2 borders. On a very short terminal the
+        // path line and the footer are dropped before the frame is clipped.
+        const compact = rows < 8;
+        const headerLines = compact ? 1 : 3;
+        const footerLines = compact ? 0 : 2;
         const borderLines = 2;
         const innerWidth = Math.max(10, width - 2);
-        const contentHeight = Math.max(1, maxHeight - headerLines - footerLines - borderLines);
+        const contentHeight = Math.max(1, rows - headerLines - footerLines - borderLines);
 
         const markdownLines = this.markdown.render(innerWidth);
 
@@ -243,8 +267,8 @@ class MarkdownViewerOverlayComponent {
         const visibleLines = contentLines.slice(this.scrollOffset, this.scrollOffset + contentHeight);
         const lines: string[] = [];
 
-        if (!this.fullscreen) {
-            lines.push(this.buildTitleLine(innerWidth));
+        lines.push(this.buildTitleLine(innerWidth));
+        if (headerLines > 1) {
             lines.push(this.buildMetaLine(innerWidth));
             lines.push("");
         }
@@ -256,7 +280,7 @@ class MarkdownViewerOverlayComponent {
             lines.push("");
          }
 
-        if (!this.fullscreen) {
+        if (footerLines > 0) {
             lines.push("");
             lines.push(this.buildActionLine(innerWidth));
         }
@@ -270,18 +294,19 @@ class MarkdownViewerOverlayComponent {
             return borderColor("│") + truncated + " ".repeat(padding) + borderColor("│");
          });
 
+        // Below five rows even the compact frame cannot hold one content line:
+        // degrade to a bare title plus text instead of a clipped border.
+        if (rows < borderLines + headerLines + 1) {
+            return [this.buildTitleLine(width), ...visibleLines]
+                .slice(0, rows)
+                .map((line) => truncateToWidth(line, width));
+        }
         return [top, ...framedLines, bottom].map((line) => truncateToWidth(line, width));
     }
 
     invalidate(): void {
         // Rebuilding is unnecessary: the markdown text never changes while open.
         // Kept for Component interface compatibility.
-    }
-
-    private getMaxHeight(): number {
-        const rows = this.tui.terminal.rows || 24;
-        if (this.fullscreen) return Math.max(10, Math.floor(rows * 0.88));
-        return Math.max(10, Math.floor(rows * 0.88));
     }
 
     private buildTitleLine(width: number): string {
@@ -306,9 +331,15 @@ class MarkdownViewerOverlayComponent {
 
     private buildActionLine(width: number): string {
         const close = this.theme.fg("accent", "esc") + this.theme.fg("dim", " close");
-        const full = this.theme.fg("accent", "f") + this.theme.fg("dim", " fullscreen");
-        const nav = this.theme.fg("dim", "j/k: scroll. ctrl+d/u: half page. ←/→: page.");
-        let line = [close, full, nav].join(this.theme.fg("muted", " • "));
+        const nav = this.theme.fg(
+            "dim",
+            "j/k scroll. ctrl+d/u half page. ←/→ page. g/G top/bottom.",
+        );
+        const parts = [close, nav];
+        if (this.tui.mode === "fullscreen") {
+            parts.push(this.theme.fg("dim", "wheel scroll"));
+        }
+        let line = parts.join(this.theme.fg("muted", " • "));
         if (this.totalLines > this.viewHeight) {
             const start = Math.min(this.totalLines, this.scrollOffset + 1);
             const end = Math.min(this.totalLines, this.scrollOffset + this.viewHeight);
@@ -318,8 +349,12 @@ class MarkdownViewerOverlayComponent {
     }
 
     private scrollBy(delta: number): void {
+        this.scrollTo(this.scrollOffset + delta);
+    }
+
+    private scrollTo(offset: number): void {
         const maxScroll = Math.max(0, this.totalLines - this.viewHeight);
-        this.scrollOffset = Math.max(0, Math.min(this.scrollOffset + delta, maxScroll));
+        this.scrollOffset = Math.max(0, Math.min(offset, maxScroll));
     }
 }
 
@@ -364,7 +399,9 @@ async function openViewer(
          },
         {
             overlay: true,
-            overlayOptions: { width: "80%", anchor: "center" },
+            // Full terminal, no margin: the component renders exactly `rows`
+            // lines, so the frame's bottom border is never clipped.
+            overlayOptions: { width: "100%", maxHeight: "100%", row: 0, col: 0, margin: 0 },
             onHandle: (handle) => {
                 runtime.handle = handle;
                 if (runtime.closed) {
@@ -372,6 +409,7 @@ async function openViewer(
                      return;
                  }
                 activeViewerHandle = handle;
+                handle.focus();
              },
          },
     ).catch((error) => {
@@ -419,7 +457,7 @@ export default function viewerExtension(pi: ExtensionAPI) {
         name: "show_markdown",
         label: "Show Markdown",
         description:
-            "Render a markdown file for the user in a scrollable viewer overlay. " +
+            "Render a markdown file for the user in a scrollable full-terminal reader. " +
             "Call this after writing or updating a markdown file (plans, reports, docs) " +
             "so the user can read the rendered result. When the file was modified, " +
             "include changeSummary: 1-3 sentences of user-facing prose describing " +
