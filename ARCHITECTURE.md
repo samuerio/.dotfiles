@@ -16,7 +16,7 @@ IDE 级编辑能力，集成 `telescope`/`fzf` 搜索与 `opencode.nvim` AI 工�
 ### `pi/agent/extensions/`
 
 pi coding agent 的自定义 TypeScript 扩展集，仓库中除 `nvim/` 外最活跃的子系统。按职责分组：
-会话编排与交接（`continue`、`find-session`（search_sessions 工具 + /search-sessions 面板：browse 模式列出
+会话编排与交接（`continue`、`session-search`（search_sessions 工具 + /search-sessions 面板：browse 模式列出
 全部会话、Enter 注入代表命中、ctrl+e 追加会话引用、ctrl+o markdown 全文预览（n/N 匹配导航，不做内联高亮））、`handoff`、`session-breakdown`、`worktree-task`（worktree 隔离派发：
 fresh git worktree（branch = alias）+ tmux 子会话 + `.pi/worktree-tasks/tasks/` 任务注册表 + 结果回报）、`tmux-split-fork`、
 `goal`（目标驱动自动迭代：`/goal` 命令族 + agent_settled 续跑循环 + worker 模型无工具 verifier 判定完成）、
@@ -40,18 +40,35 @@ TUI 工具与编辑（`preview`、`view-image`、`files`、
 `pi-tui`、`pi-ai`。子代理（`subagents.ts` 单文件扩展：spawn 隔离子 pi 进程的 Subagent 机制 +
 `task`/`finder`/`oracle`/`librarian` 四个工具各自的 spec 常量与注册）与 session 工具
 （`read-session.ts`：read_session、read_session_compaction、read_session_entry 三件套，只读解析 session
-JSONL；`find-session.ts`：search_sessions 工具 + /search-sessions 命令，无索引实时扫描：原始文本预滤 +
-活跃分支解析，会话级归组（代表命中 + more=N）与两级键排序（首条 user 消息命中优先），
-scope=all 可跨项目搜索（当前项目优先）；命令侧为常驻搜索面板（查询框 + 结果列表 + 扫描信封；
-Enter 上下文敏感：词干净时注入选中命中、词改动时重扫，Esc 不写会话，ctrl+o 预览该命中全文与
-会话内其他命中））
-也都是本目录的顶层扩展。
+JSONL；`session-search/`：会话检索与归档这一件事的两半，一个扩展（`index.ts` 只做组合与端口接线）——
+`search.ts` 提供 search_sessions 工具 + /search-sessions 命令，热侧为无索引实时扫描（原始文本预滤 +
+活跃分支解析），冷侧查全局归档索引，两侧共用 `core.ts` 的同一套 matcher / snippet / ranking，在命中层
+合并（会话级归组：代表命中 + more=N，两级键排序：首条 user 消息命中优先），scope=all 可跨项目搜索
+（当前项目优先）；`envelope.ts` 单独构建答案行（pi-free、纯函数、可在纯 `node --test` 下单测）：只报
+会话级事实与保留项，即 `hits` + `(K archived)`、`(no sessions in scope)`、`coldUnavailable`、
+`truncated`、`unreadable (hot: …)`，扫描工作量（`listed`/`scanned`/冷侧条目数）只留在 `details`；
+命令侧为常驻搜索面板（查询框 + 结果列表 + 面板底行散文）；Enter 上下文敏感：词干净时注入选中命中、词改动时重扫，
+Esc 不写会话，ctrl+o 预览该命中全文与会话内其他命中）；`archive.ts` 提供 /archive 命令族，做会话冷热
+分离——`run` 把静默超过阈值的会话 move（`rename`，不改字节）到
+`~/.pi/agent/archive/sessions/<project>/` 并把可搜索投影 ingest 进全局 `archive.db`；`rebuild` 以**归档目录**
+为准重建索引（盘上有、库里没有的摄入，库里有、盘上没了的删行，`source_dir` 只能从旧行 join 回来），因此
+索引被删、损坏或 schema 升级都能修：损坏的库先改名成 `archive.db.corrupt-<时间>` 隔离，重建完成后无条件
+盖齐三个版本号；`restore` 按记录的 source_dir 搬回并删索引行（source_dir 为空时明确告知回落到默认根）；
+命令默认 dry-run，
+`--apply` 才落盘，`.lock` 串行化 archiver；`store.ts` 与 `ngram.ts` 是该目录私有的库与分词实现，
+`tests/` 放这两个模块的单测）
+也都是本目录的顶层单元。
+lib 分层：`lib/` 供多个扩展共用，禁止 import `extensions/`；扩展反过来可以 import lib。
+归档是自包含的：`lib/session-common.ts` 不知道 archive 存在（归档把文件 MOVED 出了 sessions 根目录，
+所以 `resolveSessionRef` 的 id 查找天然找不到它们，调阅时传归档路径）。跨扩展不需要任何反向通道——
+共享介质是磁盘（`archive.db`、被搬走的 .jsonl 本身），因为 pi 用 jiti 且 `moduleCache: false` 加载扩展，
+每个扩展各有一份模块实例，跨扩展的模块状态（哪怕是 `lib/` 里的一个变量）在消费方永远是 undefined。
 扩展间共享的非扩展模块放在 `lib/` 子目录（`lib/worker.ts`：从 modes.json 解析当前激活模式的
 `roles.subagents` pin（provider/model/thinkingLevel），供 `answer`、`handoff`、`compact-worker` 与 `goal` 的
 verifier 发起一次性 LLM 请求时使用；`lib/session-common.ts`：session JSONL 解析管线（读/解析分离：readSessionText 供预滤、
-parseSessionText 供解析），供 `read-session` 与 `find-session` 共用；
+parseSessionText 供解析），供 `read-session` 与 `session-search` 共用；
 `lib/session-preview.ts`：满屏会话预览 overlay（逐项懒渲染 + 滚动/细节档）+ read_session 风格转录格式化，
-供 `find-session`（ctrl+o 全文预览）、`worktree-task`（preview 动作）与 `schedule`（run 会话预览）共用，
+供 `session-search`（ctrl+o 全文预览）、`worktree-task`（preview 动作）与 `schedule`（run 会话预览）共用，
 其内容来自 `lib/transcript-items.ts`（会话消息 → 视图模型，pi-free，可单测）、
 `lib/transcript-render.ts`（视图模型 → 终端行，正文走 pi 的 markdown、工具走 pi 的渲染器）与
 `lib/transcript-tool.ts`（工具调用渲染 fork，btw 与预览共用）；`lib/session-picker.ts`：内置 /resume 选择器的
@@ -65,6 +82,20 @@ pi 只把 `extensions/*.ts` 顶层文件与含 `index.ts` 的子目录
 `cron.ts`/`slots.ts`/`store.ts`/`run.ts`/`routing.ts`/`runs-view.ts`/`cli.ts`/`tick.ts` 不是扩展。
 
 **Architecture Invariant:** 扩展只能调用 pi 公开的 ExtensionAPI 与事件钩子，禁止直接操作 pi 内部状态。
+
+**Architecture Invariant:** 检索语义只有一份实现。`extensions/session-search/core.ts` 必须保持对 pi 只有
+类型级依赖（`import type`，零运行期 import），因为热侧扫描与冷侧 ingest 都靠它保证同一套
+haystack/snippet/rank，而它的单测要在纯 `node --test` 下跑。依赖共享规则时用参数注入（如
+`messageBodyText`/`haystackFor` 接收 `TextExtractor`，调用方传 `lib/session-common.ts` 的 `textOf`），
+不要在那个文件里另抄一份实现；归档 ingest 的投影规则（哪些 role 入库、
+`text`/`tool_calls` 如何切分、`active` 分支如何解析）只允许在 `extensions/session-search/store.ts` 定义，
+任何一处改动都要同时 bump `PROJECTION_VERSION` 或 `NGRAM_VERSION` 并要求 `/archive rebuild`。
+
+**Architecture Invariant:** `lib/` 禁止 import `extensions/`。扩展可以 import lib，反向传播只能落在
+共享介质上：文件系统、环境变量或 `globalThis`。
+**不要**用"在共享模块里放一个可变变量、由另一个扩展注册"的端口手法：pi 的扩展加载器用 jiti 且
+`moduleCache: false`，每个扩展拥有独立模块实例，注册方与消费方看到的不是同一个模块对象。
+新增跨扩展事实时先问"能不能只靠磁盘上的既有事实推导出来"。
 
 **Architecture Invariant:** `extensions/schedule/` 下的 `cron.ts`/`slots.ts`/`store.ts`/`run.ts`/`routing.ts`/`runs-view.ts`/`cli.ts`/`tick.ts` 只能 import
 node 标准库与同目录模块，禁止 import `@earendil-works/*` 或其它目录的扩展：这些文件由 crontab

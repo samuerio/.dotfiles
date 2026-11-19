@@ -1,6 +1,6 @@
 /**
  * Shared session-file plumbing for the session viewer extensions
- * (read-session.ts, find-session.ts).
+ * (read-session.ts, session-search/).
  *
  * This module intentionally holds only the pieces both consumers need:
  *
@@ -72,10 +72,14 @@ export async function resolveSessionRef(ref: string): Promise<string> {
 	const globalMatch = matchId(await SessionManager.listAll());
 	if (globalMatch) return globalMatch.path;
 
+	// Archived sessions were MOVED out of the sessions root, so no id lookup can
+	// find them: this module deliberately knows nothing about the archive. Hits
+	// and `/archive` output carry the archived path, which the path form above
+	// accepts directly.
 	throw new Error(
 		`no session found for "${ref}". Id lookup resolves pi session ids (exact match first, then prefix, most ` +
 			"recently modified wins) and only covers sessions under ~/.pi/agent/sessions/<project>/; for sessions " +
-			"outside that layout (e.g. subagent sessions), pass the .jsonl path instead.",
+			"outside that layout (subagent, archived), pass the .jsonl path instead.",
 	);
 }
 

@@ -1,6 +1,7 @@
 /**
- * Session search extension (single file): the search_sessions tool + the
- * /search-sessions slash command.
+ * Session search, hot side: the search_sessions tool + the /search-sessions
+ * slash command. Cold (archived) sessions are answered by `./store.ts` and
+ * merged into the same hit set; both sides share `./core.ts`.
  *
  * Search capability forked from `adobe/pi-session-search` (compileQuery with
  * its `g`/`y` flag stripping, snippet generation, newest-first ordering, and
@@ -104,12 +105,11 @@
  * the snippet window skipped message text. A hit with neither note is a
  * single-match session whose snippet is the complete message, which is what
  * makes the absence meaningful rather than merely quiet.
- * The envelope's listed/scanned pair measures FILE coverage, not hit counts:
- * listed is every discovered session file, scanned the ones whose text was
- * actually searched. A literal query prefilters the rest on the raw text (a
- * query absent from a file's raw JSONL cannot appear in any parsed haystack),
- * so scanned far below listed is still full coverage; regex queries prefilter
- * nothing and scan every file.
+ * The answer line itself is built in `envelope.ts`; this module only projects
+ * the result onto it. FILE coverage (listed vs scanned) is deliberately NOT on
+ * that line: a literal query prefilters whole files on the raw text, so
+ * `scanned < listed` is the normal, complete case and reads like partial
+ * coverage. Both counters stay in the structured `details`.
  *
  * Sections: pure helpers (compileQuery / snippet / args parsing) →
  * searchSessions core → tool + command registration with TUI rendering
@@ -119,10 +119,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type {
-    AgentMessage,
-    AgentToolResult,
-} from "@earendil-works/pi-agent-core";
+import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import {
     buildContextEntries,
     DynamicBorder,
@@ -157,24 +154,41 @@ import {
     parseSessionText,
     readSessionText,
     textOf,
-} from "./lib/session-common.ts";
+} from "../lib/session-common.ts";
 import {
     loadSessionTranscript,
     sessionDisplayLabel,
-} from "./lib/session-preview.ts";
+} from "../lib/session-preview.ts";
+import {
+    MAX_HAYSTACK_CHARS,
+    SELF_EXCLUDED_CUSTOM_TYPES,
+    betterRank,
+    buildSnippet,
+    compareRank,
+    compileQuery,
+    haystackFor,
+    isRegexQuery,
+    messageTimestampMs,
+    normalizeForTier,
+    preview,
+    roleWeightOf,
+    type HitRank,
+    type SearchHit,
+} from "./core.ts";
+import {
+    type ColdState,
+    type EnvelopeInput,
+    formatEnvelope,
+    noHitsBody,
+} from "./envelope.ts";
+import {
+    type ArchiveHandle,
+    openArchiveForQuery,
+    queryCold,
+} from "./store.ts";
 
-const SNIPPET_BEFORE = 120;
-const SNIPPET_AFTER = 240;
-/**
- * Upper bound for the line-aligned snippet window. Only reached when the
- * match sits inside one pathologically long line (minified JSON, base64, a
- * wall-of-text paragraph); code blocks and prose lines stay far below it.
- */
-const SNIPPET_MAX_CHARS = 600;
-const MAX_HAYSTACK_CHARS = 256 * 1024; // ReDoS bound: truncate before regex
 const DEFAULT_MAX_RESULTS = 50;
 const HARD_MAX_RESULTS = 1000;
-const TOOL_CALL_ARGS_PREVIEW = 400;
 /**
  * Visual lines the collapsed tool-result preview shows (read-session.ts
  * uses 5). Raised to 7 because the preview drops the note lines (see
@@ -190,24 +204,6 @@ const NOTE_LINE_RE = /^\(\+\d+ more matching|^\(\d+ lines? omitted/;
  * pi equivalent of WorkBuddy's 3s rg soft-stop (without detaching rg).
  */
 const SOFT_BUDGET_MS = 3000;
-
-/**
- * custom_message customTypes excluded from search. Only `custom_message`
- * entries project to role=custom and reach the haystack; plain `custom`
- * bookkeeping entries (viewer-state, preview-state, goal, pi-subagent:*, ...)
- * are dropped by the projection, so listing them here would be dead code.
- * The set is deliberately minimal: answers/goal-continuation/inline are real
- * injected conversation content and stay searchable, so every addition needs
- * its own justification.
- *   - search-sessions: this tool's own output (self-amplification).
- *   - context: the /context panel injection.
- *   - session-breakdown: the breakdown injection.
- */
-const SELF_EXCLUDED_CUSTOM_TYPES = new Set([
-    "search-sessions",
-    "context",
-    "session-breakdown",
-]);
 
 const SEARCH_SESSIONS_DESCRIPTION =
     "Search the current project's pi sessions (one level: ~/.pi/agent/sessions/<project>/; pass " +
@@ -232,14 +228,23 @@ const SEARCH_SESSIONS_DESCRIPTION =
     "returns the full transcript; when the snippet window skipped message text, another note line " +
     "counts the omitted lines before/after and points at read_session_entry for the full message " +
     "(a snippet carrying no such note IS the whole message). Drill with the " +
-    "path or id via read_session for the full transcript, or entry=<entryId> via read_session_entry to " +
-    "drill into the exact entry. The result envelope reports " +
-    "query/scope/hits/scanned/listed/unreadable: listed counts the session files discovered and " +
-    "scanned the files whose text was actually searched (a literal query prefilters the rest on " +
-    "the raw text, so scanned far below listed still means full coverage, while a regex query " +
-    "prefilters nothing and scans them all); a session's other matching messages stay visible in " +
-    "the interactive panel's ctrl+o preview, and read_session returns the full transcript. When " +
-    "results were cut short, truncated=<reason> (maxResults, time-budget, or aborted). Read-only.";
+    "path via read_session for the full transcript (use the path, not the id, for an archived=1 hit: " +
+    "archived sessions sit outside the sessions root, so their id does not resolve), or entry=<entryId> via read_session_entry to " +
+    "drill into the exact entry. The last line answers three questions and nothing else. " +
+    "What came back: hits=<sessions>, plus (N archived) when the archive contributed some of them, " +
+    "or (no sessions in scope) when the scope held no session at all on either side (then hits=0 " +
+    "means \"nothing was there to search\", not \"your history lacks this\"). What is qualified: " +
+    "unreadable=<files> (hot: ...) for session files that could not be read or parsed and so never " +
+    "reached judgement, and coldUnavailable=1 (reason) when an archive exists but was not queried " +
+    "(usually /archive rebuild). Whether the search finished: truncated=<reason> (maxResults, " +
+    "time-budget, or aborted). Read hits=0 in that order: truncated means the answer is partial, " +
+    "(no sessions in scope) means there was nothing to search, unreadable means some files were " +
+    "skipped, and only when none of those appear is \"no match\" a real finding. Coverage counters " +
+    "are in the structured result, not on this line. Sessions moved out of the sessions root by " +
+    "/archive are searched through the global archive index (same query language, same scope): " +
+    "their hits carry archived=1 on the session line, and a hit marked stale=1 has no valid entry " +
+    "ref (the archived file changed since it was ingested) so drill it by session instead. " +
+    "Read-only.";
 
 export const SearchSessionsParams = Type.Object({
     query: Type.String({
@@ -249,8 +254,7 @@ export const SearchSessionsParams = Type.Object({
             "positioning and leak lastIndex state across messages). A plain MULTI-WORD query is an EXACT " +
             "PHRASE, not one keyword per word (\"foo bar\" matches only that literal string, whitespace " +
             "included); to OR across keywords use the regex form, e.g. /foo|bar|baz/i, and /foo\\s+bar/i " +
-            "when the spacing between two words is unknown. There is no AND form. Regex queries skip the " +
-            "raw-text prefilter and parse every session file, so scanned then equals listed.",
+            "when the spacing between two words is unknown. There is no AND form.",
     }),
     since: Type.Optional(
         Type.String({
@@ -296,36 +300,19 @@ export const SearchSessionsParams = Type.Object({
                 "--session-dir outside the sessions root, 'all' degrades to 'project'.",
         }),
     ),
+    cold: Type.Optional(
+        Type.Boolean({
+            description:
+                "Also search sessions archived by /archive through the global archive index. " +
+                "Default true (archived sessions are otherwise invisible). Set false to force a " +
+                "hot-only file scan.",
+        }),
+    ),
 });
 
-export interface SearchHit {
-    /** Resolved absolute session file path (the always-drillable ref). */
-    sessionPath: string;
-    /** Session id from the JSONL header (the natural read_session argument). */
-    sessionId: string;
-    /** Session entry id — the read_session_entry drill handle. */
-    entryId: string;
-    /** Message timestamp from the session entry. */
-    timestamp: string;
-    /** Message role as emitted by sessionEntryToContextMessages. */
-    role: string;
-    /** Match plus surrounding context (120 chars before / 240 after). */
-    snippet: string;
-    /** Line breaks the snippet window skipped in the message text BEFORE
-     *  the window (0 = the snippet starts at the message start). */
-    omittedBeforeLines: number;
-    /** Line breaks the snippet window skipped AFTER the window (0 = the
-     *  snippet runs to the message end). */
-    omittedAfterLines: number;
-    /**
-     * The session's OTHER matching messages, when this hit is the session's
-     * representative (grouping output); absent for single-hit sessions.
-     */
-    more?: number;
-}
+export type { SearchHit } from "./core.ts";
 
 export interface SearchSessionsDetails {
-    path?: string;
     hitCount: number;
     /** Set when results were cut short: "maxResults", "time-budget", or "aborted". */
     truncated?: string;
@@ -339,162 +326,15 @@ export interface SearchSessionsDetails {
     scope: "project" | "all";
     /** True when an 'all' request degraded to project scope. */
     allDegraded: boolean;
+    /** Archive side of this search; absent when no archive exists. */
+    cold?: ColdSideReport;
+    /** Whether the archive index took part, and if not, why. */
+    coldState: ColdState;
 }
 
 // ============================================================================
 // Pure helpers
 // ============================================================================
-
-/**
- * Compile a query into a match regex. Two forms:
- *
- *   - `/pattern/flags`: a user regex, but the `g` and `y` flags are forced
- *     off. `g` makes String.match drop `.index` (snippet positioning breaks);
- *     `y` (sticky) leaks `lastIndex` state across haystacks, making matches
- *     depend on scan history. Both strip rules come from upstream
- *     (adobe/pi-session-search), where each once caused a real bug.
- *   - Plain string: regex metacharacters escaped, compiled case-insensitive
- *     (a literal substring match).
- */
-export function compileQuery(query: string): RegExp {
-    const m = query.match(/^\/(.+)\/([gimsuy]*)$/);
-    if (m) {
-        const safeFlags = m[2].replace(/[gy]/g, "");
-        return new RegExp(m[1], safeFlags);
-    }
-    return new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-}
-
-/**
- * Normalization for tier-1 comparison: lowercase + whitespace removed, so
- * "追踪 Goal.ts" and "追踪goal.ts" compare equal.
- */
-function normalizeForTier(text: string): string {
-    return text.toLowerCase().replace(/\s+/g, "");
-}
-
-/** A `/regex/flags` query (as opposed to a literal keyword). */
-function isRegexQuery(query: string): boolean {
-    return /^\/(.+)\/([gimsuy]*)$/.test(query);
-}
-
-/**
- * Role weight for representative-hit selection and same-tier tiebreaks:
- * user > branch/compaction summary > assistant > custom. Never a sort key on
- * its own.
- */
-const ROLE_WEIGHTS: Record<string, number> = {
-    user: 1.0,
-    branchSummary: 0.9,
-    compactionSummary: 0.9,
-    assistant: 0.75,
-    custom: 0.5,
-};
-
-function roleWeightOf(msg: AgentMessage): number {
-    return ROLE_WEIGHTS[msg.role] ?? 0;
-}
-
-/**
- * Message timestamp in ms (the runtime's getMessageActivityTime prefers the
- * message timestamp over the entry timestamp); undefined when absent.
- */
-function messageTimestampMs(msg: AgentMessage): number | undefined {
-    const ts = (msg as { timestamp?: unknown }).timestamp;
-    return typeof ts === "number" && Number.isFinite(ts) ? ts : undefined;
-}
-
-/** Ranking key of one hit within its session. */
-interface HitRank {
-    /** 1 = query hits the session's first user message; 2 = body-only hit. */
-    tier: number;
-    /** Literal query exactly equals the first user message (normalized). */
-    exact: boolean;
-    /** Message timestamp in ms (NaN sorts last). */
-    ts: number;
-    roleWeight: number;
-}
-
-/** Order hits/sessions: tier asc, exact-first-message, newest, role weight. */
-function compareRank(a: HitRank, b: HitRank): number {
-    if (a.tier !== b.tier) return a.tier - b.tier;
-    if (a.exact !== b.exact) return a.exact ? -1 : 1;
-    if (a.ts !== b.ts) return (Number.isFinite(b.ts) ? b.ts : 0) - (Number.isFinite(a.ts) ? a.ts : 0);
-    return b.roleWeight - a.roleWeight;
-}
-
-/** True when rank `a` outranks `b` for representative-hit selection. */
-function betterRank(a: HitRank, b: HitRank): boolean {
-    return compareRank(a, b) < 0;
-}
-
-/** One-line, whitespace-collapsed preview (shared shape with read-session.ts). */
-function preview(text: string, max: number): string {
-    const line = text.replace(/\s+/g, " ").trim();
-    return line.length > max ? `${line.slice(0, max)}...` : line;
-}
-
-/**
- * Assistant toolCall parts formatted for the haystack, opt-in via
- * includeToolCalls: `[tool: <name> <args preview>]` per call, args JSON
- * truncated to 400 chars. Tool RESULTS are never searched — they carry whole
- * file contents and command output that drown meaningful matches.
- */
-function toolCallHaystack(
-    msg: Extract<AgentMessage, { role: "assistant" }>,
-): string {
-    const blocks: string[] = [];
-    for (const part of msg.content) {
-        if (part.type !== "toolCall") continue;
-        let json: string;
-        try {
-            json = JSON.stringify(part.arguments);
-        } catch {
-            json = "(unserializable arguments)";
-        }
-        blocks.push(
-            `[tool: ${part.name} ${preview(json, TOOL_CALL_ARGS_PREVIEW)}]`,
-        );
-    }
-    return blocks.join("\n");
-}
-
-/**
- * Extract the searchable haystack for one message; empty string means not
- * searchable. Role knowledge converges here: user/assistant/custom carry
- * their body in msg.content, branchSummary/compactionSummary carry it in
- * msg.summary (content is absent on those), and every other role
- * (toolResult, bashExecution, ...) is unsearchable. Assistant toolCall text
- * is appended opt-in via includeToolCalls.
- *
- * realEnd marks where the MESSAGE's own text ends: the tool-call blocks are
- * synthetic `[tool: …]` renderings rather than entry text, so omission
- * counts must stop there or they would promise "lines of this message" that
- * exist only in that rendering.
- */
-function haystackFor(
-    msg: AgentMessage,
-    includeToolCalls: boolean,
-): { text: string; realEnd: number } {
-    if (
-        msg.role === "user" ||
-        msg.role === "assistant" ||
-        msg.role === "custom"
-    ) {
-        const text = textOf(msg.content);
-        if (msg.role === "assistant" && includeToolCalls) {
-            return {
-                text: `${text}\n${toolCallHaystack(msg)}`,
-                realEnd: text.length,
-            };
-        }
-        return { text, realEnd: text.length };
-    }
-    if (msg.role === "branchSummary" || msg.role === "compactionSummary") {
-        return { text: msg.summary, realEnd: msg.summary.length };
-    }
-    return { text: "", realEnd: 0 };
-}
 
 /**
  * Validate an explicitly passed maxResults. Invalid explicit values throw
@@ -512,93 +352,6 @@ function validateMaxResults(max: number | undefined): number {
     return Math.min(max, HARD_MAX_RESULTS);
 }
 
-/**
- * Build the snippet for a match at `index` in `haystack`: the window
- * SNIPPET_BEFORE before / SNIPPET_AFTER after the match EXTENDED TO LINE
- * BOUNDARIES, with horizontal whitespace collapsed but line structure kept
- * (session text is prose/markdown/code, where line breaks carry real signal
- * — a hit inside a code block is unreadable as one run-on line). The
- * before/after values are therefore minimums, not exact sizes.
- *
- * The cap is the escape hatch for the one case line alignment cannot serve: a
- * match inside a single pathologically long line (minified JSON, base64, a
- * wall-of-text paragraph) would otherwise drag the whole line in. There the
- * raw character window is the correct output — there are no meaningful line
- * boundaries to align to. Mid-line truncation of a long single-line message
- * is intended behavior, not a bug.
- *
- * Pure text transform: no indentation here (the two formatters indent via
- * indentBlock; pre-indenting would double-indent the preview panel's
- * fallback path). The omission counts travel WITH the text, because a bare
- * snippet cannot disclose that it is a window: the consumer sees text and
- * has no way to know the message continued past it.
- *
- * `haystack` is the SEARCHED text (the ReDoS bound truncates it) and must be
- * a prefix of `fullText`, the untruncated projection: the window and the
- * visible text come from the searched prefix (byte-identical to searching
- * the whole thing), while the omission counts may look past it, so a match
- * near the search bound still reports the message text that follows instead
- * of falsely claiming completeness. Both counts are line breaks in the
- * omitted spans (a blank-only span counts as nothing omitted); the cap case
- * still reports the line breaks its raw window skipped, only its first/last
- * visible line is additionally cut mid-line.
- */
-export function buildSnippet(
-    haystack: string,
-    index: number,
-    bounds: { fullText?: string; realEnd?: number } = {},
-): { text: string; omittedBeforeLines: number; omittedAfterLines: number } {
-    const fullText = bounds.fullText ?? haystack;
-    // Where the message's own text ends (see haystackFor): omission counts
-    // stop there so they never promise message lines that only exist in the
-    // synthetic tool-call rendering.
-    const realEnd = Math.min(bounds.realEnd ?? fullText.length, fullText.length);
-    const from = Math.max(0, index - SNIPPET_BEFORE);
-    const to = index + SNIPPET_AFTER;
-    const lineStart = haystack.lastIndexOf("\n", from) + 1;
-    const lineEndAt = haystack.indexOf("\n", to);
-    const lineEnd = lineEndAt === -1 ? haystack.length : lineEndAt;
-    const capped = lineEnd - lineStart > SNIPPET_MAX_CHARS;
-    const window = capped
-        ? haystack.slice(from, to)
-        : haystack.slice(lineStart, lineEnd);
-    // The capped window is a raw slice, so its visible end clamps to the
-    // searched length (a match within SNIPPET_AFTER of the search bound
-    // would otherwise start the omission count past real content).
-    const windowStart = capped ? from : lineStart;
-    const windowEnd = capped ? Math.min(to, haystack.length) : lineEnd;
-    const text = window
-        .replace(/\r\n/g, "\n") // CRLF first: a lone \r would otherwise
-        // survive as trailing whitespace on its line
-        .replace(/[^\S\n]+/g, " ") // horizontal runs only
-        .replace(/\n{3,}/g, "\n\n") // cap blank-line runs
-        .trim();
-    // Line breaks in an omitted span, blank-only spans excluded: "…\n\n…"
-    // before the window omits no information. indexOf scanning rather than
-    // trim+split: a span can be a whole large message and the count must not
-    // allocate a copy of it.
-    const breaksIn = (span: string): number => {
-        if (!/[^\s]/.test(span)) return 0;
-        let count = 0;
-        let at = span.indexOf("\n");
-        while (at !== -1) {
-            count += 1;
-            at = span.indexOf("\n", at + 1);
-        }
-        return count;
-    };
-    return {
-        text,
-        // Before the window the searched text IS the full text (the search
-        // bound only ever cuts the tail), so either source counts the same.
-        // After it the count looks into fullText (past the search bound, so
-        // "no note = complete message" survives it) but stops at realEnd (so
-        // synthetic tool-call lines are never promised as message lines).
-        omittedBeforeLines: breaksIn(fullText.slice(0, windowStart)),
-        omittedAfterLines: breaksIn(fullText.slice(windowEnd, realEnd)),
-    };
-}
-
 /** Parse a slash-command argument string into search options + the query. */
 export function parseSearchArgs(args: string): {
     query: string;
@@ -607,25 +360,35 @@ export function parseSearchArgs(args: string): {
     maxResults: number | undefined;
     includeToolCalls: boolean;
     all: boolean;
+    hotOnly: boolean;
 } {
     let since: string | undefined;
     let until: string | undefined;
     let maxResults: number | undefined;
     let includeToolCalls = false;
     let all = false;
+    let hotOnly = false;
     const queryParts: string[] = [];
 
     for (const token of args.trim().split(/\s+/).filter(Boolean)) {
         if (token.startsWith("--")) {
             const [flag, value] = token.slice(2).split("=", 2);
+            // A value-less `--since` used to fall through as undefined AND
+            // leak its argument into the query ("--since 7d" searched for
+            // "7d"): fail loudly instead, like parseRunArgs does.
             switch (flag) {
                 case "since":
+                    if (!value)
+                        throw new Error("--since needs a value, e.g. --since=7d");
                     since = value;
                     break;
                 case "until":
+                    if (!value)
+                        throw new Error("--until needs a value, e.g. --until=2025-01-01");
                     until = value;
                     break;
                 case "max":
+                    if (!value) throw new Error("--max needs a value, e.g. --max=20");
                     maxResults = Number(value);
                     break;
                 case "include-tool-calls":
@@ -634,9 +397,12 @@ export function parseSearchArgs(args: string): {
                 case "all":
                     all = true;
                     break;
+                case "hot-only":
+                    hotOnly = true;
+                    break;
                 default:
                     throw new Error(
-                        `unknown flag --${flag} (supported: since, until, max, include-tool-calls, all).`,
+                        `unknown flag --${flag} (supported: since, until, max, include-tool-calls, all, hot-only).`,
                     );
             }
             continue;
@@ -649,7 +415,7 @@ export function parseSearchArgs(args: string): {
     // now). Unknown-flag errors stay loud — only the missing-query error is
     // gone.
     const query = queryParts.join(" ").trim();
-    return { query, since, until, maxResults, includeToolCalls, all };
+    return { query, since, until, maxResults, includeToolCalls, all, hotOnly };
 }
 
 /** Display-only path shortening (matches read-session.ts shortenPath): cwd-relative or ~-collapsed. */
@@ -678,11 +444,6 @@ function errorMessage(error: unknown): string {
 }
 
 /** Envelope list rendering: show the first few entries, count the rest. */
-function capList(items: string[], max = 10): string {
-    if (items.length <= max) return items.join(", ");
-    return `${items.slice(0, max).join(", ")} +${items.length - max} more`;
-}
-
 // ============================================================================
 // searchSessions core
 // ============================================================================
@@ -711,6 +472,33 @@ export interface SearchSessionsOptions {
      * sessions root, current project ranked first).
      */
     scope?: "project" | "all";
+    /**
+     * Cold side: also search archived sessions through the global archive
+     * index. Default true; false keeps the historical hot-only file scan.
+     */
+    cold?: boolean;
+}
+
+/**
+ * Cold side of one search: what the archive index answered, why it answered
+ * that way, and whether it could answer at all. Reported on every cold pass so
+ * a truncated or degraded cold search is never mistaken for "no matches".
+ */
+export interface ColdSideReport {
+    /** Archived sessions in scope. */
+    listed: number;
+    /** Candidate rows the prefilter surfaced (rows scanned on fallback). */
+    examined: number;
+    /** Candidates that survived the shared second-pass matcher. */
+    verified: number;
+    /** Which prefilter produced the candidates. */
+    prefilter: "ngram" | "scan";
+    /** Archived sessions whose file no longer matches what was ingested. */
+    stale: number;
+    /** Set when the cold pass stopped early (maxResults, time-budget, aborted). */
+    truncated?: string;
+    /** Set when the archive exists but cannot be queried (/archive rebuild). */
+    unavailable?: string;
 }
 
 export interface SearchSessionsResult {
@@ -726,6 +514,10 @@ export interface SearchSessionsResult {
     scope: "project" | "all";
     /** True when an 'all' request degraded to project scope. */
     allDegraded: boolean;
+    /** Cold (archive) side of this search; absent when no archive exists. */
+    cold?: ColdSideReport;
+    /** Whether the archive index took part, and if not, why. */
+    coldState: ColdState;
 }
 
 /** One matched message with its ranking key: the scan's unit of work. */
@@ -789,7 +581,7 @@ function collectEntryHits(
             // truncated before matching (ReDoS bound). The untruncated text
             // still travels to buildSnippet, so omission counts can see past
             // the bound.
-            const rawHaystack = haystackFor(msg, match.includeToolCalls);
+            const rawHaystack = haystackFor(msg, match.includeToolCalls, textOf);
             if (!rawHaystack.text) continue;
             const searchedEnd = Math.min(
                 rawHaystack.text.length,
@@ -897,6 +689,14 @@ function collectEntryHits(
 export async function searchSessions(
     options: SearchSessionsOptions,
 ): Promise<SearchSessionsResult> {
+    // An empty haystack regex matches EVERY message, so an empty query would
+    // return maxResults arbitrary sessions and read as a real search. The
+    // slash command deliberately allows an empty box (it opens the panel);
+    // programmatic callers get the same treatment as an invalid maxResults.
+    if (options.query.trim() === "")
+        throw new Error(
+            "search_sessions: query is empty. Pass a keyword or /regex/flags; an empty query would match every session.",
+        );
     const re = compileQuery(options.query);
     const max = validateMaxResults(options.maxResults);
     const sinceMs =
@@ -1169,16 +969,112 @@ export async function searchSessions(
     // weight), then truncated. Truncation happens after the full scan +
     // ordering, so the budget is spent on the best sessions rather than on
     // whichever was scanned first.
-    const ordered = [...groups.values()].sort((a, b) => {
+    // Cold side: archived sessions answer from the archive index
+    // (store.ts). Its hits are already session-grouped and ranked with
+    // the same key, so the merge is one sort over both lists. No dedup is
+    // needed: archiving MOVES the file out of the hot root, so a session can
+    // never be on both sides.
+    let cold: ColdSideReport | undefined;
+    // The envelope needs to tell "no archive" from "archive skipped" from
+    // "archive unusable": all three produce zero cold hits, and only the last
+    // one is worth a caveat. It also gates the "no sessions in scope" claim,
+    // which would be a lie whenever archived sessions were never counted.
+    let coldState: ColdState = options.cold === false ? "skipped" : "absent";
+    const coldHits: Array<{
+        hit: SearchHit;
+        rank: HitRank;
+        isCurrentProject: boolean;
+    }> = [];
+    if (options.cold !== false) {
+        let handle: ArchiveHandle | undefined;
+        try {
+            handle = openArchiveForQuery();
+        } catch (error) {
+            // A corrupt / not-a-database file must degrade into
+            // coldUnavailable=1, not kill the whole search: the caveat channel
+            // has to cover it or the caller sees an error instead of a result.
+            coldState = "incompatible";
+            cold = {
+                listed: 0,
+                examined: 0,
+                verified: 0,
+                prefilter: "scan",
+                stale: 0,
+                // The answer line must carry a next step, as the README
+                // promises: a corrupt index is repairable now.
+                unavailable: `${errorMessage(error)}; run /archive rebuild`,
+            };
+        }
+        if (handle) {
+            try {
+                if (handle.incompatible) {
+                    coldState = "incompatible";
+                    cold = {
+                        listed: 0,
+                        examined: 0,
+                        verified: 0,
+                        prefilter: "scan",
+                        stale: 0,
+                        unavailable: handle.incompatible,
+                    };
+                } else {
+                    coldState = "queried";
+                    const result = queryCold(handle.db, {
+                        query: options.query,
+                        re,
+                        regexQuery,
+                        normalizedQuery,
+                        includeToolCalls,
+                        sinceMs,
+                        untilMs,
+                        // A degraded --all (custom session dir) must not widen the
+                        // cold side beyond the project the hot scan was reduced to.
+                        scope: allDegraded ? "project" : scope,
+                        cwd,
+                        currentProjectDir: sessionDir
+                            ? path.basename(sessionDirAbs)
+                            : undefined,
+                        budgetMs: SOFT_BUDGET_MS,
+                        maxSessions: max,
+                        signal,
+                    });
+                    coldHits.push(...result.hits);
+                    cold = {
+                        listed: result.listed,
+                        examined: result.examined,
+                        verified: result.verified,
+                        prefilter: result.prefilter,
+                        stale: result.stale,
+                        truncated: result.truncated,
+                    };
+                    if (truncated === undefined && result.truncated)
+                        truncated = result.truncated;
+                }
+            } finally {
+                handle.db.close();
+            }
+        }
+    }
+
+    // Session-level output: one representative hit per session, ordered by
+    // (current project first, tier asc, exact-first-message, newest, role
+    // weight), then truncated. Truncation happens after the full scan +
+    // ordering, so the budget is spent on the best sessions rather than on
+    // whichever was scanned first.
+    const merged = [
+        ...[...groups.values()].map((g) => ({
+            hit: g.total > 1 ? { ...g.best, more: g.total - 1 } : g.best,
+            rank: g.rank,
+            isCurrentProject: g.isCurrentProject,
+        })),
+        ...coldHits,
+    ].sort((a, b) => {
         if (a.isCurrentProject !== b.isCurrentProject)
             return a.isCurrentProject ? -1 : 1;
         return compareRank(a.rank, b.rank);
     });
-    const representatives: SearchHit[] = ordered.map((g) =>
-        g.total > 1 ? { ...g.best, more: g.total - 1 } : g.best,
-    );
-    const finalHits = representatives.slice(0, max);
-    if (representatives.length > finalHits.length && truncated === undefined)
+    const finalHits = merged.slice(0, max).map((entry) => entry.hit);
+    if (merged.length > finalHits.length && truncated === undefined)
         truncated = "maxResults";
 
     return {
@@ -1189,6 +1085,8 @@ export async function searchSessions(
         listed: discovered.length,
         scope,
         allDegraded,
+        cold,
+        coldState,
     };
 }
 
@@ -1225,18 +1123,6 @@ function omissionNote(hit: SearchHit): string | undefined {
     return `(${parts.join(" · ")} · read_session_entry for the full message)`;
 }
 
-/**
- * Envelope fragment for a cut-short scan: the reason plus the next step.
- * Undefined when the scan covered everything it discovered.
- */
-function truncationNote(truncated: string | undefined): string | undefined {
-    if (truncated === undefined) return undefined;
-    if (truncated === "maxResults")
-        return "truncated=maxResults (cap reached; narrow the query or raise maxResults)";
-    if (truncated === "time-budget") return "truncated=time-budget (time budget)";
-    return `truncated=${truncated}`;
-}
-
 /** Format hits for the tool result / slash command: the output contract lines. */
 export function formatHits(
     result: SearchSessionsResult,
@@ -1260,8 +1146,14 @@ export function formatHits(
                     (result.scope === "all"
                         ? ` project=${path.basename(path.dirname(hit.sessionPath))}`
                         : "") +
+                    (hit.archived ? " archived=1" : "") +
                     (more > 0 ? ` more=${more}` : ""),
-                `entry=${hit.entryId} ts=${hit.timestamp} role=${hit.role}`,
+                // A stale archived session keeps the timestamp/role but loses
+                // the entry ref: after a resume or a format migration the
+                // stored entry id is no longer a read_session_entry handle.
+                hit.stale
+                    ? `ts=${hit.timestamp} role=${hit.role} stale=1`
+                    : `entry=${hit.entryId} ts=${hit.timestamp} role=${hit.role}`,
                 moreNote(more),
                 omissionNote(hit),
                 // Snippets may span multiple lines (line-aligned, see
@@ -1274,21 +1166,35 @@ export function formatHits(
         );
     }
 
-    const envelopeParts = [
-        `query=${query}`,
-        `scope=${result.scope}${result.allDegraded ? "(degraded-to-project)" : ""}`,
-        `hits=${result.hits.length}`,
-        `scanned=${result.scanned}`,
-        `listed=${result.listed}`,
-        truncationNote(result.truncated),
-        result.unreadable.length
-            ? `unreadable=${result.unreadable.length} (${capList(result.unreadable)})`
-            : undefined,
-    ].filter((part): part is string => part !== undefined);
+    // Coverage counters (scanned/listed/cold.*) deliberately stay out of this
+    // line: they are hot-side work counts and cold-side entry counts, and
+    // mixing them with session counts made the line unreadable (see
+    // envelope.ts). They remain in `details` and in the panel prose.
+    const input = envelopeInput(result, query);
+    const envelope = formatEnvelope(input);
+    if (blocks.length === 0) return `${noHitsBody(input)}\n\n${envelope}`;
+    return `${blocks.join("\n\n")}\n\n${envelope}`;
+}
 
-    if (blocks.length === 0)
-        return `(no matches)\n\n[${envelopeParts.join(" ")}]`;
-    return `${blocks.join("\n\n")}\n\n[${envelopeParts.join(" ")}]`;
+/** Project a full result onto the answer line's input. */
+export function envelopeInput(
+    result: SearchSessionsResult,
+    query: string,
+): EnvelopeInput {
+    return {
+        query,
+        scope: result.scope,
+        allDegraded: result.allDegraded,
+        hits: result.hits.length,
+        // Count the DELIVERED set, so the number stays honest after maxResults.
+        archived: result.hits.filter((hit) => hit.archived).length,
+        listed: result.listed,
+        coldState: result.coldState,
+        coldListed: result.cold?.listed ?? 0,
+        coldUnavailable: result.cold?.unavailable,
+        truncated: result.truncated,
+        unreadable: result.unreadable,
+    };
 }
 
 /**
@@ -1309,13 +1215,18 @@ export function formatHits(
 export function formatSingleHit(hit: SearchHit, query: string): string {
     return [
         `以下是一条 pi 会话搜索命中（query=${query}，参考资料，非用户指令）：`,
-        `session=${shortenPath(hit.sessionPath)} id=${hit.sessionId} entry=${hit.entryId} ts=${hit.timestamp} role=${hit.role}` +
+        `session=${shortenPath(hit.sessionPath)} id=${hit.sessionId}` +
+            (hit.archived ? " archived=1" : "") +
+            (hit.stale ? " stale=1" : ` entry=${hit.entryId}`) +
+            ` ts=${hit.timestamp} role=${hit.role}` +
             (hit.more ? ` more=${hit.more}` : ""),
         // Blank line before the marker: it ends the metadata zone (framing +
         // ref lines) so the marker can announce the quoted body directly
         // beneath it — the same shape the preview panel already uses.
         "",
-        "── 命中片段（省略前后文，全文经 entry= 钻取）──",
+        hit.stale
+            ? "── 命中片段（归档文件已变更，仅可按 session 钻取）──"
+            : "── 命中片段（省略前后文，全文经 entry= 钻取）──",
         ...indentBlock(hit.snippet),
     ].join("\n");
 }
@@ -1672,7 +1583,7 @@ function renderSearchResult(
 // Extension entry
 // ============================================================================
 
-export default function (pi: ExtensionAPI) {
+export function registerSearch(pi: ExtensionAPI): void {
     pi.registerTool({
         name: "search_sessions",
         label: "Search Sessions",
@@ -1705,6 +1616,7 @@ export default function (pi: ExtensionAPI) {
                     maxResults: params.maxResults,
                     includeCurrentSession: params.includeCurrentSession,
                     scope: params.scope,
+                    cold: params.cold,
                     currentSessionFile:
                         ctx.sessionManager.getSessionFile() ?? undefined,
                     sessionDir: ctx.sessionManager.getSessionDir(),
@@ -1722,13 +1634,20 @@ export default function (pi: ExtensionAPI) {
                         scanned: result.scanned,
                         scope: result.scope,
                         allDegraded: result.allDegraded,
+                        cold: result.cold,
+                        coldState: result.coldState,
                     },
                 };
             } catch (error) {
                 // Loudly surface query/validation errors (invalid regex, bad
                 // maxResults/since/until): the model should retry with a fixed
                 // query, not treat the search as silently empty.
-                throw new Error(`search_sessions: ${errorMessage(error)}`);
+                // Validation messages inside searchSessions already carry the
+                // tool prefix; add it only when it is missing (a doubled
+                // "search_sessions: search_sessions:" helps nobody).
+                throw new Error(
+                    `search_sessions: ${errorMessage(error).replace(/^search_sessions: /, "")}`,
+                );
             }
         },
 
@@ -1796,6 +1715,7 @@ export default function (pi: ExtensionAPI) {
             maxResults: parsed.maxResults,
             includeToolCalls: parsed.includeToolCalls,
             scope: parsed.all ? "all" : "project",
+            cold: !parsed.hotOnly,
             currentSessionFile:
                 ctx.sessionManager.getSessionFile() ?? undefined,
             sessionDir: ctx.sessionManager.getSessionDir(),
@@ -1961,6 +1881,22 @@ export default function (pi: ExtensionAPI) {
                     pluralize(results.hits.length, "hit"),
                     `scanned ${results.scanned} of ${results.listed} files`,
                 ];
+                // The cold pass is invisible in the file scan numbers (it reads
+                // the index, not files), so a hit set that came from the archive
+                // has to say so or "scanned 0 of 0" reads as "searched nothing".
+                if (results.cold) {
+                    parts.push(
+                        results.cold.unavailable
+                            ? "archive unusable (/archive rebuild)"
+                            // `verified` counts matching entry ROWS while `listed`
+                            // counts archived SESSIONS: name the unit or the
+                            // ratio reads as impossible.
+                            : `archive ${results.cold.verified} entries via ${results.cold.prefilter} of ${results.cold.listed} sessions` +
+                                  (results.cold.stale
+                                      ? `, ${results.cold.stale} stale`
+                                      : ""),
+                    );
+                }
                 if (results.truncated)
                     parts.push(`truncated=${results.truncated}`);
                 if (results.allDegraded)
@@ -2391,7 +2327,16 @@ export default function (pi: ExtensionAPI) {
                         if (!item) return;
                         if (results) {
                             const hit = results.hits[Number(item.value)];
-                            if (hit) done({ kind: "append", id: hit.sessionId });
+                            // Archived sessions were MOVED out of the sessions
+                            // root, so their bare id no longer resolves
+                            // (resolveSessionRef only lists that root). Append
+                            // the path instead: it is the only handle that works
+                            // for both sides.
+                            if (hit)
+                                done({
+                                    kind: "append",
+                                    id: hit.archived ? hit.sessionPath : hit.sessionId,
+                                });
                         } else if (browseSessions) {
                             const info = browseSessions[Number(item.value)];
                             if (info) done({ kind: "append", id: info.id });
@@ -2420,19 +2365,19 @@ export default function (pi: ExtensionAPI) {
 
         if (!picked) return; // Esc: nothing written
         if (picked.kind === "append") {
-            // The browse editor-append semantics. The id form
-            // resolves: resolveSessionRef falls back to listAll() across
-            // projects, and subagent trees (outside its coverage) are never
-            // listed here.
+            // The browse editor-append semantics. A hot id resolves through
+            // resolveSessionRef (falling back to listAll() across projects);
+            // an archived hit appends its path because the id was moved out of
+            // the sessions root and no longer resolves.
             const current = ctx.ui.getEditorText();
             const separator = current && !current.endsWith(" ") ? " " : "";
             ctx.ui.setEditorText(
                 `${current}${separator}read session ${picked.id}`,
             );
-            ctx.ui.notify(
-                `Added read session ${picked.id.slice(0, 8)}… to prompt`,
-                "info",
-            );
+            const shown = picked.id.includes("/")
+                ? shortenPath(picked.id)
+                : `${picked.id.slice(0, 8)}…`;
+            ctx.ui.notify(`Added read session ${shown} to prompt`, "info");
             return;
         }
         // Injected as a display-only custom message; no new turn. The
@@ -2450,7 +2395,8 @@ export default function (pi: ExtensionAPI) {
 
     pi.registerCommand("search-sessions", {
         description:
-            "Search pi sessions interactively (opens a search panel; --all for every project)",
+            "Search pi sessions interactively (opens a search panel; --all for every project, " +
+            "--hot-only skips archived sessions, --include-tool-calls searches tool call arguments)",
         handler: (args, ctx) => runPanel(args, ctx),
     });
 }
