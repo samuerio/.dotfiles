@@ -1,5 +1,6 @@
 # Agent specific
 agent/sessions/
+agent/archive
 agent/auth.json
 agent/bin/
 agent/settings.json
