@@ -89,6 +89,39 @@ function errorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * Footer key for the two destructive passes. `run --apply` and `rebuild --apply`
+ * over a real corpus take minutes, and the plan is printed BEFORE the work
+ * starts, so without a live footer line a long pass looks like a hang. Same
+ * lifecycle as `compact-worker.ts`: set on entry, overwrite per item, clear in
+ * `finally` so no path leaves the line behind.
+ */
+const STATUS_KEY = "archive";
+
+/**
+ * `<verb> 12/340 · 1.2 GB moved · 2026-01-01T09-00-00.jsonl`.
+ *
+ * Only the tail of the name is shown: session files are timestamped, and the
+ * timestamp is the part that identifies them, while the head is shared by
+ * every file in the directory.
+ */
+function progressLine(
+    verb: string,
+    done: number,
+    total: number,
+    file: string | undefined,
+    extra?: string,
+): string {
+    const name = file ? path.basename(file) : "";
+    const short = name.length > 40 ? `…${name.slice(-39)}` : name;
+    // An empty `file` is how a caller says "this phase has no per-item name";
+    // skipping the segment keeps the line from ending in a dangling separator.
+    const parts = [`${verb} ${done}/${total}`];
+    if (extra) parts.push(extra);
+    if (short) parts.push(short);
+    return parts.join(" · ");
+}
+
 /** `30d` / `12h` / `90m` / `2w` → milliseconds. */
 export function parseDuration(raw: string): number {
     const match = raw.trim().match(/^(\d+)\s*([mhdw])$/i);
@@ -447,7 +480,30 @@ async function runArchive(
     const failures: string[] = [];
     try {
         db = openArchiveDb();
-        for (const candidate of candidates) {
+        // Set again inside the loop, before the first ingest: the plan above was
+        // printed before the lock, so this is what turns a silent minute into a
+        // line that moves.
+        ctx.ui.setStatus(
+            STATUS_KEY,
+            progressLine(
+                "archiving",
+                0,
+                candidates.length,
+                candidates[0].file,
+                "starting",
+            ),
+        );
+        for (const [index, candidate] of candidates.entries()) {
+            ctx.ui.setStatus(
+                STATUS_KEY,
+                progressLine(
+                    "archiving",
+                    index + 1,
+                    candidates.length,
+                    candidate.file,
+                    `${formatBytes(movedBytes)} moved`,
+                ),
+            );
             const dest = path.join(
                 archiveSessionsDir(),
                 candidate.projectDir,
@@ -482,6 +538,9 @@ async function runArchive(
             if (ctx.signal?.aborted) break;
         }
     } finally {
+        // Before the close: a close that throws must not leave the footer
+        // claiming an archiving pass is still running.
+        ctx.ui.setStatus(STATUS_KEY, undefined);
         db?.close();
         release();
     }
@@ -492,6 +551,10 @@ async function runArchive(
         ...failures.slice(0, 5).map((line) => `  ${line}`),
     ];
     if (failures.length > 5) report.push(`  ... +${failures.length - 5} more`);
+    // The loop breaks on abort, so a short count is an interrupted pass, not a
+    // finished one; saying so keeps "Archived 3 sessions" from reading like the
+    // plan was drained.
+    if (ctx.signal?.aborted) report.push("  stopped early (interrupted)");
     ctx.ui.notify(report.join("\n"), failures.length ? "warning" : "info");
 }
 
@@ -576,7 +639,24 @@ async function rebuildArchive(
 
         let done = 0;
         const failures: string[] = [];
-        for (const file of disk.files) {
+        // Same footer contract as `run --apply`: the pass is minutes long over a
+        // real corpus and prints nothing else until it ends.
+        if (disk.files.length > 0)
+            ctx.ui.setStatus(
+                STATUS_KEY,
+                progressLine(
+                    "reindexing",
+                    0,
+                    disk.files.length,
+                    disk.files[0],
+                    "starting",
+                ),
+            );
+        for (const [index, file] of disk.files.entries()) {
+            ctx.ui.setStatus(
+                STATUS_KEY,
+                progressLine("reindexing", index + 1, disk.files.length, file),
+            );
             const row = byFile.get(file);
             const projectDir = row?.project_dir ?? path.basename(path.dirname(file));
             try {
@@ -602,6 +682,13 @@ async function rebuildArchive(
             }
         }
         let dropped = 0;
+        // No counter here: dropping is one short delete per vanished file, and
+        // painting each of them would cost more than the deletes.
+        if (missing.length > 0)
+            ctx.ui.setStatus(
+                STATUS_KEY,
+                `dropping ${pluralize(missing.length, "index row")}`,
+            );
         for (const row of missing) {
             try {
                 deleteSessionRows(db, row.session_id);
@@ -622,6 +709,9 @@ async function rebuildArchive(
         ];
         ctx.ui.notify(report.join("\n"), failures.length ? "warning" : "info");
     } finally {
+        // Before the close: a close that throws must not leave the footer
+        // claiming a rebuild is still running.
+        ctx.ui.setStatus(STATUS_KEY, undefined);
         db?.close();
         release();
     }

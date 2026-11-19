@@ -75,6 +75,10 @@ Archived 2 sessions / 2.1 KB, indexed 6 entries
    failed: 0
 ```
 
+`--apply` 跑的过程中会在 footer 挂一行实时进度（`archiving 12/340 · 1.2 GB moved · 2026-01-01T09-00-00.jsonl`），
+结束或出错都会清掉（`finally` 里 `setStatus(key, undefined)`，与 `compact-worker` 同一套生命周期）。
+没有这行的话，几百个文件的一趟要跑几分钟，期间屏幕完全不动，看起来像卡死。
+
 耗时主要在两处：读文件流式解析（620 MB 的会话约 4 秒、峰值 RSS 230 MB，不会撞 V8 的字符串长度上限），
 以及 FTS 写入。搬完热目录变小，`SessionManager.list(cwd)` 从秒级掉到百毫秒级。
 
@@ -84,6 +88,8 @@ Archived 2 sessions / 2.1 KB, indexed 6 entries
 /archive rebuild              # dry run：报盘上有多少、库里多少、要摄入几个
 /archive rebuild --apply
 ```
+
+`--apply` 同样在 footer 挂进度（`reindexing 12/379 · <文件名>`，收尾阶段变成 `dropping N index rows`）。
 
 **工作清单来自归档目录，不是数据库。** 盘上有、库里没有的文件会被摄入；库里有、盘上已消失的行会被删掉；只有 `source_dir`（会话原来所在的目录）从库里按路径 join 回来，库丢了它就为空。
 
