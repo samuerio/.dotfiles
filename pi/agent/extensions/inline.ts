@@ -25,9 +25,9 @@ type ExtensionUI = ExtensionCommandContext["ui"];
 // real markers. Used to filter them out of rg scan output before describing.
 const SELF_PATH = fileURLToPath(import.meta.url);
 
-const SYSTEM_PROMPT = `Identify genuine PI!: and PI?: task comments in rg -C3 -n -H output.
+const SYSTEM_PROMPT = `Identify genuine PI!: and PI?: task comments in rg -A6 -n -H output.
 
-The input contains rg context blocks. A block is the matched line plus the lines around it printed by '-C3', i.e. up to 3 lines before and after the match, delimited from neighboring blocks by a '--' separator line. Treat a block as the whole span of context for its marker, including the '--' separator and any blank line the '-C3' spanning includes.
+Markers are always written above the code they request changes to, so only the lines after the match carry meaning; read the file itself when you need more surrounding code. The input contains rg after-context blocks. A block is the matched line plus the lines printed after it by '-A6', i.e. up to 6 lines after the match, delimited from neighboring blocks by a '--' separator line. Treat a block as the whole span of after-context for its marker, including the '--' separator and any blank line the '-A6' spanning includes.
 
 A genuine marker must:
 - Start the text of a code comment.
@@ -40,7 +40,7 @@ RAW_RG_BLOCK
 </pi-task>
 
 Rules:
-- Preserve the complete rg block exactly, including path and line prefixes, the '-C3' context lines, and the '--' separator line. Do not strip the context lines down to only the matched line.
+- Preserve the complete rg block exactly, including path and line prefixes, the '-A6' after-context lines, and the '--' separator line. Do not strip the context lines down to only the matched line.
 - Use the matched line's path and scan-time line number.
 - Emit one element per marker, in rg order; do not group by file.
 - Do not add a type attribute, Markdown, summaries, commentary, or other fields.
@@ -385,7 +385,9 @@ export default function (pi: ExtensionAPI) {
         }
 
         // 2. No remaining or no state (or explicit scan path) -> fresh scan + new plan
-        const rgArgs = ["PI!:|PI\\?:", "-C", "3", "-n", "-H"];
+        // After-context only: PI!:/PI?: markers always sit above the code they
+        // ask about, so pre-context lines are pure token waste.
+        const rgArgs = ["PI!:|PI\\?:", "-A", "6", "-n", "-H"];
         // Explicit paths bypass .gitignore so ignored dirs (e.g. .pi) can be targeted.
         if (scanScope) rgArgs.push("--no-ignore", ...scanScope.paths);
         // Exclude this extension's own source at scan time: its PI!:/PI?:
