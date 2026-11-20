@@ -44,12 +44,12 @@
       "roles": {
         "main": {
           "provider": "opencode-go",
-          "modelId": "deepseek-v4.1-flash",
+          "modelId": "glm-5.3",
           "thinkingLevel": "high"
         },
         "oracle": {
           "provider": "opencode-go",
-          "modelId": "deepseek-v4.1-flash",
+          "modelId": "glm-5.3",
           "thinkingLevel": "high"
         },
         "subagents": {
