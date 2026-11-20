@@ -90,13 +90,26 @@ function errorMessage(error: unknown): string {
 }
 
 /**
- * Footer key for the two destructive passes. `run --apply` and `rebuild --apply`
+ * Widget key for the two destructive passes. `run --apply` and `rebuild --apply`
  * over a real corpus take minutes, and the plan is printed BEFORE the work
- * starts, so without a live footer line a long pass looks like a hang. Same
- * lifecycle as `compact-worker.ts`: set on entry, overwrite per item, clear in
+ * starts, so without a live progress row a long pass looks like a hang. The row
+ * lives in the widget zone above the editor (pi's own status zone, rendered
+ * while the main agent is idle), never the footer. Same lifecycle as
+ * `compact-worker.ts`/`btw.ts`: set on entry, overwrite per item, clear in
  * `finally` so no path leaves the line behind.
  */
 const STATUS_KEY = "archive";
+
+/**
+ * In-flight pass progress as a string-array widget (works in both TUI and RPC
+ * modes); `undefined` drops the row.
+ */
+function setPassProgress(
+    ctx: ExtensionCommandContext,
+    text: string | undefined,
+): void {
+    ctx.ui.setWidget(STATUS_KEY, text === undefined ? undefined : [text]);
+}
 
 /**
  * `<verb> 12/340 · 1.2 GB moved · 2026-01-01T09-00-00.jsonl`.
@@ -483,8 +496,8 @@ async function runArchive(
         // Set again inside the loop, before the first ingest: the plan above was
         // printed before the lock, so this is what turns a silent minute into a
         // line that moves.
-        ctx.ui.setStatus(
-            STATUS_KEY,
+        setPassProgress(
+            ctx,
             progressLine(
                 "archiving",
                 0,
@@ -494,8 +507,8 @@ async function runArchive(
             ),
         );
         for (const [index, candidate] of candidates.entries()) {
-            ctx.ui.setStatus(
-                STATUS_KEY,
+            setPassProgress(
+                ctx,
                 progressLine(
                     "archiving",
                     index + 1,
@@ -538,9 +551,9 @@ async function runArchive(
             if (ctx.signal?.aborted) break;
         }
     } finally {
-        // Before the close: a close that throws must not leave the footer
-        // claiming an archiving pass is still running.
-        ctx.ui.setStatus(STATUS_KEY, undefined);
+        // Before the close: a close that throws must not leave the progress
+        // row claiming an archiving pass is still running.
+        setPassProgress(ctx, undefined);
         db?.close();
         release();
     }
@@ -639,11 +652,11 @@ async function rebuildArchive(
 
         let done = 0;
         const failures: string[] = [];
-        // Same footer contract as `run --apply`: the pass is minutes long over a
-        // real corpus and prints nothing else until it ends.
+        // Same progress-row contract as `run --apply`: the pass is minutes
+        // long over a real corpus and prints nothing else until it ends.
         if (disk.files.length > 0)
-            ctx.ui.setStatus(
-                STATUS_KEY,
+            setPassProgress(
+                ctx,
                 progressLine(
                     "reindexing",
                     0,
@@ -653,8 +666,8 @@ async function rebuildArchive(
                 ),
             );
         for (const [index, file] of disk.files.entries()) {
-            ctx.ui.setStatus(
-                STATUS_KEY,
+            setPassProgress(
+                ctx,
                 progressLine("reindexing", index + 1, disk.files.length, file),
             );
             const row = byFile.get(file);
@@ -685,8 +698,8 @@ async function rebuildArchive(
         // No counter here: dropping is one short delete per vanished file, and
         // painting each of them would cost more than the deletes.
         if (missing.length > 0)
-            ctx.ui.setStatus(
-                STATUS_KEY,
+            setPassProgress(
+                ctx,
                 `dropping ${pluralize(missing.length, "index row")}`,
             );
         for (const row of missing) {
@@ -709,9 +722,9 @@ async function rebuildArchive(
         ];
         ctx.ui.notify(report.join("\n"), failures.length ? "warning" : "info");
     } finally {
-        // Before the close: a close that throws must not leave the footer
-        // claiming a rebuild is still running.
-        ctx.ui.setStatus(STATUS_KEY, undefined);
+        // Before the close: a close that throws must not leave the progress
+        // row claiming a rebuild is still running.
+        setPassProgress(ctx, undefined);
         db?.close();
         release();
     }

@@ -40,9 +40,11 @@
  *   broken, auto-retry exhausted) pauses the goal instead of burning
  *   iterations. No context-usage fuse: pi auto-compaction already covers it.
  * - Restart restores an "active" goal as paused; /goal resume continues it.
- * - Verifier visibility: an animated footer spinner while the verifier is
- *   in flight (live-state render, so a mid-flight /goal pause is never
- *   clobbered), plus a cumulative verifier spend suffix on the footer
+ * - Verifier visibility: an animated spinner in the widget row above the
+ *   editor (pi's own status zone, rendered while the main agent is idle)
+ *   while the verifier is in flight (live-state render, so a mid-flight
+ *   /goal pause is never clobbered), plus a cumulative verifier spend
+ *   suffix on the goal footer line
  *   ("· Σ 41.2k tok ($0.08)") - the nested verifier call never enters pi's
  *   session usage accounting, so the extension carries it explicitly.
  */
@@ -64,7 +66,7 @@ import {
 	resolveWorkerModel,
 	workerComplete,
 } from "./lib/worker.ts";
-import { Text, truncateToWidth } from "@earendil-works/pi-tui";
+import { Text, truncateToWidth, type Component, type TUI } from "@earendil-works/pi-tui";
 
 const MAX_ITERATIONS = 25;
 const GOAL_SUBS = ["pause", "resume", "show", "clear"] as const;
@@ -102,11 +104,50 @@ let userAbortedSinceLastSettle = false;
 // across restarts.
 let verifyTotals = { tokens: 0, cost: 0 };
 
-// Verifier-flight footer spinner. One interval at most; cleared on every
-// exit path (runSettleCycle finally + resetState on session lifecycle).
-let verifySpinner: ReturnType<typeof setInterval> | undefined;
+// Verifier-flight spinner UI. Captured ctx.ui alone (not the whole context
+// graph); cleared on every exit path (runSettleCycle finally + resetState on
+// session lifecycle).
+let verifyWidgetUI: ExtensionContext["ui"] | null = null;
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+/** In-flight verifier feedback for the widget row above the editor. The frame
+ * timer is owned here; pi disposes it when the widget is replaced or cleared,
+ * so a missed stop cannot leak the interval. Renders from live state, so a
+ * mid-flight /goal pause blanks the row instead of spinning on a dead goal. */
+class GoalVerifyWidget implements Component {
+	private frame = 0;
+	private timer: ReturnType<typeof setInterval> | null = null;
+
+	constructor(
+		private readonly tui: TUI,
+		private readonly theme: ExtensionContext["ui"]["theme"],
+		private readonly suffix: string,
+	) {
+		this.timer = setInterval(() => {
+			this.frame = (this.frame + 1) % SPINNER_FRAMES.length;
+			this.tui.requestRender();
+		}, 120);
+	}
+
+	render(_width: number): string[] {
+		// Live-state guard kept from the interval version: a mid-flight
+		// /goal pause must not keep spinning.
+		if (!goal || goal.status !== "active") return [];
+		return [
+			`${this.theme.fg("accent", SPINNER_FRAMES[this.frame])}${this.theme.fg("dim", this.suffix)}`,
+		];
+	}
+
+	invalidate(): void {}
+
+	dispose(): void {
+		if (this.timer) {
+			clearInterval(this.timer);
+			this.timer = null;
+		}
+	}
+}
 
 function resetVerifyTotals(): void {
 	verifyTotals = { tokens: 0, cost: 0 };
@@ -141,26 +182,27 @@ function startVerifySpinner(
 	objective: string,
 ): void {
 	if (!ctx.hasUI) return;
-	// The suffix is fixed for the flight: precompute it so each tick only
-	// swaps the frame glyph (verifySummary/truncate would otherwise re-run
-	// their regex/formatting every 120ms). Capture ctx.ui alone, not the
-	// whole context object graph.
-	let frame = 0;
+	// The suffix is fixed for the flight: precompute it so each tick only swaps
+	// the frame glyph (verifySummary/truncate would otherwise re-run their
+	// regex/formatting every 120ms). The spinner lives in the widget row above
+	// the editor (pi's own status zone): the verifier runs while the main
+	// agent is idle, and the footer is the least noticeable surface.
 	const suffix = ` goal verifying iter ${iteration + 1}${verifySummary()}: ${truncateText(objective, 32)}`;
-	verifySpinner = setInterval(() => {
-		frame = (frame + 1) % SPINNER_FRAMES.length;
-		// Render from live state: a mid-flight /goal pause must not be
-		// clobbered.
-		if (!goal || goal.status !== "active") return;
-		ctx.ui.setStatus("goal", `${SPINNER_FRAMES[frame]}${suffix}`);
-	}, 120);
+	verifyWidgetUI = ctx.ui;
+	if (ctx.mode === "tui") {
+		// Same-key replace auto-disposes any previous flight's timer, so
+		// overlapping cycles cannot stack spinners.
+		ctx.ui.setWidget("goal-verify", (tui, theme) => new GoalVerifyWidget(tui, theme, suffix));
+	} else {
+		ctx.ui.setWidget("goal-verify", [`${SPINNER_FRAMES[0]}${suffix}`]);
+	}
 }
 
 function stopVerifySpinner(): void {
-	if (verifySpinner !== undefined) {
-		clearInterval(verifySpinner);
-		verifySpinner = undefined;
-	}
+	// pi owns the component timer (disposed on replace/clear); dropping the
+	// row here is all a stop needs.
+	verifyWidgetUI?.setWidget("goal-verify", undefined);
+	verifyWidgetUI = null;
 }
 
 function resetState(): void {

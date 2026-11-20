@@ -470,6 +470,55 @@ function formatThread(thread: BtwDetails[]): string {
 		.map((item) => `User: ${item.question.trim()}\nAssistant: ${item.answer.trim()}`)
 		.join("\n\n---\n\n");
 }
+// --- Summarizing feedback: editor-adjacent widget (pi's own status zone) ---
+
+/** Braille spinner frames, mirroring pi's working-indicator examples. */
+const BRAILLE_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const SUMMARIZING_TEXT = " Summarizing BTW thread...";
+
+/** Animated "summarizing" row for the widget slot above the editor. The frame
+ * timer is owned here; pi calls dispose() when the widget is replaced or
+ * cleared, so a missed hide cannot leak the interval. */
+class SummarizingWidget implements Component {
+	private frame = 0;
+	private timer: ReturnType<typeof setInterval> | null = null;
+	constructor(
+		private readonly tui: TUI,
+		private readonly theme: BtwTheme,
+	) {
+		this.timer = setInterval(() => {
+			this.frame = (this.frame + 1) % BRAILLE_FRAMES.length;
+			this.tui.requestRender();
+		}, 120);
+	}
+	render(_width: number): string[] {
+		return [`${this.theme.fg("accent", BRAILLE_FRAMES[this.frame])}${this.theme.fg("dim", SUMMARIZING_TEXT)}`];
+	}
+	invalidate(): void {}
+	dispose(): void {
+		if (this.timer) {
+			clearInterval(this.timer);
+			this.timer = null;
+		}
+	}
+}
+/** Show the summarizing feedback above the editor (the zone pi itself uses for
+ * Working.../Compacting... rows; rendered even while the main agent is idle).
+ * Animated in the TUI; a static line elsewhere, since RPC forwards string-array
+ * widgets only and ignores component factories. */
+function showSummarizing(ctx: ExtensionContext | ExtensionCommandContext): void {
+	if (!ctx.hasUI) return;
+	if (ctx.mode === "tui") {
+		ctx.ui.setWidget("btw-summary", (tui, theme) => new SummarizingWidget(tui, theme));
+	} else {
+		ctx.ui.setWidget("btw-summary", [`⠋${SUMMARIZING_TEXT}`]);
+	}
+}
+/** Clear the summarizing row; disposes the widget's animation timer. */
+function hideSummarizing(ctx: ExtensionContext | ExtensionCommandContext): void {
+	if (!ctx.hasUI) return;
+	ctx.ui.setWidget("btw-summary", undefined);
+}
 
 function notify(ctx: ExtensionContext | ExtensionCommandContext, message: string, level: "info" | "warning" | "error"): void {
 	if (ctx.hasUI) {
@@ -1227,9 +1276,12 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 
-		setOverlayStatus("Summarizing BTW thread for injection...");
 		// Snapshot: the thread can be reset by a new turn while the summary streams.
 		const items = thread;
+		// Feedback before the first await (auth resolution can itself be slow):
+		// the overlay is already dismissed here, so the widget row above the
+		// editor carries the feedback for the whole summarization window.
+		showSummarizing(ctx);
 		try {
 			const summary = await summarizeThread(ctx, items);
 			if (sideBusy) {
@@ -1239,6 +1291,9 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 			const message = `Summary of my BTW side conversation:\n\n${summary}`;
+			// Clear before injecting: the main agent's own working loader takes over
+			// on the injected message, and a lingering row would contradict it.
+			hideSummarizing(ctx);
 			if (ctx.isIdle()) {
 				pi.sendUserMessage(message);
 			} else {
@@ -1249,6 +1304,9 @@ export default function (pi: ExtensionAPI) {
 			notify(ctx, "Injected BTW summary into main chat.", "info");
 		} catch (error) {
 			notify(ctx, error instanceof Error ? error.message : String(error), "error");
+		} finally {
+			// Sole owner of cleanup: covers the sideBusy early return and the catch path.
+			hideSummarizing(ctx);
 		}
 	}
 
