@@ -22,8 +22,8 @@ fresh git worktree（branch = alias）+ tmux 子会话 + `.pi/worktree-tasks/tas
 `goal`（目标驱动自动迭代：`/goal` 命令族 + agent_settled 续跑循环 + worker 模型无工具 verifier 判定完成）、
 `loop`（定时任务：`/loop [interval] <prompt>` 命令 + loop_create/loop_list/loop_delete 模型工具，
 任务存 `.pi/loop-tasks.json`，1s 自调度 tick 链按 cron 的下次触发时间到点后
-通过 sendMessage 注入当前会话；`.pi/loop-tasks.lock` 文件锁 +
-mtime 陈旧判定做多会话调度权互斥，claim-then-dispatch 毫秒级关键区）、
+通过 sendMessage 注入当前会话；`.pi/loop-tasks.lock` owner lease（会话身份 +
+PID 存活 + mtime 心跳）做多会话调度权互斥，claim-then-dispatch 毫秒级关键区）、
 `schedule`（cron 调度 + headless 执行：任务定义存 `pi/agent/schedule/tasks/*.json`，prompt 正文内联其中
 （`--prompt-file` 只在 add/set-prompt 时读一次、路径不落盘，任务因此自包含），OS crontab 每分钟跑
 `schedule tick`，到期任务以非递归 `mkdir` 原子 claim 后派生 detached helper，由它启动
@@ -32,13 +32,18 @@ mtime 陈旧判定做多会话调度权互斥，claim-then-dispatch 毫秒级关
 （SIGTERM → 10s → SIGKILL 进程组）与两段式 metadata 状态机；调度锚点是 tick 独占的
 `runs/<id>/state.json` watermark（dispatched 与 missed 都消耗 slot），占用判定走 effectiveState
 派生而非 pid 注册表；管理面为独立 CLI `/usr/local/bin/schedule` → `extensions/schedule/cli.ts`，不注册模型工具））、
-TUI 工具与编辑（`preview`、`view-image`、`files`、
-`context`、`unified-edit`、`review`、`security-review`（安全审查：高置信漏洞识别 +
-并行子代理误报过滤，rubric 改编自 Claude Code 的 security-review）、`answer`、`btw`（在主会话旁开启独立旁路线程））、
-模式与提示词编辑（`prompt-editor`）、监控与装饰（`cache-hit-monitor`、`notify`、`whimsical`、`inline`）。
+TUI 工具与编辑（`view-image`、`files`、
+`unified-edit`、`review`、`security-review`（安全审查：高置信漏洞识别 +
+并行子代理误报过滤，rubric 改编自 Claude Code 的 security-review）、`answer`、`btw`（在主会话旁开启独立旁路线程）、
+`viewer`（show_markdown 工具 + /view 命令：全终端滚动 markdown 阅读器）、`copy-session`（/copy-session
+[--id|--path]：复制当前会话 id 或 session JSONL 路径，参数解析刻意严格）、`explain`（/explain：动作提示词
+自 agents/skills/explain 迁移内嵌））、compaction 路由（`compact-worker`：/compact、自动阈值与溢出恢复的
+摘要改用 worker 模型，任何失败回落默认路径，绝不取消）、监控与装饰（`cache-hit-monitor`、`notify`、`whimsical`、`inline`）。
 依赖 pi 运行时库 `@earendil-works/pi-coding-agent`、
-`pi-tui`、`pi-ai`。子代理（`subagents.ts` 单文件扩展：spawn 隔离子 pi 进程的 Subagent 机制 +
-`task`/`finder`/`oracle`/`librarian` 四个工具各自的 spec 常量与注册）与 session 工具
+`pi-tui`、`pi-ai`。子代理能力由 submodule `subagent-manager/`（npm 包 pi-subagent-manager：
+`task`/`finder`/`oracle`/`librarian` 四工具的并行派发、监视与 steer）提供，配套 `librarian/` 目录存放
+librarian 子代理专用 skill（远程仓库缓存 checkout 到 ~/.cache/checkouts）；
+`subagents.ts`、`prompt-editor.ts`、`context.ts` 已移入 `deprecated/`，不再被加载。session 工具
 （`read-session.ts`：read_session、read_session_compaction、read_session_entry 三件套，只读解析 session
 JSONL；`session-search/`：会话检索与归档这一件事的两半，一个扩展（`index.ts` 只做组合与端口接线）——
 `search.ts` 提供 search_sessions 工具 + /search-sessions 命令，热侧为无索引实时扫描（原始文本预滤 +
@@ -75,10 +80,14 @@ parseSessionText 供解析），供 `read-session` 与 `session-search` 共用�
 ctrl+o 预览子类封装（pickSession），供 `worktree-task` 挑选会话；
 `lib/review-target.ts`：ReviewTarget 模型 + git 基础设施
 （merge base、分支/提交列表、PR checkout）+ preset 选择器（可选附加项）+ 直参解析，
-供 `review` 与 `security-review` 共用，两命令各自持有 rubric 与会话机制）。
-pi 只把 `extensions/*.ts` 顶层文件与含 `index.ts` 的子目录
+供 `review` 与 `security-review` 共用，两命令各自持有 rubric 与会话机制）；`lib/clipboard.ts`
+提供剪贴板写入（`copy-session` 共用，不可用时回落为提示文本手工复制）。
+另有两个内嵌 fork：`pi-memory/`（counterposition/pi-memory 的本地 fork，GPL-3.0：memory_search/
+memory_write/memory_move 工具 + /memory、/remember、/forget 命令，数据根为 `pi/agent/memory/`，
+搜索带 CJK 匹配本地修改）与 `pi-web-search/`（同上游 fork，web_search/web_fetch 工具，暂无本地修改）。
+pi 只把 `extensions/*.ts` 顶层文件、含 `index.ts` 的子目录、以及 package.json 声明 `pi.extensions` 的子目录
 识别为扩展，`lib/` 子目录不会被自动加载；`extensions/schedule/` 与 `extensions/loop/` 都是「含
-`index.ts` 而被自动加载」的子目录，schedule 同目录下的
+`index.ts` 而被自动加载」的子目录（`pi-memory/`、`pi-web-search/` 走 `pi.extensions` 声明加载），schedule 同目录下的
 `cron.ts`/`slots.ts`/`store.ts`/`run.ts`/`routing.ts`/`runs-view.ts`/`cli.ts`/`tick.ts` 不是扩展。
 
 **Architecture Invariant:** 扩展只能调用 pi 公开的 ExtensionAPI 与事件钩子，禁止直接操作 pi 内部状态。
@@ -106,22 +115,25 @@ node 标准库与同目录模块，禁止 import `@earendil-works/*` 或其它�
 
 pi coding agent 的运行时配置中心。`models.json` 定义多 provider 的模型清单与成本参数；`modes.json` 定义
 default/rush/smart 等工作模式及其 roles 模型绑定；`keybindings.json` 定制 TUI 键位；`settings.json` 存放
-agent 全局设置（不再使用 `packages` 声明第三方扩展包）；子代理能力由本地扩展提供（`task`/`finder`/
-`oracle`/`librarian` 四个工具，机制与各工具的模型/工具配置 spec 常量同在同一文件
-`extensions/subagents.ts` 中）；`telegram.json` 配置 Telegram bot
+agent 全局设置（不再使用 `packages` 声明第三方扩展包，`packages` 保持空数组）；子代理能力由
+`extensions/subagent-manager/` submodule 提供（`task`/`finder`/`oracle`/`librarian` 四个工具）；
+`telegram.json` 配置 Telegram bot
 远程交互通道；`auth.json` 管理 API 密钥；`trust.json` 记录项目信任状态；`prompts/` 存放可复用
-提示词模板（`prototype.md`、`simplify.md`、`clarify.md`、`summary.md`、`translate-paragraph.md`）。
-`AGENTS.md` 定义 agent 行为规范。
-`sessions/`、`tmux-subagents/` 与 `bin/`（pi 自己下载的 `fd` 等工具二进制）为运行时与工具产物，随使用生成
-（`bin/` 被 `pi/.gitignore` 忽略）。`schedule` CLI 不属于这里：它由
+提示词模板，现为子代理协作模板集（`ask-oracle`、`fanout`、`fork-subagent`、`steer-subagent`、
+`use-subagent`、`teach-me` 等）加 `clarify`/`summary` 等命令模板。
+`AGENTS.md` 定义 agent 行为规范；`models-store.json` 为模型清单的运行时存储（gitignore）。
+`sessions/`、`archive/`（session-search 归档落盘处）、`memory/`（pi-memory 数据根：global/ 与 projects/）、
+`git/`、`npm/node_modules/` 与 `bin/`（pi 自己下载的 `fd` 等工具二进制）为运行时与工具产物，随使用生成
+（`sessions/`、`archive/`、`auth.json`、`settings.json`、`telegram.json`、`bin/` 等被 `pi/.gitignore` 忽略）。`schedule` CLI 不属于这里：它由
 `extensions/schedule/install.sh` 软链到 `/usr/local/bin/schedule`（需 root，脚本自行给出 `sudo` 命令），
 因此不在仓库内、也不在 `~/.pi/agent/bin` 里。`schedule/tasks/*.json` 是任务定义，但 `cwd` 是绝对路径、
 跨机不可复用，因此与 `schedule/runs/`（含 watermark `state.json` 与 tick.log 去重标记
 `notice.json`）、`schedule/tick.log`（轮转为 `tick.log.1`）、`schedule/crontab.bak`
 一样属于本机运行产物，已 gitignore。
 
-**API Boundary:** `models.json` 是 provider/模型清单的唯一来源，扩展不直接读取；`modes.json` 由 `prompt-editor` 扩展
-提供 TUI 编辑入口，运行时与扩展共享读写。子代理运行时与 session 查看工具均为本地 `extensions/`
+**API Boundary:** `models.json` 是 provider/模型清单的唯一来源，扩展不直接读取；`modes.json` 的
+`roles.subagents` pin 由 `answer`、`handoff`、`compact-worker` 与 `goal` 经 `lib/worker.ts` 读取，
+用于发起一次性 LLM 请求。子代理运行时与 session 查看工具均为本地 `extensions/`
 顶层扩展与 `lib/` 共享模块（`lib/session-common.ts`、`lib/session-preview.ts`、`lib/worker.ts`、`lib/review-target.ts`），
 不与本地其他扩展源码混写。
 
@@ -129,7 +141,7 @@ agent 全局设置（不再使用 `packages` 声明第三方扩展包）；子�
 
 可复用 AI agent 技能库。每个 skill 是自包含目录，包含 `SKILL.md` 说明文档与可选的辅助脚本（Shell/JS/Python）。
 被 agent 框架按需加载，提供 tmux 控制、浏览器自动化、K 线图表生成、提交工作流、架构文档生成、
-Obsidian 笔记管理、数据库查询、定时任务管理等垂直能力。skill 之间通过 `skill()` 调用显式声明依赖。
+Obsidian 笔记管理、数据库查询、定时任务管理等垂直能力。技能组合方式是在 SKILL.md 中指示先加载另一技能。
 
 **API Boundary:** SKILL.md 是技能的唯一公开接口；脚本实现细节对调用方不可见。
 
@@ -190,9 +202,9 @@ IDE/编辑器配置。`vscode/` 区分 macOS 与 Windows 的键位与设置；`i
 组件把安装逻辑留在自己目录里（如 `pi/agent/extensions/schedule/install.sh`），由顶层脚本调用并兜住失败。
 - **AI 集成：** Neovim（`opencode.nvim`）、pi 扩展（`pi/agent/extensions/`）、pi agent 配置（`pi/agent/`）、
 `opencode` 配置、`agents/skills` 构成三层 AI 辅助体系，分别嵌入编辑器、agent 框架与命令行。
-- **提示词迁移：** 原 `pi/agent/prompts/` 中的 explain、plan-spec、mental-map、refine 等提示词已迁移为
-`agents/skills/` 中的独立 skill，遵循"一个 skill 一个目录"的自治边界；clarify 与 summary 则回归为
-prompts 模板驱动的 `/clarify`、`/summary` 命令。
+- **提示词迁移：** 原 `pi/agent/prompts/` 中的 plan-spec、mental-map、refine 等提示词已迁移为
+`agents/skills/` 中的独立 skill，遵循"一个 skill 一个目录"的自治边界；explain 又从 skill 收敛为
+`extensions/explain.ts` 扩展内嵌提示词；`prompts/` 现存放子代理协作模板集与 `/clarify`、`/summary` 等命令模板。
 - **跨平台一致性：** Linux（`i3`）与 macOS（`yabai`）桌面层、各平台 IDE 配置、`karabiner`/`autohotkey`/`rime`
 共同维护跨系统的键位与操作习惯。
 - **配置边界：** 每个工具独占一个顶层目录，不跨目录耦合；agent skills 遵循"一个目录一个技能"的自治边界。
