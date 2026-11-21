@@ -1,19 +1,27 @@
-import { mkdirSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import {
-	buildSessionContext,
-	convertToLlm,
+	createBashTool,
+	createEditTool,
+	createFindTool,
+	createGrepTool,
+	createLsTool,
+	createPowerShellTool,
+	createReadTool,
+	createWriteTool,
 	createAgentSession,
 	createExtensionRuntime,
+	DefaultResourceLoader,
+	getAgentDir,
 	getMarkdownTheme,
 	SessionManager,
+	SettingsManager,
 	type AgentSession,
 	type AgentSessionEvent,
 	type ExtensionAPI,
 	type ExtensionCommandContext,
 	type ExtensionContext,
+	type InlineExtension,
 	type ResourceLoader,
+	type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { type AssistantMessage, type Message, type ThinkingLevel as AiThinkingLevel } from "@earendil-works/pi-ai";
 import {
@@ -40,23 +48,68 @@ import {
 	type Detail,
 } from "./lib/transcript-tool.ts";
 
-/** Fork files for side sessions land here and are deleted on side-session dispose. */
-const SIDE_SESSION_DIR = join(tmpdir(), "pi-btw-side");
-// Created owner-only upfront: forkFrom reuses an existing directory, so fork
-// files stay unreadable to other local users on shared hosts.
-mkdirSync(SIDE_SESSION_DIR, { recursive: true, mode: 0o700 });
 const BTW_ENTRY_TYPE = "btw-thread-entry";
 const BTW_RESET_TYPE = "btw-thread-reset";
 
-const BTW_SYSTEM_PROMPT = [
-	"You are BTW, a side-channel assistant embedded in the user's coding agent.",
-	"You have access to the main conversation context — use it to give informed answers.",
-	"Help with focused questions, planning, and quick explorations.",
-	"Be direct and practical.",
-].join(" ");
-
 const BTW_SUMMARY_PROMPT =
 	"Summarize this side conversation for handoff into the main conversation. Keep key decisions, findings, risks, and next actions. Output only the summary.";
+
+const BTW_DENY_TEXT = "BTW side questions cannot use tools. Answer directly from the conversation context.";
+
+/** The parent's last outgoing request, captured at the provider boundary: the
+ * exact system-prompt string and tool declarations the provider actually saw.
+ * The side fork replays these bytes verbatim (forceSystemPrompt + ordered
+ * tool definitions), which is more faithful than rebuilding from base options —
+ * parent extensions mutate the prompt per-run, so base options alone diverge
+ * from the last request. OpenAI-completions/responses payload shape only. */
+type CapturedParentRequest = {
+	system: string;
+	tools: Array<{ name: string; description: string; parameters: unknown }>;
+};
+
+let lastParentRequest: CapturedParentRequest | null = null;
+
+/** Defense in depth: the guard's tool_call handler blocks and terminates first;
+ * if a custom tool still reached execution, it fails closed with the denial. */
+const denySideToolExecute: ToolDefinition["execute"] = async () => ({
+	content: [{ type: "text", text: BTW_DENY_TEXT }],
+	details: {},
+	isError: true,
+});
+
+/** Claude Code's verbatim side-question reminder (src/utils/sideQuestion.ts,
+ * runSideQuestion): the tail message is the only place the no-tools contract
+ * is declared, since the system prompt stays byte-identical to the parent's
+ * (prompt-cache prefix). Kept upstream-verbatim on purpose. */
+const BTW_SIDE_REMINDER = `<system-reminder>This is a side question from the user. You must answer this question directly in a single response.
+
+IMPORTANT CONTEXT:
+- You are a separate, lightweight agent spawned to answer this one question
+- The main agent is NOT interrupted - it continues working independently in the background
+- You share the conversation context but are a completely separate instance
+- Do NOT reference being interrupted or what you were "previously doing" - that framing is incorrect
+
+CRITICAL CONSTRAINTS:
+- You have NO tools available - you cannot read files, run commands, search, or take any actions
+- This is a one-off response - there will be no follow-up turns
+- You can ONLY provide information based on what you already know from the conversation context
+- NEVER say things like "Let me try...", "I'll now...", "Let me check...", or promise to take any action
+- If you don't know the answer, say so - do not offer to look it up or investigate
+
+Simply answer the question with the information you have.</system-reminder>`;
+
+function wrapSideQuestion(question: string): string {
+	return `${BTW_SIDE_REMINDER}\n\n${question}`;
+}
+
+/** Stand-in answer when the model returned no text at all. A blocked tool attempt
+ * (the guard denies every tool) reads differently from an empty response. */
+function emptyAnswerPlaceholder(hadToolCalls: boolean): string {
+	if (hadToolCalls) {
+		return "(The model tried to call tools instead of answering directly. Try rephrasing, or ask in the main conversation.)";
+	}
+	return "(No text response)";
+}
 
 type SessionThinkingLevel = "off" | AiThinkingLevel;
 
@@ -88,8 +141,6 @@ type OverlayRuntime = {
 
 type SideSessionRuntime = {
 	session: AgentSession;
-	/** File-backed fork source for cleanup; undefined for in-memory fallback sessions. */
-	sideFile?: string;
 	unsubscribe: () => void;
 	/** Main content leaf (non-custom branch tail) the side session's main context covers. */
 	contentLeafId: string | null;
@@ -121,23 +172,20 @@ type ToolCallInfo = {
 	status: "running" | "done" | "error";
 };
 
-/** Drop pi's trailing dynamic footer (date/cwd lines) as one contiguous block. */
-function stripDynamicSystemPromptFooter(systemPrompt: string): string {
-	return systemPrompt.replace(/(?:\nCurrent (?:date and time|working directory):[^\n]*)+$/u, "").trim();
-}
-
-function createBtwResourceLoader(ctx: ExtensionContext, appendSystemPrompt: string[] = [BTW_SYSTEM_PROMPT]): ResourceLoader {
+/** Minimal loader for the one-shot summarizer: no discovery, no extensions, a
+ * neutral system prompt. Cache identity is irrelevant for this call. */
+function createSummaryResourceLoader(): ResourceLoader {
 	const extensionsResult = { extensions: [], errors: [], runtime: createExtensionRuntime() };
-	const systemPrompt = stripDynamicSystemPromptFooter(ctx.getSystemPrompt());
-
 	return {
 		getExtensions: () => extensionsResult,
 		getSkills: () => ({ skills: [], diagnostics: [] }),
 		getPrompts: () => ({ prompts: [], diagnostics: [] }),
 		getThemes: () => ({ themes: [], diagnostics: [] }),
 		getAgentsFiles: () => ({ agentsFiles: [] }),
-		getSystemPrompt: () => systemPrompt,
-		getAppendSystemPrompt: () => appendSystemPrompt,
+		getSystemPrompt: () => "",
+		getSystemPromptSource: () => undefined,
+		getAppendSystemPrompt: () => [BTW_SUMMARY_PROMPT],
+		getAppendSystemPromptSources: () => [],
 		extendResources: () => {},
 		reload: async () => {},
 	};
@@ -435,10 +483,12 @@ function resetPendingTurn(): void {
 function buildThreadSeedMessages(ctx: ExtensionContext, thread: BtwDetails[]): Message[] {
 	const seed: Message[] = [];
 	for (const item of thread) {
+		// Wrapped like the live turns were, so a recreated side session replays
+		// the same request bytes its earlier turns actually sent.
 		seed.push(
 			{
 				role: "user",
-				content: [{ type: "text", text: item.question }],
+				content: [{ type: "text", text: wrapSideQuestion(item.question) }],
 				timestamp: item.timestamp,
 			},
 			{
@@ -842,14 +892,6 @@ export default function (pi: ExtensionAPI) {
 		}
 		runtime.session.dispose();
 
-		if (runtime.sideFile) {
-			try {
-				rmSync(runtime.sideFile, { force: true });
-			} catch {
-				// Ignore fork-file cleanup errors (tmpdir, best effort).
-			}
-		}
-
 		if (overlayRefreshTimer) {
 			clearTimeout(overlayRefreshTimer);
 			overlayRefreshTimer = null;
@@ -914,171 +956,319 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	/**
-	 * Forked snapshot: every (re)creation forks a fresh copy of the main session,
-	 * so the side LLM sees the main conversation exactly as its own model would,
-	 * including the latest compaction. Staleness is tracked in ensureSideSession,
-	 * which recreates whenever the main content leaf moves.
+	 * In-memory fork of the main branch: the side LLM sees the main conversation
+	 * exactly as its own model would, including the latest compaction. Entry ids
+	 * survive the copy, so branch() aligns the leaf with the main session's
+	 * current one (inMemory's default leaf is the copied tail, which is wrong
+	 * for navigated parents).
+	 *
+	 * Session id is provider-aware, decided by measurement: the opencode-go
+	 * gateway keys prefix-cache affinity on the per-conversation header
+	 * (x-opencode-session, from Agent.sessionId), so a fresh id misses the
+	 * parent's cache entirely (cacheRead 0 vs full-prefix hit with the shared
+	 * id). OpenAI-style APIs share the parent's id — their dispose-time
+	 * cleanupSessionResources is a no-op for these APIs, so the side session
+	 * cannot poison parent state. Anthropic-style APIs keep per-session provider
+	 * state (thread continuation, strict-tool tracking) that a shared id would
+	 * let the side session dispose; those take a fresh id and eat the miss.
 	 */
-	function buildForkedSessionManager(ctx: ExtensionContext): SessionManager {
-		const sourcePath = ctx.sessionManager.getSessionFile();
-		if (!sourcePath) {
-			throw new Error("main session is not file-backed");
-		}
-		const forked = SessionManager.forkFrom(sourcePath, ctx.sessionManager.getCwd(), SIDE_SESSION_DIR);
-		// forkFrom's leaf is the source file's tail; align it with the main session's
-		// current leaf (entry ids survive the verbatim copy, so branch() by the main
-		// leaf id works). An empty main session has a null leaf and keeps the tail.
+	function buildSideSessionManager(ctx: ExtensionCommandContext, model: NonNullable<ExtensionCommandContext["model"]>): SessionManager {
+		const shareSessionId = model.api === "openai-completions" || model.api === "openai-responses";
+		const manager = SessionManager.inMemory(
+			ctx.sessionManager.getCwd(),
+			shareSessionId ? { id: ctx.sessionManager.getSessionId() } : {},
+			ctx.sessionManager.getEntries(),
+		);
 		const mainLeafId = ctx.sessionManager.getLeafId();
 		if (mainLeafId) {
-			forked.branch(mainLeafId);
+			manager.branch(mainLeafId);
 		}
-		return forked;
+		return manager;
+	}
+
+	/** Structured system-prompt inputs, snapshotted at /btw time. Restoring them
+	 * in the child's before_agent_start makes the rebuilt prompt byte-identical
+	 * to the parent's (pi's equivalent of Claude's cache-safe params).
+	 * structuredClone because getSystemPromptOptions() returns the live base
+	 * object and the child must never mutate it. */
+	type PromptOptionsSnapshot = ReturnType<ExtensionCommandContext["getSystemPromptOptions"]>;
+
+	/**
+	 * The inline guard extension, the ONLY extension of the side session: no
+	 * parent extension ever runs here (their factories would re-write shared
+	 * module state — loop's captured `api`, for example — and hijack the
+	 * parent's live handlers). bindExtensions is never called: the runner is
+	 * live without it, and calling it would emit session_start into this
+	 * instance and double-connect MCP. Known cost: mcp__ tools and parent
+	 * extensions' registered tools only reach the request through
+	 * buildSideToolDefinitions' data replication.
+	 */
+	function createBtwGuard(snapshot: PromptOptionsSnapshot, captured: CapturedParentRequest | null): InlineExtension {
+		return {
+			name: "btw-guard",
+			factory: (guardPi) => {
+				guardPi.on("before_agent_start", (event) => {
+					if (captured) {
+						// Replay the parent's exact request bytes: the captured system
+						// prompt overrides every other option for this run.
+						event.systemPromptOptions.forceSystemPrompt = captured.system;
+						return;
+					}
+					// No capture yet (fresh session, non-OpenAI payload shape):
+					// fall back to restoring a deep copy of the base-options
+					// snapshot. The runner keeps mutating this options object after
+					// the handlers return, the snapshot must stay pristine.
+					Object.assign(event.systemPromptOptions, structuredClone(snapshot));
+				});
+				// Tools stay declared in the request (byte-identity with the parent);
+				// every execution is denied and the turn terminated, the pi-native
+				// equivalent of Claude's canUseTool deny + maxTurns: 1 pair.
+				guardPi.on("tool_call", () => ({
+					block: true,
+					reason: BTW_DENY_TEXT,
+					terminate: true,
+				}));
+			},
+		};
 	}
 
 	/**
-	 * Fallback for when forking is impossible (non-file-backed main session or a
-	 * forkFrom failure): an in-memory session manager seeded from the main branch's
-	 * projection. convertToLlm turns compaction/branch-summary/custom roles into
-	 * plain messages, since appendMessage forbids writing entry-only roles.
+	 * Wire-faithful declarations for EVERY active tool of the parent, in
+ * captured-payload order with a deny-only execute. Preferred source: the
+ * parent's last request payload (exact order and content). Fallback when no
+ * capture exists: pi.getAllTools() definitions in getActiveTools order — still
+ * the parent's actual definitions, including extension overrides of built-in
+ * names (unified-edit's "edit"). _refreshToolRegistry lets customTools override
+ * same-named built-ins, and _applyToolLoadout preserves the current
+ * state.tools order (the assignment below sets the baseline), so the side
+ * request's tools param stays byte-identical without running any parent
+ * extension factory. MCP and other runtime-registered tools are a known
+ * limitation and are skipped.
 	 */
-	function buildInMemorySessionManager(ctx: ExtensionContext): SessionManager {
-		const fallback = SessionManager.inMemory(ctx.sessionManager.getCwd());
-		try {
-			const contextMessages = buildSessionContext(ctx.sessionManager.getEntries(), ctx.sessionManager.getLeafId()).messages;
-			for (const message of convertToLlm(contextMessages)) {
-				fallback.appendMessage(message);
-			}
-		} catch (error) {
-			// Surface context seed failures; continue with the BTW thread only (no main context).
-			const message = error instanceof Error ? error.message : String(error);
-			notify(ctx, `BTW: main context seed failed: ${message}`, "warning");
+	function buildSideToolDefinitions(ctx: ExtensionCommandContext, captured: CapturedParentRequest | null): ToolDefinition[] {
+		const cwd = ctx.sessionManager.getCwd();
+		// Full built-in definitions: they carry constrainedSampling/TypeBox schema
+		// fields that ToolInfo strips and the serializer needs to classify
+		// strictness. Only used when the parent's live definition IS the
+		// un-overridden built-in; an extension override (unified-edit's "edit")
+		// keeps the ToolInfo replica, which matches the override's plain schema.
+		const builtinFactories: Record<string, () => ToolDefinition> = {
+			read: () => createReadTool(cwd),
+			bash: () => createBashTool(cwd),
+			edit: () => createEditTool(cwd),
+			write: () => createWriteTool(cwd),
+			grep: () => createGrepTool(cwd),
+			find: () => createFindTool(cwd),
+			ls: () => createLsTool(cwd),
+			powershell: () => createPowerShellTool(cwd),
+		};
+		const allTools = pi.getAllTools();
+		const liveByname = new Map(allTools.map((tool) => [tool.name, tool]));
+		if (captured && captured.tools.length > 0) {
+			// Captured order, live content: the payload gives the exact declaration
+			// order the provider saw; content comes from the parent's live
+			// definitions, with the pi factory preferred for un-overridden
+			// built-ins so strictness classification matches byte-for-byte.
+			return captured.tools.flatMap((capturedTool) => {
+				const live = liveByname.get(capturedTool.name);
+				if (!live) {
+					return [];
+				}
+				const factoryTool = builtinFactories[capturedTool.name]?.();
+				if (
+					factoryTool &&
+					factoryTool.description === live.description &&
+					JSON.stringify(factoryTool.parameters) === JSON.stringify(live.parameters)
+				) {
+					return [factoryTool];
+				}
+				return [
+					{
+						name: live.name,
+						label: live.name,
+						description: live.description,
+						parameters: live.parameters,
+						annotations: live.annotations,
+						execute: denySideToolExecute,
+					},
+				];
+			});
 		}
-		return fallback;
-
+		const active = pi.getActiveTools();
+		if (active.length === 0) {
+			return [];
+		}
+		const definitions: ToolDefinition[] = [];
+		for (const name of active) {
+			const info = allTools.find((tool) => tool.name === name);
+			if (!info) {
+				continue;
+			}
+			const factoryTool = builtinFactories[name]?.();
+			if (
+				factoryTool &&
+				factoryTool.description === info.description &&
+				JSON.stringify(factoryTool.parameters) === JSON.stringify(info.parameters)
+			) {
+				definitions.push(factoryTool);
+				continue;
+			}
+			definitions.push({
+				name: info.name,
+				label: info.name,
+				description: info.description,
+				parameters: info.parameters,
+				annotations: info.annotations,
+				execute: denySideToolExecute,
+			});
+		}
+		return definitions;
 	}
 
 	async function createSideSession(ctx: ExtensionCommandContext, contentLeafId: string | null): Promise<SideSessionRuntime | null> {
-		if (!ctx.model) {
+		const model = ctx.model;
+		if (!model) {
 			return null;
 		}
 
-		let sessionManager: SessionManager;
-		let sideFile: string | undefined;
-		try {
-			sessionManager = buildForkedSessionManager(ctx);
-			sideFile = sessionManager.getSessionFile();
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			console.warn(`BTW: main session fork failed (${message}); falling back to in-memory seed.`);
-			sessionManager = buildInMemorySessionManager(ctx);
+		// Snapshot before any await: the fork must freeze the prompt state as of
+		// this question, not as of whenever discovery finishes.
+		const snapshot: PromptOptionsSnapshot = structuredClone(ctx.getSystemPromptOptions());
+		// In-memory settings copy, warming off: the idle warmer must never spend
+		// on a session that only exists to answer side questions.
+		const settingsManager = SettingsManager.inMemory(
+			{ ...pi.getSettings(), cacheWarming: "off" },
+			{ projectTrusted: ctx.isProjectTrusted() },
+		);
+		// Byte-identity comes from data, not runtime parity: the prompt via the
+		// guard's capture replay (fallback: snapshot restore), tool declarations
+		// via buildSideToolDefinitions(). No parent extension runs here — their
+		// factories would re-write shared module state (loop's captured `api`,
+		// for example) and hijack the parent's live handlers.
+		const loader = new DefaultResourceLoader({
+			cwd: ctx.sessionManager.getCwd(),
+			agentDir: getAgentDir(),
+			settingsManager,
+			noExtensions: true,
+			noSkills: true,
+			noContextFiles: true,
+			noPromptTemplates: true,
+			noThemes: true,
+			extensionFactories: [createBtwGuard(snapshot, lastParentRequest)],
+		});
+		await loader.reload();
+		// The guard is the only thing standing between the side question and the
+		// parent's active tools. If its factory threw, the extensions list comes
+		// back empty and the session would run fully tool-enabled — refuse that.
+		if (!loader.getExtensions().extensions.some((extension) => extension.path.startsWith("<inline:btw-guard>"))) {
+			throw new Error("BTW guard extension failed to load; refusing to create an unguarded side session.");
 		}
 
-		try {
-			const { session } = await createAgentSession({
-				sessionManager,
-				model: ctx.model,
-				modelRegistry: ctx.modelRegistry as AgentSession["modelRegistry"],
-				thinkingLevel: pi.getThinkingLevel() as SessionThinkingLevel,
-				tools: ["read", "bash", "edit", "write"],
-				resourceLoader: createBtwResourceLoader(ctx),
-			});
+		const sessionManager = buildSideSessionManager(ctx, model);
 
-			// Seed via the session manager: AgentSession's prepareRequest hook rebuilds
-			// context from the session manager's projection, so plain
-			// agent.state.messages assignment would be discarded at request time.
-			for (const message of buildThreadSeedMessages(ctx, thread)) {
-				sessionManager.appendMessage(message);
+		const { session } = await createAgentSession({
+			cwd: ctx.sessionManager.getCwd(),
+			sessionManager,
+			settingsManager,
+			resourceLoader: loader,
+			model,
+			thinkingLevel: pi.getThinkingLevel() as SessionThinkingLevel,
+			// The parent's active tool names: the request's tool declarations match
+			// byte-for-byte (built-ins from the shared registry, customs from the
+			// replicated definitions), and the guard denies every execution.
+			tools: pi.getActiveTools(),
+			customTools: buildSideToolDefinitions(ctx, lastParentRequest),
+		});
+
+		// Order baseline: _applyToolLoadout rebuilds state.tools from the registry
+		// on every request, but it preserves the current order ("kept" first), so
+		// one assignment in captured-payload order holds for the session's life.
+		// The cast is shape-only: ToolDefinition and AgentTool agree on every
+		// request-facing field, and execute never runs under the guard.
+		session.state.tools = buildSideToolDefinitions(ctx, lastParentRequest) as unknown as AgentSession["state"]["tools"];
+
+		// Seed via the session manager: AgentSession's prepareRequest hook rebuilds
+		// context from the session manager's projection, so plain
+		// agent.state.messages assignment would be discarded at request time.
+		for (const message of buildThreadSeedMessages(ctx, thread)) {
+			sessionManager.appendMessage(message);
+		}
+		const unsubscribe = session.subscribe((event: AgentSessionEvent) => {
+			if (!sideBusy || !pendingQuestion) {
+				return;
 			}
 
-			const unsubscribe = session.subscribe((event: AgentSessionEvent) => {
-				if (!sideBusy || !pendingQuestion) {
+			switch (event.type) {
+				case "message_start":
+				case "message_update":
+				case "message_end": {
+					// message_update carries the cumulative message — no delta work.
+					const assistantMessage = event.message;
+					if (assistantMessage?.role === "assistant") {
+						pendingAssistant = assistantMessage;
+					}
+					const streamed = extractEventAssistantText(assistantMessage);
+					if (streamed) {
+						pendingAnswer = streamed;
+						pendingError = null;
+					}
+					setOverlayStatus(event.type === "message_end" ? "Finalizing side response..." : "Streaming side response...", true);
 					return;
 				}
-
-				switch (event.type) {
-					case "message_start":
-					case "message_update":
-					case "message_end": {
-						// message_update carries the cumulative message — no delta work.
-						const assistantMessage = event.message;
-						if (assistantMessage?.role === "assistant") {
-							pendingAssistant = assistantMessage;
-						}
-						const streamed = extractEventAssistantText(assistantMessage);
-						if (streamed) {
-							pendingAnswer = streamed;
-							pendingError = null;
-						}
-						setOverlayStatus(event.type === "message_end" ? "Finalizing side response..." : "Streaming side response...", true);
-						return;
-					}
-					case "tool_execution_start": {
-						try {
-							const toolCallId = event.toolCallId ?? "";
-							if (!toolCallId) {
-								return;
-							}
-							const toolName = event.toolName ?? "unknown";
-							const args = event.args;
-							// Pair by toolCallId end-to-end; concurrent same-name tools stay distinct.
-							const existing = pendingToolCalls.find((t) => t.toolCallId === toolCallId);
-							if (existing) {
-								existing.args = args;
-								existing.status = "running";
-							} else {
-								pendingToolCalls.push({
-									toolCallId,
-									toolName,
-									args,
-									result: undefined,
-									isError: false,
-									status: "running",
-								});
-							}
-							setOverlayStatus(`Running tool: ${toolName}...`, true);
-						} catch {
-							// Ignore tool tracking failures
-						}
-						return;
-					}
-					case "tool_execution_end": {
+				case "tool_execution_start": {
+					try {
 						const toolCallId = event.toolCallId ?? "";
-						const tc = pendingToolCalls.find((t) => t.toolCallId === toolCallId);
-						if (tc) {
-							tc.result = event.result;
-							tc.isError = event.isError === true;
-							tc.status = tc.isError ? "error" : "done";
+						if (!toolCallId) {
+							return;
 						}
-						setOverlayStatus("Streaming side response...", true);
-						return;
+						const toolName = event.toolName ?? "unknown";
+						const args = event.args;
+						// Pair by toolCallId end-to-end; concurrent same-name tools stay distinct.
+						const existing = pendingToolCalls.find((t) => t.toolCallId === toolCallId);
+						if (existing) {
+							existing.args = args;
+							existing.status = "running";
+						} else {
+							pendingToolCalls.push({
+								toolCallId,
+								toolName,
+								args,
+								result: undefined,
+								isError: false,
+								status: "running",
+							});
+						}
+						setOverlayStatus(`Running tool: ${toolName}...`, true);
+					} catch {
+						// Ignore tool tracking failures
 					}
-					case "turn_end": {
-						setOverlayStatus("Finalizing side response...", true);
-						return;
+					return;
+				}
+				case "tool_execution_end": {
+					const toolCallId = event.toolCallId ?? "";
+					const tc = pendingToolCalls.find((t) => t.toolCallId === toolCallId);
+					if (tc) {
+						tc.result = event.result;
+						tc.isError = event.isError === true;
+						tc.status = tc.isError ? "error" : "done";
 					}
-					default:
-						return;
+					setOverlayStatus("Streaming side response...", true);
+					return;
 				}
-			});
-
-			return {
-				session,
-				sideFile,
-				unsubscribe,
-				contentLeafId,
-			};
-		} catch (error) {
-			// forkFrom copies the transcript eagerly; drop the file when session
-			// creation or seeding fails so no transcript copy outlives this attempt.
-			if (sideFile) {
-				try {
-					rmSync(sideFile, { force: true });
-				} catch {
-					// Best-effort tmpdir cleanup.
+				case "turn_end": {
+					setOverlayStatus("Finalizing side response...", true);
+					return;
 				}
+				default:
+					return;
 			}
-			throw error;
-		}
+		});
+
+		return {
+			session,
+			unsubscribe,
+			contentLeafId,
+		};
 	}
 
 	/**
@@ -1113,8 +1303,8 @@ export default function (pi: ExtensionAPI) {
 		}
 
 		// Everything below works on local references: a cancel landing inside the
-		// fork / createAgentSession window must not leave a live session or a fork
-		// file attached to no owner.
+		// fork / createAgentSession window must not leave a live session attached
+		// to no owner.
 		const stale = activeSideSession;
 		activeSideSession = null;
 		if (stale) {
@@ -1240,10 +1430,9 @@ export default function (pi: ExtensionAPI) {
 		const { session } = await createAgentSession({
 			sessionManager: SessionManager.inMemory(),
 			model,
-			modelRegistry: ctx.modelRegistry as AgentSession["modelRegistry"],
 			thinkingLevel: "off",
 			tools: [],
-			resourceLoader: createBtwResourceLoader(ctx, [BTW_SUMMARY_PROMPT]),
+			resourceLoader: createSummaryResourceLoader(),
 		});
 
 		try {
@@ -1439,7 +1628,9 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			await side.session.prompt(question, { source: "extension" });
+			// The reminder rides the question's tail: the system prompt must stay
+			// byte-identical to the parent's, so the system prompt is never touched.
+			await side.session.prompt(wrapSideQuestion(question), { source: "extension" });
 			// First statement after the prompt: the session may already be disposed,
 			// so nothing may be read from it before this check.
 			if (run.cancelled) {
@@ -1465,7 +1656,7 @@ export default function (pi: ExtensionAPI) {
 				throw new Error(response.errorMessage || "BTW request failed.");
 			}
 
-			const answer = joinTextParts(response.content) || "(No text response)";
+			const answer = joinTextParts(response.content) || emptyAnswerPlaceholder(pendingToolCalls.length > 0);
 			pendingAnswer = answer;
 			const details: BtwDetails = {
 				question,
@@ -1548,7 +1739,32 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("session_start", async (_event, ctx) => {
+		// A capture from a previous parent session would replay the wrong bytes.
+		lastParentRequest = null;
 		await restoreThread(ctx);
+	});
+
+	// Cache-safe params, pi edition: keep the last request bytes the provider
+ // actually saw, so a side fork can replay them for a prefix-cache hit.
+	pi.on("before_provider_request", (event) => {
+		const payload = event.payload as
+			| { messages?: Array<{ role?: unknown; content?: unknown }>; tools?: Array<{ function?: unknown }> }
+			| null
+			| undefined;
+		const first = payload?.messages?.[0];
+		const tools = payload?.tools;
+		if (!first || first.role !== "system" || typeof first.content !== "string" || !Array.isArray(tools)) {
+			return;
+		}
+		const declarations = tools
+			.map((tool) => tool.function as { name?: unknown; description?: unknown; parameters?: unknown } | undefined)
+			.filter((fn): fn is { name: string; description: string; parameters: unknown } => {
+				return typeof fn?.name === "string" && typeof fn?.description === "string" && typeof fn?.parameters === "object" && fn.parameters !== null;
+			});
+		if (declarations.length === 0) {
+			return;
+		}
+		lastParentRequest = { system: first.content, tools: declarations };
 	});
 
 	pi.on("session_tree", async (_event, ctx) => {
